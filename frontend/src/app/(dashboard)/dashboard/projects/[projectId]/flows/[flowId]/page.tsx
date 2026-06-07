@@ -25,12 +25,15 @@ import {
   GitBranch,
   ClipboardList,
   Grid3x3,
-  MousePointerClick,
+  Plus,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Save,
+  Check,
 } from 'lucide-react';
 import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
-import { RecordSheetTable } from '@/components/records/record-sheet-table';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
-import type { RecordTemplate } from '@/lib/record-templates';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -39,7 +42,13 @@ import type {
 } from '@/components/flow-editor/flow-types';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { Input } from '@/components/ui/input';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import {
+  flowDefinitionApi,
+  EMPTY_DEFINITION,
+  type FlowDefinition,
+} from '@/lib/flow-definition';
 import mermaid from 'mermaid';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
@@ -53,22 +62,274 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// 現状把握「業務定義シート」のレンズ（目的/担当/関係者/INPUT/トリガー/DO/OUTPUT/頻度/システム）。
-// このフロー専用に1ステップ=1行で属性化する（RecordSheet にフローごとスコープ保存）。
-const FLOW_DEFINITION_COLUMNS: RecordTemplate['columns'] = [
-  { key: 'gyomuName', label: '業務名・ステップ' },
+type FlowTab = 'flow' | 'definition' | 'cruoa';
+
+// ===========================================
+// 個別定義タブ：このフロー1本分の業務定義を編集する
+// （目的/担当/関係者/INPUT/INPUT詳細/トリガー/番号付きDO手順/OUTPUT/次工程/例外処理/頻度/システム/暗黙知メモ）
+// ===========================================
+
+// 単一行テキスト項目（input で編集）
+const DEF_INPUT_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?: string }[] = [
   { key: 'purpose', label: '目的（なぜ必要か）' },
-  { key: 'owner', label: '担当者（主担当）' },
-  { key: 'stakeholders', label: '関係者' },
+  { key: 'owner', label: '担当（主担当）' },
   { key: 'input', label: 'INPUT（何を受け取るか）' },
   { key: 'trigger', label: 'トリガー（いつ始まるか）' },
-  { key: 'do', label: 'DO（何をするか）' },
   { key: 'output', label: 'OUTPUT（何を渡すか）' },
+  { key: 'nextProcess', label: '次工程（誰の何へ渡すか）' },
   { key: 'frequency', label: '頻度' },
   { key: 'system', label: '使用システム' },
 ];
 
-type FlowTab = 'flow' | 'definition' | 'cruoa';
+// 複数行テキスト項目（textarea で編集）
+const DEF_TEXTAREA_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?: string }[] = [
+  { key: 'stakeholders', label: '関係者' },
+  { key: 'inputDetail', label: 'INPUT詳細（セル範囲・項目など）' },
+  { key: 'exceptionHandling', label: '例外処理（イレギュラー時の対応）' },
+  { key: 'tacitNotes', label: '暗黙知メモ（口頭ルール・勘どころ）' },
+];
+
+function FlowDefinitionPanel({ flowId }: { flowId: string }) {
+  const [def, setDef] = useState<FlowDefinition | null>(null);
+  const [steps, setSteps] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    flowDefinitionApi
+      .get(flowId)
+      .then((d) => {
+        if (cancelled) return;
+        setDef(d);
+        setSteps(Array.isArray(d.doSteps) ? d.doSteps : []);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Unknown error');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [flowId]);
+
+  const setField = useCallback((key: keyof FlowDefinition, value: string) => {
+    setDef((prev) => (prev ? { ...prev, [key]: value } : prev));
+    setSavedAt(null);
+  }, []);
+
+  const moveStep = useCallback((i: number, d: -1 | 1) => {
+    setSteps((s) => {
+      const j = i + d;
+      if (j < 0 || j >= s.length) return s;
+      const next = [...s];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+    setSavedAt(null);
+  }, []);
+
+  const updateStep = useCallback((i: number, value: string) => {
+    setSteps((s) => s.map((step, k) => (k === i ? value : step)));
+    setSavedAt(null);
+  }, []);
+
+  const removeStep = useCallback((i: number) => {
+    setSteps((s) => s.filter((_, k) => k !== i));
+    setSavedAt(null);
+  }, []);
+
+  const addStep = useCallback(() => {
+    setSteps((s) => [...s, '']);
+    setSavedAt(null);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!def) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const patch: Partial<FlowDefinition> = {
+        purpose: def.purpose,
+        owner: def.owner,
+        stakeholders: def.stakeholders,
+        input: def.input,
+        inputDetail: def.inputDetail,
+        trigger: def.trigger,
+        doSteps: steps.map((s) => s.trim()).filter((s) => s.length > 0),
+        output: def.output,
+        nextProcess: def.nextProcess,
+        exceptionHandling: def.exceptionHandling,
+        frequency: def.frequency,
+        system: def.system,
+        tacitNotes: def.tacitNotes,
+      };
+      const updated = await flowDefinitionApi.upsert(flowId, patch);
+      setDef(updated);
+      setSteps(Array.isArray(updated.doSteps) ? updated.doSteps : []);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : '保存に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  }, [def, steps, flowId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="bg-white border-red-200">
+        <CardContent className="py-8 text-center">
+          <p className="text-red-600">{loadError}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const d = def ?? { flowId, ...EMPTY_DEFINITION };
+
+  return (
+    <div className="space-y-4">
+      {/* 単一行テキスト項目（2カラム） */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="grid grid-cols-1 gap-4 py-5 md:grid-cols-2">
+          {DEF_INPUT_FIELDS.map((f) => (
+            <div key={f.key} className="space-y-1">
+              <label className="text-sm font-medium text-gray-700">{f.label}</label>
+              <Input
+                value={(d[f.key] as string | null) ?? ''}
+                placeholder={f.placeholder}
+                onChange={(e) => setField(f.key, e.target.value)}
+                className="text-gray-900"
+              />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* 番号付き DO 手順 */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="space-y-3 py-5">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+            DO（手順を番号順に）
+            <HelpTooltip text="この業務で「実際に何をするか」を手順ごとに1行ずつ。↑↓で順序を入れ替え、不要な行は削除できます。" />
+          </div>
+          {steps.length === 0 ? (
+            <p className="text-sm text-gray-400">手順がありません。「手順を追加」で1行目を作成してください。</p>
+          ) : (
+            <div className="space-y-2">
+              {steps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-6 shrink-0 text-right text-sm font-medium text-gray-500">
+                    {i + 1}.
+                  </span>
+                  <Input
+                    value={step}
+                    onChange={(e) => updateStep(i, e.target.value)}
+                    placeholder={`手順 ${i + 1}`}
+                    className="text-gray-900"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => moveStep(i, -1)}
+                    disabled={i === 0}
+                    className="text-gray-500"
+                    aria-label="上へ"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => moveStep(i, 1)}
+                    disabled={i === steps.length - 1}
+                    className="text-gray-500"
+                    aria-label="下へ"
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeStep(i)}
+                    className="text-red-500 hover:text-red-600"
+                    aria-label="削除"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button type="button" variant="outline" size="sm" onClick={addStep} className="text-gray-600">
+            <Plus className="mr-1.5 h-4 w-4" />
+            手順を追加
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* 複数行テキスト項目 */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="grid grid-cols-1 gap-4 py-5 md:grid-cols-2">
+          {DEF_TEXTAREA_FIELDS.map((f) => (
+            <div key={f.key} className="space-y-1">
+              <label className="text-sm font-medium text-gray-700">{f.label}</label>
+              <Textarea
+                value={(d[f.key] as string | null) ?? ''}
+                placeholder={f.placeholder}
+                rows={3}
+                onChange={(e) => setField(f.key, e.target.value)}
+                className="text-gray-900"
+              />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* 保存バー */}
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="mr-2 h-4 w-4" />
+          )}
+          保存
+        </Button>
+        {savedAt && (
+          <span className="inline-flex items-center gap-1 text-sm text-emerald-600">
+            <Check className="h-4 w-4" />
+            保存しました
+          </span>
+        )}
+        {saveError && (
+          <span className="inline-flex items-center gap-1 text-sm text-red-600">
+            <AlertCircle className="h-4 w-4" />
+            {saveError}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ProjectFlowDetailPage() {
   const params = useParams();
@@ -752,20 +1013,6 @@ export default function ProjectFlowDetailPage() {
     }
   }, [showMermaid, mermaidCode, renderMermaid]);
 
-  // 業務定義シート（このフロー専用に templateKey をスコープ）
-  const flowDefinitionTemplate = useMemo<RecordTemplate>(
-    () => ({
-      key: `flow-definition:${flowId}`,
-      label: '業務定義シート',
-      group: '現状把握',
-      course: 'asis-gyomu-flow',
-      description:
-        '1ステップ=1行で、目的・担当・関係者・INPUT・トリガー・DO・OUTPUT・頻度・使用システムを整理します（このフロー専用に保存）。',
-      columns: FLOW_DEFINITION_COLUMNS,
-    }),
-    [flowId]
-  );
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[600px]">
@@ -943,7 +1190,7 @@ export default function ProjectFlowDetailPage() {
       <div className="flex flex-wrap gap-1 border-b border-gray-200">
         {([
           { key: 'flow', label: 'フロー図', icon: GitBranch },
-          { key: 'definition', label: '業務定義', icon: ClipboardList },
+          { key: 'definition', label: '個別定義', icon: ClipboardList },
           { key: 'cruoa', label: '情報の地図(CRUOA)', icon: Grid3x3 },
         ] as const).map((t) => {
           const Icon = t.icon;
@@ -998,23 +1245,17 @@ export default function ProjectFlowDetailPage() {
         />
       </div>
 
-      {/* 業務定義タブ（業務定義シートのレンズをこのフロー専用に） */}
+      {/* 個別定義タブ（このフロー1本分の業務定義を編集） */}
       {activeTab === 'definition' && (
         <div className="space-y-3">
           <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
             <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
             <p className="text-sm text-blue-800">
-              {flowDefinitionTemplate.description}
-              <br />
-              <span className="inline-flex items-center gap-1 text-blue-700">
-                <MousePointerClick className="h-4 w-4" />
-                個別定義シート（1業務の詳細・判断基準・例外処理）は、
-                <strong>フロー図のノードをダブルクリック</strong>
-                すると開ける詳細フロー（子フロー）に対応します。
-              </span>
+              この業務フロー1本分の業務定義（目的・担当・関係者・INPUT・トリガー・DO手順・OUTPUT・次工程・例外処理・頻度・システム・暗黙知）を整理します。
+              ここで保存した内容は「業務定義シート（全フロー一覧）」にも反映されます。
             </p>
           </div>
-          <RecordSheetTable projectId={projectId} template={flowDefinitionTemplate} />
+          <FlowDefinitionPanel flowId={flowId} />
         </div>
       )}
 
