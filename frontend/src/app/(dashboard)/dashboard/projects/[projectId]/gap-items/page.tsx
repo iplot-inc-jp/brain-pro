@@ -100,7 +100,20 @@ type EditableField =
   | 'gapDescription'
   | 'ownerName';
 
+type FlowSummary = {
+  id: string;
+  name: string;
+  kind: 'ASIS' | 'TOBE';
+};
+
+type FlowNodeSummary = {
+  id: string;
+  label: string;
+};
+
 const ALL = 'ALL';
+// 選択式 Select の「未選択 / 指定なし」を表す番兵値（空文字は Radix Select で不可）
+const NONE = '__none__';
 
 export default function GapItemsPage() {
   const params = useParams();
@@ -141,7 +154,18 @@ export default function GapItemsPage() {
     gapDescription: '',
     priority: 'MEDIUM' as Priority,
     ownerName: '',
+    targetFlowId: '' as string,
+    asisFlowId: '' as string,
+    asisNodeId: '' as string,
+    tobeFlowId: '' as string,
+    tobeNodeId: '' as string,
   });
+
+  // 業務フロー（対象業務 / ASIS / TOBE 選択用）
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
+  // 選択中の ASIS / TOBE フローのノード一覧（フォーム内のノード選択用）
+  const [asisNodes, setAsisNodes] = useState<FlowNodeSummary[]>([]);
+  const [tobeNodes, setTobeNodes] = useState<FlowNodeSummary[]>([]);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('accessToken');
@@ -182,6 +206,85 @@ export default function GapItemsPage() {
     fetchItems();
   }, [fetchItems]);
 
+  // 業務フロー一覧（対象業務 / ASIS / TOBE 選択用）をマウント時に取得
+  const fetchFlows = useCallback(async () => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(
+        `${API_URL}/api/business-flows/project/${projectId}/all`,
+        { headers },
+      );
+      if (res.ok) {
+        const data: FlowSummary[] = await res.json();
+        setFlows(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch business flows:', err);
+    }
+  }, [projectId, getHeaders]);
+
+  useEffect(() => {
+    fetchFlows();
+  }, [fetchFlows]);
+
+  // 指定フローのノード一覧を取得（ASIS/TOBE のノード選択用）
+  const fetchNodes = useCallback(
+    async (flowId: string): Promise<FlowNodeSummary[]> => {
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowId}`, {
+          headers,
+        });
+        if (!res.ok) return [];
+        const data: { nodes?: FlowNodeSummary[] } = await res.json();
+        return (data.nodes ?? []).map((n) => ({ id: n.id, label: n.label }));
+      } catch (err) {
+        console.error('Failed to fetch flow nodes:', err);
+        return [];
+      }
+    },
+    [getHeaders],
+  );
+
+  // フロー名 → フロー の解決マップ（一覧チップ表示用）
+  const flowById = new Map(flows.map((f) => [f.id, f]));
+  const asisFlowOptions = flows.filter((f) => f.kind === 'ASIS');
+  const tobeFlowOptions = flows.filter((f) => f.kind === 'TOBE');
+
+  // 対象業務フロー選択（フロー名を businessArea に入れる）
+  const handleTargetFlowChange = (value: string) => {
+    if (value === NONE) {
+      setNewItem((prev) => ({ ...prev, targetFlowId: '' }));
+      return;
+    }
+    const flow = flowById.get(value);
+    setNewItem((prev) => ({
+      ...prev,
+      targetFlowId: value,
+      businessArea: flow ? flow.name : prev.businessArea,
+    }));
+  };
+
+  const handleAsisFlowChange = async (value: string) => {
+    if (value === NONE) {
+      setNewItem((prev) => ({ ...prev, asisFlowId: '', asisNodeId: '' }));
+      setAsisNodes([]);
+      return;
+    }
+    setNewItem((prev) => ({ ...prev, asisFlowId: value, asisNodeId: '' }));
+    setAsisNodes(await fetchNodes(value));
+  };
+
+  const handleTobeFlowChange = async (value: string) => {
+    if (value === NONE) {
+      setNewItem((prev) => ({ ...prev, tobeFlowId: '', tobeNodeId: '' }));
+      setTobeNodes([]);
+      return;
+    }
+    setNewItem((prev) => ({ ...prev, tobeFlowId: value, tobeNodeId: '' }));
+    setTobeNodes(await fetchNodes(value));
+  };
+
   // 作成
   const handleCreate = async () => {
     if (!newItem.businessArea.trim()) return;
@@ -199,6 +302,10 @@ export default function GapItemsPage() {
           gapDescription: newItem.gapDescription || undefined,
           priority: newItem.priority,
           ownerName: newItem.ownerName || undefined,
+          asisFlowId: newItem.asisFlowId || undefined,
+          asisNodeId: newItem.asisNodeId || undefined,
+          tobeFlowId: newItem.tobeFlowId || undefined,
+          tobeNodeId: newItem.tobeNodeId || undefined,
         }),
       });
       if (res.ok) {
@@ -211,7 +318,14 @@ export default function GapItemsPage() {
           gapDescription: '',
           priority: 'MEDIUM',
           ownerName: '',
+          targetFlowId: '',
+          asisFlowId: '',
+          asisNodeId: '',
+          tobeFlowId: '',
+          tobeNodeId: '',
         });
+        setAsisNodes([]);
+        setTobeNodes([]);
       } else {
         const data = await res.json().catch(() => null);
         setCreateError(
@@ -553,6 +667,31 @@ export default function GapItemsPage() {
                             rows={2}
                             className="w-full resize-none bg-transparent text-gray-900 font-medium outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5"
                           />
+                          {/* ASIS / TOBE フロー名チップ（クリックでフロー編集へ） */}
+                          {(item.asisFlowId || item.tobeFlowId) && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {item.asisFlowId && (
+                                <Link
+                                  href={`/dashboard/projects/${projectId}/flows/${item.asisFlowId}`}
+                                  className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+                                  title="ASISフローを開く"
+                                >
+                                  ASIS:{' '}
+                                  {flowById.get(item.asisFlowId)?.name ?? 'フロー'}
+                                </Link>
+                              )}
+                              {item.tobeFlowId && (
+                                <Link
+                                  href={`/dashboard/projects/${projectId}/flows/${item.tobeFlowId}`}
+                                  className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                                  title="TOBEフローを開く"
+                                >
+                                  TOBE:{' '}
+                                  {flowById.get(item.tobeFlowId)?.name ?? 'フロー'}
+                                </Link>
+                              )}
+                            </div>
+                          )}
                         </td>
                         {/* ASIS */}
                         <td className="px-3 py-2 align-top">
@@ -726,6 +865,29 @@ export default function GapItemsPage() {
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
+              <Label className="text-gray-700">対象業務（業務フローから選択）</Label>
+              <Select
+                value={newItem.targetFlowId || NONE}
+                onValueChange={handleTargetFlowChange}
+              >
+                <SelectTrigger className="bg-white border-gray-300">
+                  <SelectValue placeholder="業務フローを選択（任意）" />
+                </SelectTrigger>
+                <SelectContent className="bg-white">
+                  <SelectItem value={NONE}>選択しない（自由入力）</SelectItem>
+                  {flows.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      [{f.kind}] {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-400">
+                フローを選ぶと業務領域にフロー名が入ります。未選択でも下の欄に自由入力できます。
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label className="text-gray-700">
                 業務領域 <span className="text-red-500">*</span>
               </Label>
@@ -737,6 +899,93 @@ export default function GapItemsPage() {
                 }
                 className="bg-white border-gray-300"
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-gray-700">ASISフロー（任意）</Label>
+                <Select
+                  value={newItem.asisFlowId || NONE}
+                  onValueChange={handleAsisFlowChange}
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue placeholder="ASISフローを選択" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value={NONE}>指定なし</SelectItem>
+                    {asisFlowOptions.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {newItem.asisFlowId && (
+                  <Select
+                    value={newItem.asisNodeId || NONE}
+                    onValueChange={(v) =>
+                      setNewItem((prev) => ({
+                        ...prev,
+                        asisNodeId: v === NONE ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="bg-white border-gray-300">
+                      <SelectValue placeholder="ノードを選択（任意）" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value={NONE}>指定なし</SelectItem>
+                      {asisNodes.map((n) => (
+                        <SelectItem key={n.id} value={n.id}>
+                          {n.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label className="text-gray-700">TOBEフロー（任意）</Label>
+                <Select
+                  value={newItem.tobeFlowId || NONE}
+                  onValueChange={handleTobeFlowChange}
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue placeholder="TOBEフローを選択" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white">
+                    <SelectItem value={NONE}>指定なし</SelectItem>
+                    {tobeFlowOptions.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {newItem.tobeFlowId && (
+                  <Select
+                    value={newItem.tobeNodeId || NONE}
+                    onValueChange={(v) =>
+                      setNewItem((prev) => ({
+                        ...prev,
+                        tobeNodeId: v === NONE ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="bg-white border-gray-300">
+                      <SelectValue placeholder="ノードを選択（任意）" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white">
+                      <SelectItem value={NONE}>指定なし</SelectItem>
+                      {tobeNodes.map((n) => (
+                        <SelectItem key={n.id} value={n.id}>
+                          {n.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
