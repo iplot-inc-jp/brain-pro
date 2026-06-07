@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Zap,
   Network,
+  Share2,
   GitCompare,
   Folder,
   Layers,
@@ -585,6 +586,7 @@ export default function DashboardLayout({
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
           { name: '業務定義シート', href: `${base}/business-definition`, icon: FileSpreadsheet },
+          { name: 'DFD', href: `${base}/dfd`, icon: Share2 },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
         ],
       },

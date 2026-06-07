@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -34,6 +34,7 @@ import {
   Share2,
   Table2,
   Network,
+  ChevronRight,
 } from 'lucide-react';
 import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
@@ -74,7 +75,15 @@ type FlowTab = 'flow' | 'definition' | 'cruoa' | 'dfd';
 // DFDタブ：このフローのデータフロー図（get-or-generate）＋ 図 / 一覧表 サブ切替
 // ===========================================
 
-function DfdPanel({ flowId }: { flowId: string }) {
+function DfdPanel({
+  flowId,
+  projectId,
+  flowName,
+}: {
+  flowId: string;
+  projectId: string;
+  flowName: string;
+}) {
   const [diagram, setDiagram] = useState<DfdDiagram | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +214,19 @@ function DfdPanel({ flowId }: { flowId: string }) {
 
   return (
     <div className="space-y-3">
+      {/* プロジェクトDFD ＞ フロー名 のパンくず（第1レベルへ戻る） */}
+      <nav className="flex items-center gap-1.5 text-sm text-gray-500">
+        <Link
+          href={`/dashboard/projects/${projectId}/dfd`}
+          className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+        >
+          <Share2 className="h-4 w-4" />
+          プロジェクトDFD
+        </Link>
+        <ChevronRight className="h-4 w-4 text-gray-400" />
+        <span className="font-medium text-gray-700">{flowName}</span>
+      </nav>
+
       <div className="flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
         <Share2 className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" />
         <p className="text-sm text-indigo-800">
@@ -546,11 +568,14 @@ function FlowDefinitionPanel({ flowId }: { flowId: string }) {
 export default function ProjectFlowDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const flowId = params.flowId as string;
 
-  // フロー図 / 業務定義 / 情報の地図(CRUOA) のタブ
-  const [activeTab, setActiveTab] = useState<FlowTab>('flow');
+  // フロー図 / 業務定義 / 情報の地図(CRUOA) / DFD のタブ。
+  // ?tab=dfd（第1レベルDFDからのドリルダウン）で初期タブをDFDに。
+  const initialTab: FlowTab = searchParams.get('tab') === 'dfd' ? 'dfd' : 'flow';
+  const [activeTab, setActiveTab] = useState<FlowTab>(initialTab);
 
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -1491,7 +1516,9 @@ export default function ProjectFlowDetailPage() {
       )}
 
       {/* DFD（データフロー図）タブ */}
-      {activeTab === 'dfd' && <DfdPanel flowId={flowId} />}
+      {activeTab === 'dfd' && (
+        <DfdPanel flowId={flowId} projectId={projectId} flowName={flowData.name} />
+      )}
 
       {/* Mermaidモーダル（プレビュー機能付き） */}
       {showMermaid && mermaidCode && (
