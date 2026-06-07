@@ -65,6 +65,11 @@ export function InterestMatrixGrid({
         </div>
       )}
 
+      <p className="text-xs text-gray-500">
+        フェーズ（行）×ロール（列）で「各局面で誰が何に関心を持つか」を整理します。ここで決めた関心ごとが、会議体での
+        「報告の中身（何を）」を相手別に決める土台になります。
+      </p>
+
       <Card className="bg-white border-gray-200">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -87,7 +92,10 @@ export function InterestMatrixGrid({
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={i} className="border-b border-gray-100 align-top">
+                  <tr
+                    key={i}
+                    className="border-b border-gray-100 align-top transition-colors hover:bg-blue-50/30"
+                  >
                     {/* sticky フェーズ列 */}
                     <td className="sticky left-0 z-10 bg-blue-50/70 px-2 py-1.5">
                       <textarea

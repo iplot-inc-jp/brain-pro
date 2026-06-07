@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Trash2, Plus, UserPlus } from 'lucide-react';
+import { Loader2, Trash2, Plus, UserPlus, GripVertical } from 'lucide-react';
 import type { RecordTemplate } from '@/lib/record-templates';
 import { useSheetStore, type SheetRow } from './sheet-store';
 import { SaveBar } from './save-bar';
@@ -12,12 +12,16 @@ const SUPPORT_LEVELS = ['支持', '中立', '反対'] as const;
 type Influence = (typeof INFLUENCE_LEVELS)[number];
 type Support = (typeof SUPPORT_LEVELS)[number];
 
-/** セル値（「影響度(高/中/低)」等の冗長表記）から区分語を1つ取り出す。 */
+const DND_MIME = 'application/x-stakeholder-index';
+
+/**
+ * セル値から区分語を取り出す。完全一致のみ採用（前後空白は許容）。
+ * ＝テンプレ既定の冗長表記「影響度(高/中/低)」のような全語を含む文字列が
+ *   誤って先頭区分(高/支持)に分類されるのを防ぐ（未設定＝未配置として扱う）。
+ */
 function pickLevel<T extends string>(raw: string, levels: readonly T[]): T | '' {
-  for (const lv of levels) {
-    if (raw.includes(lv)) return lv;
-  }
-  return '';
+  const t = (raw ?? '').trim();
+  return (levels as readonly string[]).includes(t) ? (t as T) : '';
 }
 
 /** 支持度→カードの色。 */
@@ -103,6 +107,23 @@ export function StakeholderMapBoard({
   const deleteRow = (rowIndex: number) =>
     update((prev) => prev.filter((_, i) => i !== rowIndex));
 
+  // ── ドラッグ&ドロップ（カードを掴んでセルへ配置） ──
+  const [dragRow, setDragRow] = useState<number | null>(null);
+  const [overCell, setOverCell] = useState<string | null>(null);
+  const onCardDragStart = (e: React.DragEvent, rowIndex: number) => {
+    e.dataTransfer.setData(DND_MIME, String(rowIndex));
+    e.dataTransfer.effectAllowed = 'move';
+    setDragRow(rowIndex);
+  };
+  const onCellDrop = (e: React.DragEvent, inf: Influence, sup: Support) => {
+    e.preventDefault();
+    const raw = e.dataTransfer.getData(DND_MIME);
+    const idx = Number(raw);
+    if (raw !== '' && Number.isInteger(idx)) moveTo(idx, inf, sup);
+    setOverCell(null);
+    setDragRow(null);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[240px]">
@@ -130,6 +151,10 @@ export function StakeholderMapBoard({
       {/* 影響度 × 支持度 マトリクス */}
       <Card className="bg-white border-gray-200">
         <CardContent className="overflow-x-auto p-4">
+          <p className="mb-3 flex items-center gap-1.5 text-[11px] text-gray-400">
+            <GripVertical className="h-3.5 w-3.5" />
+            カードをドラッグしてセルに置くと、影響度×支持度をまとめて変更できます（各カードの選択でも変更可）。
+          </p>
           <div className="min-w-[680px]">
             {/* 列ヘッダー（支持度） */}
             <div className="grid grid-cols-[80px_repeat(3,1fr)] gap-2">
@@ -165,11 +190,25 @@ export function StakeholderMapBoard({
                   </div>
                   {SUPPORT_LEVELS.map((sup) => {
                     const idxs = grid.get(`${inf}__${sup}`) ?? [];
+                    const cellKey = `${inf}__${sup}`;
+                    const isOver = overCell === cellKey;
                     return (
                       <div
                         key={sup}
-                        className={`min-h-[110px] rounded-md border p-2 space-y-1.5 ${
-                          isHigh
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (overCell !== cellKey) setOverCell(cellKey);
+                        }}
+                        onDragLeave={(e) => {
+                          if (!e.currentTarget.contains(e.relatedTarget as Node))
+                            setOverCell((c) => (c === cellKey ? null : c));
+                        }}
+                        onDrop={(e) => onCellDrop(e, inf, sup)}
+                        className={`min-h-[110px] rounded-md border p-2 space-y-1.5 transition-colors ${
+                          isOver
+                            ? 'border-blue-500 bg-blue-100/70 ring-2 ring-blue-300'
+                            : isHigh
                             ? 'border-blue-200 bg-blue-50/40'
                             : 'border-gray-200 bg-gray-50/40'
                         }`}
@@ -179,12 +218,19 @@ export function StakeholderMapBoard({
                           return (
                             <div
                               key={rowIndex}
-                              className={`group rounded-md border px-2 py-1.5 text-xs shadow-sm ${supportClasses(
+                              draggable
+                              onDragStart={(e) => onCardDragStart(e, rowIndex)}
+                              onDragEnd={() => {
+                                setDragRow(null);
+                                setOverCell(null);
+                              }}
+                              className={`group cursor-grab rounded-md border px-2 py-1.5 text-xs shadow-sm active:cursor-grabbing ${supportClasses(
                                 sup,
-                              )}`}
+                              )} ${dragRow === rowIndex ? 'opacity-40' : ''}`}
                             >
                               <div className="flex items-start justify-between gap-1">
-                                <span className="font-semibold leading-tight">
+                                <span className="flex items-center gap-1 font-semibold leading-tight">
+                                  <GripVertical className="h-3 w-3 shrink-0 opacity-40" />
                                   {row.name || '（無名）'}
                                 </span>
                                 <button
@@ -271,8 +317,17 @@ export function StakeholderMapBoard({
                 {unplaced.map(({ row, i }) => (
                   <div
                     key={i}
-                    className="flex items-center gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs"
+                    draggable
+                    onDragStart={(e) => onCardDragStart(e, i)}
+                    onDragEnd={() => {
+                      setDragRow(null);
+                      setOverCell(null);
+                    }}
+                    className={`flex cursor-grab items-center gap-2 rounded-md border border-amber-200 bg-white px-2 py-1 text-xs active:cursor-grabbing ${
+                      dragRow === i ? 'opacity-40' : ''
+                    }`}
                   >
+                    <GripVertical className="h-3 w-3 shrink-0 text-amber-400" />
                     <span className="font-medium text-gray-800">
                       {row.name || '（無名）'}
                     </span>
