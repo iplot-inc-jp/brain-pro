@@ -54,35 +54,35 @@ export class RegisterUserUseCase {
   ) {}
 
   async execute(input: RegisterUserInput): Promise<RegisterUserOutput> {
-    // 1. メールアドレスの重複チェック
-    const exists = await this.userRepository.existsByEmail(input.email);
-    if (exists) {
-      throw new EntityAlreadyExistsError('User', 'email', input.email);
-    }
-
-    // 2. パスワードハッシュ化（インフラサービス）
+    // 1. パスワードハッシュ化（インフラサービス）
     const hashedPassword = await this.passwordHashService.hash(input.password);
 
-    // 3. ID生成（インフラ）
-    const id = this.userRepository.generateId();
+    // 2. 既存ユーザー確認：招待枠（パスワード未設定）なら引き継ぎ、本登録済みなら重複エラー
+    const existing = await this.userRepository.findByEmail(input.email);
+    let user: User;
+    if (existing) {
+      if (existing.password) {
+        throw new EntityAlreadyExistsError('User', 'email', input.email);
+      }
+      // 招待ユーザーを本登録（パスワード・氏名を設定）
+      existing.changePassword(hashedPassword);
+      if (input.name) existing.changeName(input.name);
+      user = existing;
+    } else {
+      const id = this.userRepository.generateId();
+      user = User.create(
+        { email: input.email, password: input.password, name: input.name },
+        hashedPassword,
+        id,
+      );
+    }
 
-    // 4. ユーザーエンティティ生成（ドメインロジック）
-    const user = User.create(
-      {
-        email: input.email,
-        password: input.password,
-        name: input.name,
-      },
-      hashedPassword,
-      id,
-    );
-
-    // 5. 全体管理者ブートストラップ（SUPER_ADMIN_EMAILS）
+    // 3. 全体管理者ブートストラップ（SUPER_ADMIN_EMAILS）
     if (!user.isSuperAdmin && isBootstrapSuperAdminEmail(user.email)) {
       user.promoteToSuperAdmin();
     }
 
-    // 6. 永続化
+    // 4. 永続化
     await this.userRepository.save(user);
 
     // 7. トークン生成

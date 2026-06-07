@@ -40,6 +40,7 @@ import {
   Lightbulb,
   Target,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -50,6 +51,7 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -93,6 +95,7 @@ type MindNodeData = {
   onSelect: (id: string | null) => void;
   onAddCause: (parentId: string | null) => void;
   onAddCountermeasure: (parentId: string | null) => void;
+  onIdeate: (id: string | null) => void;
   onDelete: (id: string) => void;
 };
 
@@ -237,6 +240,18 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
             <Plus className="h-3 w-3" />
             {treeType === 'WHY' ? '原因(なぜ)' : '打ち手'}
           </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              d.onIdeate(null);
+            }}
+            className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+            title="発想法で子ノードに分解"
+          >
+            <Sparkles className="h-3 w-3" />
+            発想法で分解
+          </button>
         </div>
       </div>
     );
@@ -319,6 +334,18 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              d.onIdeate(node.id);
+            }}
+            className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+            title="発想法で子ノードに分解"
+          >
+            <Sparkles className="h-3 w-3" />
+            発想法
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
               d.onDelete(node.id);
             }}
             className="inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-100"
@@ -358,6 +385,10 @@ function IssueTreeMindMap() {
   const [importText, setImportText] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+
+  // 発想法アシスト（分解）ダイアログ
+  const [ideateOpen, setIdeateOpen] = useState(false);
+  const [ideateParentId, setIdeateParentId] = useState<string | null>(null);
 
   const howToRef = useRef<HTMLDivElement>(null);
 
@@ -425,6 +456,43 @@ function IssueTreeMindMap() {
     (parentId: string | null) => addNode(parentId, 'ISSUE', '新しい論点'),
     [addNode],
   );
+
+  // 発想法アシスト: チェック済み候補を子ノードとして一括追加（既存の add-node API を再利用）
+  const addNodesBulk = useCallback(
+    async (
+      parentId: string | null,
+      kind: IssueNodeKind,
+      labels: string[],
+    ): Promise<boolean> => {
+      if (!tree || labels.length === 0) return false;
+      setBusy(true);
+      setActionError(null);
+      try {
+        const headers = getHeaders();
+        for (const label of labels) {
+          const res = await fetch(`${API_URL}/api/issue-trees/${treeId}/nodes`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ parentId, label, kind }),
+          });
+          if (!res.ok) throw new Error('ノードの作成に失敗しました');
+        }
+        await fetchTree();
+        return true;
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'ノードの作成に失敗しました');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [tree, treeId, getHeaders, fetchTree],
+  );
+
+  const openIdeate = useCallback((parentId: string | null) => {
+    setIdeateParentId(parentId);
+    setIdeateOpen(true);
+  }, []);
 
   const patchNode = useCallback(
     async (nodeId: string, body: Record<string, unknown>) => {
@@ -620,6 +688,7 @@ function IssueTreeMindMap() {
       onSelect: setSelectedId,
       onAddCause: addCause,
       onAddCountermeasure: addCountermeasure,
+      onIdeate: openIdeate,
       onDelete: deleteNode,
     };
 
@@ -661,7 +730,7 @@ function IssueTreeMindMap() {
     }));
 
     return { rfNodes: nodes, rfEdges: edges };
-  }, [tree, selectedId, addCause, addCountermeasure, deleteNode]);
+  }, [tree, selectedId, addCause, addCountermeasure, openIdeate, deleteNode]);
 
   const selectedNode = useMemo(
     () => (selectedId ? (tree?.nodes ?? []).find((n) => n.id === selectedId) ?? null : null),
@@ -792,6 +861,7 @@ function IssueTreeMindMap() {
               steps={[
                 'ノード上の「＋原因」でその下に原因を、「＋打ち手」で打ち手を追加します。ルートの問いからも追加できます。',
                 'ノードをクリックすると右パネルが開き、種別・ラベル・根拠を編集できます。',
+                'ノードの「発想法で分解」から IPLoT 発想法（SDF/RTOCS/横展開ほか）のレンズを選び、子ノード候補を一括で生成できます。',
                 '原因ノードは検証マーク（○確定／×否定／△未確認／?要ヒアリング）で確からしさを記録します。',
                 '打ち手ノードは推奨（採用／保留／不採用）を設定して取捨選択します。',
                 '「テキストから取り込み」でインデント箇条書きを一括投入できます（作成時向け）。',
@@ -867,6 +937,7 @@ function IssueTreeMindMap() {
             onClose={() => setSelectedId(null)}
             onPatch={patchNode}
             onSetVerification={setVerification}
+            onIdeate={openIdeate}
             onDelete={deleteNode}
           />
         )}
@@ -916,6 +987,20 @@ function IssueTreeMindMap() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 発想法アシスト（分解）ダイアログ */}
+      <IdeationAssistDialog
+        open={ideateOpen}
+        onOpenChange={setIdeateOpen}
+        parentId={ideateParentId}
+        parentLabel={
+          ideateParentId === null
+            ? tree.rootQuestion ?? ''
+            : (tree.nodes ?? []).find((n) => n.id === ideateParentId)?.label ?? ''
+        }
+        treeType={tree.type}
+        onAdd={addNodesBulk}
+      />
     </div>
   );
 }
@@ -931,6 +1016,7 @@ function NodeEditPanel({
   onClose,
   onPatch,
   onSetVerification,
+  onIdeate,
   onDelete,
 }: {
   node: BackendNode;
@@ -939,6 +1025,7 @@ function NodeEditPanel({
   onClose: () => void;
   onPatch: (nodeId: string, body: Record<string, unknown>) => void;
   onSetVerification: (nodeId: string, verification: Verification) => void;
+  onIdeate: (nodeId: string | null) => void;
   onDelete: (nodeId: string) => void;
 }) {
   const [label, setLabel] = useState(node.label);
@@ -946,7 +1033,7 @@ function NodeEditPanel({
   const kind = node.kind ?? 'ISSUE';
 
   return (
-    <Card className="w-80 shrink-0 overflow-y-auto border-gray-200 bg-white">
+    <Card className="absolute inset-y-0 right-0 z-30 w-full overflow-y-auto border-gray-200 bg-white shadow-xl sm:static sm:z-auto sm:w-80 sm:shrink-0 sm:shadow-none">
       <CardContent className="space-y-4 p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-gray-900">ノードを編集</h3>
@@ -1079,6 +1166,16 @@ function NodeEditPanel({
             className="resize-none text-sm"
           />
         </div>
+
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={() => onIdeate(node.id)}
+          className="w-full bg-blue-600 text-white hover:bg-blue-700"
+        >
+          <Sparkles className="mr-1 h-4 w-4" />
+          発想法で分解
+        </Button>
 
         <Button
           variant="outline"

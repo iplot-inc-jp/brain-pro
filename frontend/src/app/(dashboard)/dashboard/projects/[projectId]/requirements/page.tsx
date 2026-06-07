@@ -355,7 +355,7 @@ export default function RequirementsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -371,7 +371,7 @@ export default function RequirementsPage() {
             <p className="text-gray-500 mt-1">システム要求を定義・管理</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span id="howto-trigger-requirements" className="contents">
             <HowToPanel
               steps={[
@@ -535,7 +535,7 @@ export default function RequirementsPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
                   <Label className="text-gray-700">タイプ</Label>

@@ -99,6 +99,8 @@ model Project {
   subProjects       SubProject[]
   attachments       Attachment[]
   databaseConnections DatabaseConnection[]
+  recordSheets      RecordSheet[]
+  flowFolders       FlowFolder[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -215,11 +217,14 @@ model BusinessFlow {
   depth       Int            @default(0)
   // サブプロジェクトによるグルーピング（任意）
   subProjectId String?       @map("sub_project_id")
+  // フォルダによるグルーピング（任意）
+  folderId    String?        @map("folder_id")
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
   project             Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   subProject          SubProject?              @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  folder              FlowFolder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
   parent              BusinessFlow?            @relation("FlowHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children            BusinessFlow[]           @relation("FlowHierarchy")
   nodes               FlowNode[]
@@ -230,6 +235,8 @@ model BusinessFlow {
   requirementMappings RequirementFlowMapping[]
   gapAsisItems        GapItem[]                @relation("GapAsisFlow")
   gapTobeItems        GapItem[]                @relation("GapTobeFlow")
+  // 他フローのノードからこのフローへ向かう入出力リンク
+  nodeLinkTargets     FlowNodeLink[]           @relation("NodeLinkTargetFlow")
 
   @@map("business_flows")
 }
@@ -262,6 +269,10 @@ model FlowNode {
   requirementMappings RequirementFlowMapping[]
   gapAsisNodes        GapItem[]                @relation("GapAsisNode")
   gapTobeNodes        GapItem[]                @relation("GapTobeNode")
+  // このノードが持つクロスフロー入出力リンク
+  links               FlowNodeLink[]           @relation("NodeLinks")
+  // 他ノードのリンクがこのノードを参照しているもの
+  linkTargets         FlowNodeLink[]           @relation("NodeLinkTargetNode")
 
   @@map("flow_nodes")
 }
@@ -292,6 +303,55 @@ model FlowEdge {
   interfaceDefinitions InterfaceDefinition[]
 
   @@map("flow_edges")
+}
+
+// ===========================================
+// フローフォルダ（業務フローの入れ子グルーピング）
+// ===========================================
+
+model FlowFolder {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  // 親フォルダ（入れ子フォルダ）
+  parentId  String?  @map("parent_id")
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        FlowFolder?    @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      FlowFolder[]   @relation("FolderTree")
+  businessFlows BusinessFlow[]
+
+  @@map("flow_folders")
+}
+
+// ===========================================
+// クロスフロー入出力リンク（ノード ⇔ 他フロー/他ノード）
+// ===========================================
+
+enum FlowLinkDirection {
+  INPUT
+  OUTPUT
+}
+
+model FlowNodeLink {
+  id           String            @id @default(uuid())
+  nodeId       String            @map("node_id")
+  direction    FlowLinkDirection
+  targetFlowId String            @map("target_flow_id")
+  targetNodeId String?           @map("target_node_id")
+  label        String?
+  order        Int               @default(0)
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  node       FlowNode     @relation("NodeLinks", fields: [nodeId], references: [id], onDelete: Cascade)
+  targetFlow BusinessFlow @relation("NodeLinkTargetFlow", fields: [targetFlowId], references: [id], onDelete: Cascade)
+  targetNode FlowNode?    @relation("NodeLinkTargetNode", fields: [targetNodeId], references: [id], onDelete: SetNull)
+
+  @@map("flow_node_links")
 }
 
 // ===========================================
@@ -857,4 +917,23 @@ model DatabaseConnection {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("database_connections")
+}
+
+// ===========================================
+// 記録シート（教材の配布物テンプレ＝表形式の記録）
+// ===========================================
+
+model RecordSheet {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  templateKey String   @map("template_key") // registry のテンプレ識別子（配布物由来）
+  title       String?
+  rows        Json     @default("[]") // 行データ（{列key: 値} の配列）
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, templateKey])
+  @@map("record_sheets")
 }

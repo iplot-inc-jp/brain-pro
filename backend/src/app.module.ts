@@ -14,6 +14,8 @@ import {
   COLUMN_REPOSITORY,
   BUSINESS_FLOW_REPOSITORY,
   FLOW_NODE_REPOSITORY,
+  FLOW_FOLDER_REPOSITORY,
+  FLOW_NODE_LINK_REPOSITORY,
   CRUD_MAPPING_REPOSITORY,
   PROJECT_PHASE_REPOSITORY,
   GAP_ITEM_REPOSITORY,
@@ -60,6 +62,20 @@ import {
   UpdateIssueNodeUseCase,
   DeleteIssueNodeUseCase,
   SetNodeVerificationUseCase,
+  // FlowFolder
+  CreateFlowFolderUseCase,
+  GetFlowFoldersUseCase,
+  RenameFlowFolderUseCase,
+  MoveFlowFolderUseCase,
+  DeleteFlowFolderUseCase,
+  // FlowNodeLink
+  CreateNodeLinkUseCase,
+  GetNodeLinksUseCase,
+  DeleteNodeLinkUseCase,
+  // FlowNode child-flow drill-down
+  CreateNodeChildFlowUseCase,
+  // FlowTree (project-wide hierarchy map)
+  GetFlowTreeUseCase,
 } from './application';
 
 // Infrastructure
@@ -73,6 +89,8 @@ import {
   PrismaColumnRepository,
   PrismaBusinessFlowRepository,
   PrismaFlowNodeRepository,
+  FlowFolderRepositoryImpl,
+  FlowNodeLinkRepositoryImpl,
   PrismaCrudMappingRepository,
   ProjectPhaseRepositoryImpl,
   GapItemRepositoryImpl,
@@ -91,6 +109,8 @@ import {
   RoleController,
   TableController,
   BusinessFlowController,
+  FlowFolderController,
+  FlowFolderByIdController,
   ProjectPhaseController,
   PhaseByIdController,
   GapItemController,
@@ -108,6 +128,7 @@ import { CodeCatalogController } from './presentation/controllers/code-catalog.c
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
 import { AttachmentController } from './presentation/controllers/attachment.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
+import { RecordSheetController } from './presentation/controllers/record-sheet.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -144,6 +165,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     RoleController,
     TableController,
     BusinessFlowController,
+    FlowFolderController,
+    FlowFolderByIdController,
     ProjectPhaseController,
     PhaseByIdController,
     GapItemController,
@@ -157,6 +180,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     DatabaseConnectionController,
     AttachmentController,
     SubProjectController,
+    RecordSheetController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -201,6 +225,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: FLOW_NODE_REPOSITORY,
       useClass: PrismaFlowNodeRepository,
+    },
+    {
+      provide: FLOW_FOLDER_REPOSITORY,
+      useClass: FlowFolderRepositoryImpl,
+    },
+    {
+      provide: FLOW_NODE_LINK_REPOSITORY,
+      useClass: FlowNodeLinkRepositoryImpl,
     },
     {
       provide: CRUD_MAPPING_REPOSITORY,
@@ -259,6 +291,20 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateIssueNodeUseCase,
     DeleteIssueNodeUseCase,
     SetNodeVerificationUseCase,
+    // FlowFolder
+    CreateFlowFolderUseCase,
+    GetFlowFoldersUseCase,
+    RenameFlowFolderUseCase,
+    MoveFlowFolderUseCase,
+    DeleteFlowFolderUseCase,
+    // FlowNodeLink
+    CreateNodeLinkUseCase,
+    GetNodeLinksUseCase,
+    DeleteNodeLinkUseCase,
+    // FlowNode child-flow drill-down
+    CreateNodeChildFlowUseCase,
+    // FlowTree (project-wide hierarchy map)
+    GetFlowTreeUseCase,
 
     // ========== Services ==========
     ClaudeService,

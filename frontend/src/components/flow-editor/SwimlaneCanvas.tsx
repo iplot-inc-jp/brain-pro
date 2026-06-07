@@ -14,7 +14,7 @@
  *   - 縦/横の向きはキャンバス内部状態でトグルし、flow ごとに localStorage に永続化。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -48,10 +48,22 @@ import {
   X,
   Download,
   RotateCw,
+  Link2,
+  ArrowRight,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { computeFlowLayout, type LayoutInputNode, type LayoutInputEdge } from './flow-layout';
-import type { FlowData, FlowDataNode, Role } from './flow-types';
+import type {
+  FlowData,
+  FlowDataNode,
+  FlowLinkDirection,
+  FlowNodeLink,
+  FlowSummary,
+  Role,
+} from './flow-types';
 
 const LANE_LABEL_W = 132;
 
@@ -66,9 +78,20 @@ export interface NodeUpdatePatch {
   metadata?: Record<string, unknown>;
 }
 
+/** ノードの入出力リンク取得結果（双方向）。 */
+export interface NodeLinksResult {
+  nodeId: string;
+  outgoing: FlowNodeLink[];
+  incoming: FlowNodeLink[];
+}
+
 export interface SwimlaneCanvasProps {
   flowData: FlowData;
   roles: Role[];
+  /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
+  projectId?: string;
+  /** 連携先フロー選択用の、同プロジェクトの他フロー一覧。 */
+  otherFlows?: FlowSummary[];
   onBack?: () => void;
   onUpdateFlow?: (id: string, name: string, description?: string) => void;
   onCreateNode?: (input: { type: string; roleId?: string; afterNodeId?: string }) => void;
@@ -79,7 +102,24 @@ export interface SwimlaneCanvasProps {
   onChangeNodeRole?: (nodeId: string, roleId: string) => void;
   onCreateChildFlow?: (nodeId: string) => void;
   onOpenChildFlow?: (nodeId: string, childFlowId: string) => void;
+  /**
+   * ノードのダブルクリックで詳細（子）フローを開く。
+   * 子フローが無ければ作成してから遷移する処理は、呼び出し側（ページ）に委譲する。
+   */
+  onNodeDoubleClick?: (nodeId: string) => void;
   onAddRole?: () => void;
+  // --- クロスフロー入出力リンク（右サイドバー「他の業務フローと連携」） ---
+  /** ノードの入出力リンク一覧（双方向）を取得。サイドバーを開いた時に呼ぶ。 */
+  onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
+  /** ノードに入出力リンクを作成。 */
+  onCreateNodeLink?: (
+    nodeId: string,
+    input: { direction: FlowLinkDirection; targetFlowId: string; targetNodeId?: string; label?: string },
+  ) => Promise<void>;
+  /** 入出力リンクを削除。 */
+  onDeleteNodeLink?: (linkId: string) => Promise<void>;
+  /** 連携先フローのノード一覧を取得（連携先ノード選択用、任意）。 */
+  onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
   /**
    * ノードのプロパティ保存 / ドラッグでの並べ替え・レーン移動で呼ばれる。
    * - 右サイドバー保存: { label?, type?, roleId?, metadata? }
@@ -137,6 +177,7 @@ type ContentNodeData = {
   label: string;
   ntype: string;
   hasChildFlow?: boolean;
+  hasLinks?: boolean;
   roleColor?: string;
   orientation: FlowOrientation;
 };
@@ -165,10 +206,26 @@ function ContentNode({ data, selected }: { data: ContentNodeData; selected?: boo
     >
       <Handle type="target" position={targetPos} className="w-2 h-2 !bg-gray-400" />
       <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
-      {data.hasChildFlow && (
-        <div className="text-[10px] text-indigo-500 mt-0.5 flex items-center gap-0.5">
-          <Layers className="w-2.5 h-2.5" />
-          詳細あり
+      {(data.hasChildFlow || data.hasLinks) && (
+        <div className="mt-0.5 flex items-center justify-center gap-1.5">
+          {data.hasChildFlow && (
+            <span
+              className="text-[10px] text-indigo-600 flex items-center gap-0.5"
+              title="Wクリックで詳細フローを開く"
+            >
+              <Layers className="w-2.5 h-2.5" />
+              詳細フロー
+            </span>
+          )}
+          {data.hasLinks && (
+            <span
+              className="text-[10px] text-teal-600 flex items-center gap-0.5"
+              title="他の業務フローと連携あり"
+            >
+              <GitBranch className="w-2.5 h-2.5" />
+              連携
+            </span>
+          )}
         </div>
       )}
       <Handle type="source" position={sourcePos} className="w-2 h-2 !bg-gray-400" />
@@ -408,7 +465,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         data: {
           label: src.label,
           ntype: pn.type,
-          hasChildFlow: src.hasChildFlow,
+          hasChildFlow: src.hasChildFlow || !!src.childFlowId,
+          hasLinks: (src.links?.length ?? 0) > 0,
           roleColor: src.role?.color,
           orientation,
         } as ContentNodeData,
@@ -579,8 +637,15 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           if (node.type === 'content') setEditingNodeId(node.id);
         }}
         onNodeDoubleClick={(_, node) => {
+          if (node.type !== 'content') return;
+          // ドリルダウン: 子フローがあれば開き、無ければ作成してから遷移（呼び出し側に委譲）
+          if (props.onNodeDoubleClick) {
+            props.onNodeDoubleClick(node.id);
+            return;
+          }
+          // 後方互換: onNodeDoubleClick 未指定なら従来どおり既存子フローのみ開く
           const src = flowData.nodes.find((n) => n.id === node.id);
-          if (src?.hasChildFlow && src.childFlowId) props.onOpenChildFlow?.(node.id, src.childFlowId);
+          if (src?.childFlowId) props.onOpenChildFlow?.(node.id, src.childFlowId);
         }}
         onNodeContextMenu={(e, node) => {
           if (node.type === 'lane') return;
@@ -640,7 +705,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
         {/* ツールバー（右上）: 縦横トグル + PNG出力 */}
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Button
               variant="outline"
               size="sm"
@@ -743,8 +808,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           key={editingNodeId}
           node={flowData.nodes.find((n) => n.id === editingNodeId) ?? null}
           roles={roles}
+          currentFlowId={flowData.id}
+          otherFlows={props.otherFlows ?? []}
           onClose={() => setEditingNodeId(null)}
           onUpdateNode={props.onUpdateNode}
+          onFetchNodeLinks={props.onFetchNodeLinks}
+          onCreateNodeLink={props.onCreateNodeLink}
+          onDeleteNodeLink={props.onDeleteNodeLink}
+          onFetchFlowNodes={props.onFetchFlowNodes}
         />
       )}
 
@@ -791,16 +862,416 @@ function readMeta(node: FlowDataNode | null): {
   };
 }
 
+// ===========================================
+// クロスフロー入出力リンク（右サイドバー内セクション）
+// ===========================================
+
+type AddLinkDraft = {
+  direction: FlowLinkDirection;
+  targetFlowId: string;
+  targetNodeId: string;
+  label: string;
+} | null;
+
+function NodeLinksSection({
+  node,
+  currentFlowId,
+  otherFlows,
+  onFetchNodeLinks,
+  onCreateNodeLink,
+  onDeleteNodeLink,
+  onFetchFlowNodes,
+}: {
+  node: FlowDataNode | null;
+  currentFlowId: string;
+  otherFlows: FlowSummary[];
+  onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
+  onCreateNodeLink?: (
+    nodeId: string,
+    input: { direction: FlowLinkDirection; targetFlowId: string; targetNodeId?: string; label?: string },
+  ) => Promise<void>;
+  onDeleteNodeLink?: (linkId: string) => Promise<void>;
+  onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
+}) {
+  const [links, setLinks] = useState<NodeLinksResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState<AddLinkDraft>(null);
+  const [draftNodes, setDraftNodes] = useState<Array<{ id: string; label: string }>>([]);
+  const [busy, setBusy] = useState(false);
+
+  // 連携可能な他フロー（自分自身を除外）
+  const selectableFlows = useMemo(
+    () => otherFlows.filter((f) => f.id !== currentFlowId),
+    [otherFlows, currentFlowId],
+  );
+
+  const reload = useCallback(async () => {
+    if (!node || !onFetchNodeLinks) return;
+    setLoading(true);
+    try {
+      const result = await onFetchNodeLinks(node.id);
+      setLinks(result);
+    } catch {
+      // 取得失敗時はフロー詳細に含まれる links を OUTPUT 起点としてフォールバック表示
+      setLinks({
+        nodeId: node.id,
+        outgoing: node.links ?? [],
+        incoming: [],
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [node, onFetchNodeLinks]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  // ドラフトの連携先フローが変わったら、その連携先ノード候補を取得
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!draft || !draft.targetFlowId || !onFetchFlowNodes) {
+        setDraftNodes([]);
+        return;
+      }
+      try {
+        const ns = await onFetchFlowNodes(draft.targetFlowId);
+        if (!cancelled) setDraftNodes(ns);
+      } catch {
+        if (!cancelled) setDraftNodes([]);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, onFetchFlowNodes]);
+
+  const startAdd = (direction: FlowLinkDirection) => {
+    setDraft({
+      direction,
+      targetFlowId: selectableFlows[0]?.id ?? '',
+      targetNodeId: '',
+      label: '',
+    });
+  };
+
+  const commitAdd = async () => {
+    if (!node || !draft || !draft.targetFlowId || !onCreateNodeLink) return;
+    setBusy(true);
+    try {
+      await onCreateNodeLink(node.id, {
+        direction: draft.direction,
+        targetFlowId: draft.targetFlowId,
+        targetNodeId: draft.targetNodeId || undefined,
+        label: draft.label.trim() || undefined,
+      });
+      setDraft(null);
+      await reload();
+    } catch {
+      /* 失敗時はドラフトを残す */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeLink = async (linkId: string) => {
+    if (!onDeleteNodeLink) return;
+    setBusy(true);
+    try {
+      await onDeleteNodeLink(linkId);
+      await reload();
+    } catch {
+      /* noop */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!node) return null;
+
+  const outgoing = links?.outgoing ?? node.links ?? [];
+  const incoming = links?.incoming ?? [];
+  const inputLinks = outgoing.filter((l) => l.direction === 'INPUT');
+  const outputLinks = outgoing.filter((l) => l.direction === 'OUTPUT');
+
+  const linkSupported = !!onCreateNodeLink && !!onFetchNodeLinks;
+
+  return (
+    <div className="pt-2 border-t border-gray-200">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Link2 className="w-3.5 h-3.5 text-teal-600" />
+        <span className="text-[11px] font-semibold text-gray-700">他の業務フローと連携</span>
+        {loading && <Loader2 className="w-3 h-3 animate-spin text-gray-400" />}
+      </div>
+
+      {!linkSupported ? (
+        <p className="text-[11px] text-gray-400">連携機能は利用できません。</p>
+      ) : (
+        <div className="space-y-3">
+          {/* INPUT 元フロー */}
+          <LinkGroup
+            title="INPUT元フロー"
+            icon={<ArrowDownLeft className="w-3 h-3 text-blue-500" />}
+            emptyText="INPUT元フローはありません"
+            links={inputLinks}
+            onDelete={removeLink}
+            disabled={busy}
+          />
+          {draft?.direction === 'INPUT' ? (
+            <AddLinkForm
+              draft={draft}
+              setDraft={setDraft}
+              flows={selectableFlows}
+              targetNodes={draftNodes}
+              onCancel={() => setDraft(null)}
+              onCommit={commitAdd}
+              busy={busy}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => startAdd('INPUT')}
+              disabled={selectableFlows.length === 0 || !!draft}
+              className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-blue-600 border border-dashed border-blue-300 rounded hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-3 h-3" />
+              INPUT元フローを追加
+            </button>
+          )}
+
+          {/* OUTPUT 先フロー */}
+          <LinkGroup
+            title="OUTPUT先フロー"
+            icon={<ArrowUpRight className="w-3 h-3 text-emerald-500" />}
+            emptyText="OUTPUT先フローはありません"
+            links={outputLinks}
+            onDelete={removeLink}
+            disabled={busy}
+          />
+          {draft?.direction === 'OUTPUT' ? (
+            <AddLinkForm
+              draft={draft}
+              setDraft={setDraft}
+              flows={selectableFlows}
+              targetNodes={draftNodes}
+              onCancel={() => setDraft(null)}
+              onCommit={commitAdd}
+              busy={busy}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => startAdd('OUTPUT')}
+              disabled={selectableFlows.length === 0 || !!draft}
+              className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] text-emerald-600 border border-dashed border-emerald-300 rounded hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-3 h-3" />
+              OUTPUT先フローを追加
+            </button>
+          )}
+
+          {/* このノードを参照している他フロー（被参照） */}
+          {incoming.length > 0 && (
+            <div>
+              <div className="text-[10px] text-gray-400 mb-1">他フローから参照されています</div>
+              <div className="flex flex-wrap gap-1">
+                {incoming.map((l) => (
+                  <span
+                    key={l.id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-gray-100 text-gray-600 rounded-full"
+                    title={`${l.targetFlowName ?? '不明なフロー'}${l.targetNodeLabel ? ' / ' + l.targetNodeLabel : ''}（${l.direction}）`}
+                  >
+                    <GitBranch className="w-2.5 h-2.5" />
+                    {l.targetFlowName ?? '不明なフロー'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectableFlows.length === 0 && (
+            <p className="text-[11px] text-gray-400">連携先にできる他のフローがありません。</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkGroup({
+  title,
+  icon,
+  emptyText,
+  links,
+  onDelete,
+  disabled,
+}: {
+  title: string;
+  icon: ReactNode;
+  emptyText: string;
+  links: FlowNodeLink[];
+  onDelete: (linkId: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1 text-[10px] font-medium text-gray-500 mb-1">
+        {icon}
+        {title}
+      </div>
+      {links.length === 0 ? (
+        <p className="text-[10px] text-gray-400">{emptyText}</p>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {links.map((l) => (
+            <span
+              key={l.id}
+              className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-[10px] bg-teal-50 text-teal-700 border border-teal-200 rounded-full"
+              title={`${l.targetFlowName ?? '不明なフロー'}${l.targetNodeLabel ? ' / ' + l.targetNodeLabel : ''}${l.label ? '（' + l.label + '）' : ''}`}
+            >
+              <span className="max-w-[120px] truncate">
+                {l.targetFlowName ?? '不明なフロー'}
+                {l.targetNodeLabel ? ` / ${l.targetNodeLabel}` : ''}
+              </span>
+              {l.label ? <span className="text-teal-500">［{l.label}］</span> : null}
+              <button
+                type="button"
+                onClick={() => onDelete(l.id)}
+                disabled={disabled}
+                className="p-0.5 rounded-full hover:bg-teal-200 disabled:opacity-40"
+                title="連携を削除"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddLinkForm({
+  draft,
+  setDraft,
+  flows,
+  targetNodes,
+  onCancel,
+  onCommit,
+  busy,
+}: {
+  draft: NonNullable<AddLinkDraft>;
+  setDraft: (d: AddLinkDraft) => void;
+  flows: FlowSummary[];
+  targetNodes: Array<{ id: string; label: string }>;
+  onCancel: () => void;
+  onCommit: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="rounded border border-gray-200 bg-gray-50 p-2 space-y-2">
+      <div className="text-[10px] font-medium text-gray-600 flex items-center gap-1">
+        {draft.direction === 'INPUT' ? (
+          <>
+            <ArrowDownLeft className="w-3 h-3 text-blue-500" />
+            INPUT元フローを追加
+          </>
+        ) : (
+          <>
+            <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+            OUTPUT先フローを追加
+          </>
+        )}
+      </div>
+      <div>
+        <label className="block text-[10px] text-gray-500 mb-0.5">連携先フロー</label>
+        <select
+          value={draft.targetFlowId}
+          onChange={(e) => setDraft({ ...draft, targetFlowId: e.target.value, targetNodeId: '' })}
+          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+        >
+          {flows.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+              {f.parentId ? '（詳細）' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-[10px] text-gray-500 mb-0.5">連携先ノード（任意）</label>
+        <select
+          value={draft.targetNodeId}
+          onChange={(e) => setDraft({ ...draft, targetNodeId: e.target.value })}
+          className="w-full px-2 py-1 text-xs border border-gray-300 rounded bg-white"
+        >
+          <option value="">（フロー全体）</option>
+          {targetNodes.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-[10px] text-gray-500 mb-0.5">ラベル（任意）</label>
+        <input
+          value={draft.label}
+          onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          placeholder="例: 受注データ"
+          className="w-full px-2 py-1 text-xs border border-gray-300 rounded"
+        />
+      </div>
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-200 rounded disabled:opacity-40"
+        >
+          キャンセル
+        </button>
+        <button
+          type="button"
+          onClick={onCommit}
+          disabled={busy || !draft.targetFlowId}
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-white bg-teal-600 hover:bg-teal-700 rounded disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+          追加
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NodePropertyPanel({
   node,
   roles,
+  currentFlowId,
+  otherFlows,
   onClose,
   onUpdateNode,
+  onFetchNodeLinks,
+  onCreateNodeLink,
+  onDeleteNodeLink,
+  onFetchFlowNodes,
 }: {
   node: FlowDataNode | null;
   roles: Role[];
+  currentFlowId: string;
+  otherFlows: FlowSummary[];
   onClose: () => void;
   onUpdateNode?: (nodeId: string, patch: NodeUpdatePatch) => void;
+  onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
+  onCreateNodeLink?: (
+    nodeId: string,
+    input: { direction: FlowLinkDirection; targetFlowId: string; targetNodeId?: string; label?: string },
+  ) => Promise<void>;
+  onDeleteNodeLink?: (linkId: string) => Promise<void>;
+  onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
 }) {
   const [label, setLabel] = useState(node?.label ?? '');
   const [type, setType] = useState(node?.type ?? 'PROCESS');
@@ -826,7 +1297,7 @@ function NodePropertyPanel({
   if (!node) return null;
 
   return (
-    <div className="absolute top-0 right-0 h-full w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
+    <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">ノードのプロパティ</h3>
         <button
@@ -922,6 +1393,16 @@ function NodePropertyPanel({
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>
+
+        <NodeLinksSection
+          node={node}
+          currentFlowId={currentFlowId}
+          otherFlows={otherFlows}
+          onFetchNodeLinks={onFetchNodeLinks}
+          onCreateNodeLink={onCreateNodeLink}
+          onDeleteNodeLink={onDeleteNodeLink}
+          onFetchFlowNodes={onFetchFlowNodes}
+        />
       </div>
 
       <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-end gap-2">

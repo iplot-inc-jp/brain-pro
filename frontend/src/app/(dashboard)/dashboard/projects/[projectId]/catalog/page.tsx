@@ -27,9 +27,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine } from 'lucide-react';
+import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine, BookMarked, Truck, Package, BarChart3, type LucideIcon } from 'lucide-react';
+import { RECORD_TEMPLATES, type RecordTemplate } from '@/lib/record-templates';
+import { RecordSheetTable } from '@/components/records/record-sheet-table';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+// 現状把握「発注計画ツール」由来の参考マスタ（destination=catalog）。
+// 既存 RECORD_TEMPLATES の定義（列）をそのまま再利用し、RecordSheet に構造保存する。
+const REFERENCE_MASTER_DEFS: { key: string; icon: LucideIcon }[] = [
+  { key: 'supplier-master', icon: Truck },
+  { key: 'product-min-lot', icon: Package },
+  { key: 'demand-history', icon: BarChart3 },
+];
+
+type ReferenceMaster = { key: string; icon: LucideIcon; template: RecordTemplate };
+
+const REFERENCE_MASTERS: ReferenceMaster[] = REFERENCE_MASTER_DEFS.flatMap((def) => {
+  const template = RECORD_TEMPLATES.find((t) => t.key === def.key);
+  return template ? [{ ...def, template }] : [];
+});
 
 type TableData = {
   id: string;
@@ -62,6 +79,10 @@ type IntrospectResult = {
 export default function ProjectCatalogPage() {
   const params = useParams();
   const projectId = params.projectId as string;
+
+  // データカタログ本体 / 参考マスタ の切替
+  const [topTab, setTopTab] = useState<'catalog' | 'reference'>('catalog');
+  const [activeMaster, setActiveMaster] = useState<string>(REFERENCE_MASTERS[0]?.key ?? '');
 
   const [tables, setTables] = useState<TableData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -418,7 +439,7 @@ export default function ProjectCatalogPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -434,7 +455,7 @@ export default function ProjectCatalogPage() {
             <p className="text-gray-500 mt-1">テーブルとカラムのメタデータを管理</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <span ref={howToRef} className="inline-flex">
             <HowToPanel
               steps={[
@@ -462,7 +483,7 @@ export default function ProjectCatalogPage() {
                 スキーマから取り込み(AI)
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-white border-gray-200 max-w-2xl">
+            <DialogContent className="bg-white border-gray-200 max-w-2xl max-h-[85vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="text-gray-900 flex items-center gap-2">
                   スキーマから取り込み(AI)
@@ -557,7 +578,7 @@ export default function ProjectCatalogPage() {
                 CSVインポート
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-white border-gray-200 max-w-2xl">
+            <DialogContent className="bg-white border-gray-200 max-w-2xl max-h-[85vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="text-gray-900">CSVからインポート</DialogTitle>
                 <DialogDescription className="text-gray-500">
@@ -736,6 +757,36 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
         </div>
       </div>
 
+      {/* トップレベルタブ: データカタログ本体 / 参考マスタ */}
+      <div className="flex flex-wrap gap-1 border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => setTopTab('catalog')}
+          className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            topTab === 'catalog'
+              ? 'border-blue-600 text-blue-700 bg-blue-50'
+              : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+          }`}
+        >
+          <Database className="h-4 w-4" />
+          データカタログ
+        </button>
+        <button
+          type="button"
+          onClick={() => setTopTab('reference')}
+          className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            topTab === 'reference'
+              ? 'border-blue-600 text-blue-700 bg-blue-50'
+              : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+          }`}
+        >
+          <BookMarked className="h-4 w-4" />
+          参考マスタ
+        </button>
+      </div>
+
+      {/* ── データカタログ本体（DB直結 / スキーマ貼付 / 手動テーブル）── */}
+      <div className={topTab === 'catalog' ? 'space-y-6' : 'hidden'}>
       {/* 取り込みの説明 */}
       <div className="flex items-start gap-2 p-3 bg-violet-50 border border-violet-200 rounded-lg">
         <Sparkles className="h-5 w-5 text-violet-600 mt-0.5 shrink-0" />
@@ -747,7 +798,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
       {/* DB直結（複数） */}
       <Card className="bg-white border-gray-200">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
                 <Server className="h-5 w-5 text-emerald-600" />
@@ -858,7 +909,7 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
                 return (
                   <div
                     key={conn.id}
-                    className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg"
+                    className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 border border-gray-200 rounded-lg"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -1001,6 +1052,62 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
           </CardContent>
         </Card>
       )}
+      </div>
+
+      {/* ── 参考マスタ（現状把握「発注計画ツール」由来の参照データ）── */}
+      <div className={topTab === 'reference' ? 'space-y-6' : 'hidden'}>
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <BookMarked className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-amber-800">
+            現状把握（発注計画ツール）で扱う参照マスタです。仕入先・商品×最小ロット・過去需要データを表として記録し、ASIS/TOBE業務フローや発注量計算のINPUTとして参照します。各表ごとに「保存」を押してください。
+          </p>
+        </div>
+
+        {REFERENCE_MASTERS.length === 0 ? (
+          <Card className="bg-white border-gray-200">
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertCircle className="h-8 w-8 text-amber-500 mb-3" />
+              <p className="text-gray-700">参考マスタのテンプレが見つかりませんでした。</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* 参考マスタ内タブ */}
+            <div className="flex flex-wrap gap-1 border-b border-gray-200">
+              {REFERENCE_MASTERS.map((m) => {
+                const Icon = m.icon;
+                const isActive = activeMaster === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setActiveMaster(m.key)}
+                    className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'border-amber-500 text-amber-700 bg-amber-50'
+                        : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {m.template.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 各参考マスタ表（未保存の編集を保持するため全タブをマウントし表示のみ切替） */}
+            {REFERENCE_MASTERS.map((m) => (
+              <div
+                key={m.key}
+                className={activeMaster === m.key ? 'space-y-2' : 'hidden'}
+              >
+                <p className="text-sm text-gray-500">{m.template.description}</p>
+                <RecordSheetTable projectId={projectId} template={m.template} />
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }

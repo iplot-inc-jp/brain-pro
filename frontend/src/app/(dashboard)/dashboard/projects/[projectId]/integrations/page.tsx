@@ -388,7 +388,7 @@ export default function IntegrationsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -407,7 +407,7 @@ export default function IntegrationsPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <HowToPanel
             open={howToOpen}
             onOpenChange={setHowToOpen}
@@ -629,7 +629,7 @@ export default function IntegrationsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                       <Button
                         size="sm"
                         onClick={() => handleSync(conn)}

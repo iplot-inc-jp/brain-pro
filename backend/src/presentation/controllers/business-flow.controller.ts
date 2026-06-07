@@ -11,8 +11,16 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsString, IsOptional, IsNumber, IsIn, IsObject } from 'class-validator';
+import {
+  CreateNodeLinkUseCase,
+  GetNodeLinksUseCase,
+  DeleteNodeLinkUseCase,
+  CreateNodeChildFlowUseCase,
+  GetFlowTreeUseCase,
+} from '../../application';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
 import {
   BUSINESS_FLOW_REPOSITORY,
   IBusinessFlowRepository,
@@ -27,7 +35,6 @@ import {
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
-import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { v4 as uuid } from 'uuid';
 
 // DTOs
@@ -57,6 +64,11 @@ class CreateBusinessFlowDto {
   @IsOptional()
   @IsString()
   subProjectId?: string | null;
+
+  @ApiProperty({ description: 'フローフォルダID', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  folderId?: string | null;
 }
 
 class UpdateBusinessFlowDto {
@@ -79,6 +91,11 @@ class UpdateBusinessFlowDto {
   @IsOptional()
   @IsString()
   subProjectId?: string | null;
+
+  @ApiProperty({ description: 'フローフォルダID', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  folderId?: string | null;
 }
 
 class CreateFlowNodeDto {
@@ -179,6 +196,33 @@ class ImportMermaidDto {
   mermaid: string;
 }
 
+class CreateNodeLinkDto {
+  @ApiProperty({ description: 'リンク方向', enum: ['INPUT', 'OUTPUT'] })
+  @IsIn(['INPUT', 'OUTPUT'])
+  direction: 'INPUT' | 'OUTPUT';
+
+  @ApiProperty({ description: '接続先フローID' })
+  @IsString()
+  targetFlowId: string;
+
+  @ApiProperty({ description: '接続先ノードID（任意）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  targetNodeId?: string | null;
+
+  @ApiProperty({ description: 'リンクラベル（任意）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  label?: string | null;
+}
+
+class CreateNodeChildFlowDto {
+  @ApiProperty({ description: '子フロー名（省略時はノードラベル+" 詳細"）', required: false })
+  @IsOptional()
+  @IsString()
+  name?: string;
+}
+
 @ApiTags('Business Flows')
 @ApiBearerAuth()
 @Controller('business-flows')
@@ -193,6 +237,11 @@ export class BusinessFlowController {
     private readonly prisma: PrismaService,
     private readonly claudeService: ClaudeService,
     private readonly companyKeyService: CompanyKeyService,
+    private readonly createNodeLinkUseCase: CreateNodeLinkUseCase,
+    private readonly getNodeLinksUseCase: GetNodeLinksUseCase,
+    private readonly deleteNodeLinkUseCase: DeleteNodeLinkUseCase,
+    private readonly createNodeChildFlowUseCase: CreateNodeChildFlowUseCase,
+    private readonly getFlowTreeUseCase: GetFlowTreeUseCase,
   ) {}
 
   @Get('project/:projectId')
@@ -209,6 +258,21 @@ export class BusinessFlowController {
     return flows.map((f) => this.toResponse(f));
   }
 
+  @Get('project/:projectId/tree')
+  @ApiOperation({
+    summary:
+      'プロジェクト全体のフローツリー（親子階層マップ用のフラット配列）を取得',
+  })
+  async getFlowTree(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.getFlowTreeUseCase.execute({
+      userId: user.id,
+      projectId,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'フロー詳細を取得（ノード・エッジ含む）' })
   async getById(@Param('id') id: string) {
@@ -217,12 +281,19 @@ export class BusinessFlowController {
       return { error: 'Business flow not found' };
     }
 
-    // ノードとエッジを取得
+    // ノードとエッジを取得（クロスフロー入出力リンクも含める）
     const nodes = await this.prisma.flowNode.findMany({
       where: { flowId: id },
       include: {
         role: true,
         childFlow: true,
+        links: {
+          include: {
+            targetFlow: { select: { id: true, name: true } },
+            targetNode: { select: { id: true, label: true } },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -257,6 +328,17 @@ export class BusinessFlowController {
           ? { id: n.childFlow.id, name: n.childFlow.name }
           : null,
         hasChildFlow: !!n.childFlowId,
+        links: n.links.map((l) => ({
+          id: l.id,
+          nodeId: l.nodeId,
+          direction: l.direction,
+          targetFlowId: l.targetFlowId,
+          targetFlowName: l.targetFlow?.name ?? null,
+          targetNodeId: l.targetNodeId,
+          targetNodeLabel: l.targetNode?.label ?? null,
+          label: l.label,
+          order: l.order,
+        })),
         metadata: n.metadata,
       })),
       edges: edges.map((e) => ({
@@ -292,6 +374,7 @@ export class BusinessFlowController {
       kind: dto.kind,
       confidence: dto.confidence,
       subProjectId: dto.subProjectId,
+      folderId: dto.folderId,
       parentId: dto.parentId,
       depth,
     });
@@ -313,6 +396,7 @@ export class BusinessFlowController {
     if (dto.kind) flow.setKind(dto.kind);
     if (dto.confidence) flow.setConfidence(dto.confidence);
     if (dto.subProjectId !== undefined) flow.setSubProject(dto.subProjectId);
+    if (dto.folderId !== undefined) flow.setFolder(dto.folderId);
 
     const saved = await this.flowRepository.save(flow);
     return this.toResponse(saved);
@@ -501,6 +585,68 @@ export class BusinessFlowController {
     node.unlinkChildFlow();
     await this.nodeRepository.save(node);
 
+    return { success: true };
+  }
+
+  // ========== Node Child-Flow Drill-down (idempotent) ==========
+
+  @Post('nodes/:nodeId/child-flow')
+  @ApiOperation({
+    summary: 'ノードの子フロー（ドリルダウン）を作成または取得（冪等）',
+  })
+  async createNodeChildFlow(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('nodeId') nodeId: string,
+    @Body() dto: CreateNodeChildFlowDto,
+  ) {
+    return this.createNodeChildFlowUseCase.execute({
+      userId: user.id,
+      nodeId,
+      name: dto.name,
+    });
+  }
+
+  // ========== Node Cross-Flow Links ==========
+
+  @Get('nodes/:nodeId/links')
+  @ApiOperation({ summary: 'ノードの入出力リンク一覧（双方向）を取得' })
+  async getNodeLinks(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('nodeId') nodeId: string,
+  ) {
+    return this.getNodeLinksUseCase.execute({
+      userId: user.id,
+      nodeId,
+    });
+  }
+
+  @Post('nodes/:nodeId/links')
+  @ApiOperation({ summary: 'ノードに入出力リンクを作成' })
+  async createNodeLink(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('nodeId') nodeId: string,
+    @Body() dto: CreateNodeLinkDto,
+  ) {
+    return this.createNodeLinkUseCase.execute({
+      userId: user.id,
+      nodeId,
+      direction: dto.direction,
+      targetFlowId: dto.targetFlowId,
+      targetNodeId: dto.targetNodeId,
+      label: dto.label,
+    });
+  }
+
+  @Delete('node-links/:linkId')
+  @ApiOperation({ summary: '入出力リンクを削除' })
+  async deleteNodeLink(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('linkId') linkId: string,
+  ) {
+    await this.deleteNodeLinkUseCase.execute({
+      userId: user.id,
+      linkId,
+    });
     return { success: true };
   }
 
@@ -741,6 +887,7 @@ export class BusinessFlowController {
       kind: flow.kind,
       confidence: flow.confidence,
       subProjectId: flow.subProjectId,
+      folderId: flow.folderId,
       parentId: flow.parentId,
       depth: flow.depth,
       isRootFlow: flow.isRootFlow,

@@ -8,6 +8,8 @@ export * from './column.entity';
 export * from './business-flow.entity';
 export * from './flow-node.entity';
 export * from './flow-edge.entity';
+export * from './flow-folder.entity';
+export * from './flow-node-link.entity';
 export * from './crud-mapping.entity';
 export * from './project-phase.entity';
 export * from './gap-item.entity';

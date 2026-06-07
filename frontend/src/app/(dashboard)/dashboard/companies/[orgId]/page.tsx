@@ -32,6 +32,7 @@ import {
   ArrowLeft,
   UserPlus,
   Trash2,
+  KeyRound,
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
@@ -94,6 +95,8 @@ export default function CompanySettingsPage() {
 
   // メンバー追加
   const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberPassword, setNewMemberPassword] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<'admin' | 'general'>('general');
   const [addingMember, setAddingMember] = useState(false);
 
@@ -260,13 +263,26 @@ export default function CompanySettingsPage() {
       const res = await fetch(`${API_URL}/api/organizations/${orgId}/members`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ email: newMemberEmail, role }),
+        body: JSON.stringify({
+          email: newMemberEmail,
+          role,
+          name: newMemberName || undefined,
+          password: newMemberPassword || undefined,
+        }),
       });
       if (res.ok) {
         await fetchMembers();
         setNewMemberEmail('');
+        setNewMemberName('');
+        setNewMemberPassword('');
         setNewMemberRole('general');
-        setMessage({ type: 'success', text: 'メンバーを追加しました' });
+        const body = await res.json().catch(() => null);
+        setMessage({
+          type: 'success',
+          text: body?.invited
+            ? 'メンバーを招待しました（本人が登録するか、パスワードを設定するとログインできます）'
+            : 'メンバーを追加しました',
+        });
       } else {
         const body = await res.json().catch(() => null);
         setMessage({ type: 'error', text: body?.message || 'メンバーの追加に失敗しました' });
@@ -298,6 +314,32 @@ export default function CompanySettingsPage() {
       }
     } catch (err) {
       console.error('Failed to change role:', err);
+      setMessage({ type: 'error', text: 'エラーが発生しました' });
+    }
+  };
+
+  const handleResetPassword = async (member: Member) => {
+    const pw = window.prompt(`${member.email} の新しいパスワードを入力（4文字以上）`);
+    if (!pw) return;
+    if (pw.length < 4) {
+      setMessage({ type: 'error', text: 'パスワードは4文字以上にしてください' });
+      return;
+    }
+    setMessage(null);
+    try {
+      const res = await fetch(`${API_URL}/api/organizations/${orgId}/members/${member.userId}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        await fetchMembers();
+        setMessage({ type: 'success', text: 'パスワードを設定しました' });
+      } else {
+        setMessage({ type: 'error', text: 'パスワードの設定に失敗しました' });
+      }
+    } catch (err) {
+      console.error('Failed to reset password:', err);
       setMessage({ type: 'error', text: 'エラーが発生しました' });
     }
   };
@@ -351,7 +393,7 @@ export default function CompanySettingsPage() {
   return (
     <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <button
             onClick={() => router.push('/dashboard/companies')}
@@ -395,7 +437,7 @@ export default function CompanySettingsPage() {
       )}
 
       <Tabs defaultValue="ai" className="space-y-6">
-        <TabsList className="bg-gray-100 border border-gray-200">
+        <TabsList className="bg-gray-100 border border-gray-200 max-w-full overflow-x-auto">
           <TabsTrigger value="ai" className="data-[state=active]:bg-white data-[state=active]:text-gray-900">
             <Key className="h-4 w-4 mr-2" />
             AI設定
@@ -585,7 +627,6 @@ export default function CompanySettingsPage() {
                   <Button
                     onClick={handleAddMember}
                     disabled={!newMemberEmail || addingMember}
-                    className="bg-blue-600 hover:bg-blue-700"
                   >
                     {addingMember ? (
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -594,6 +635,30 @@ export default function CompanySettingsPage() {
                     )}
                     追加
                   </Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-gray-700 text-sm">氏名（任意）</Label>
+                    <Input
+                      value={newMemberName}
+                      onChange={(e) => setNewMemberName(e.target.value)}
+                      placeholder="山田 太郎"
+                      className="bg-white border-gray-300 text-gray-900"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-gray-700 text-sm flex items-center gap-1.5">
+                      初期パスワード（任意）
+                      <HelpTooltip text="管理者が初期パスワードを設定すると、本人はメール＋このパスワードで即ログインできます。空なら招待（本人が登録時に設定）。" />
+                    </Label>
+                    <Input
+                      type="password"
+                      value={newMemberPassword}
+                      onChange={(e) => setNewMemberPassword(e.target.value)}
+                      placeholder="未入力なら招待"
+                      className="bg-white border-gray-300 text-gray-900"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -608,7 +673,7 @@ export default function CompanySettingsPage() {
                     return (
                       <div
                         key={m.userId}
-                        className="flex items-center justify-between gap-3 px-4 py-3"
+                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900 truncate">
@@ -617,7 +682,7 @@ export default function CompanySettingsPage() {
                           </p>
                           <p className="text-xs text-gray-500 truncate">{m.email}</p>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                           <span className="hidden sm:inline text-xs text-gray-400">
                             {roleLabel(m.role)}
                           </span>
@@ -637,6 +702,14 @@ export default function CompanySettingsPage() {
                               </SelectItem>
                             </SelectContent>
                           </Select>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleResetPassword(m)}
+                            title="パスワードを設定/再設定"
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"

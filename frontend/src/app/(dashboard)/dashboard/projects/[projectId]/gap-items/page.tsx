@@ -34,10 +34,15 @@ import {
   Filter,
   GitBranch,
   ExternalLink,
+  BarChart3,
+  ClipboardList,
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { AnalysisTab } from './_components/analysis-tab';
+import { LedgerTab } from './_components/ledger-tab';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -326,7 +331,7 @@ export default function GapItemsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -345,7 +350,7 @@ export default function GapItemsPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <HowToPanel
             open={howToOpen}
             onOpenChange={setHowToOpen}
@@ -370,6 +375,33 @@ export default function GapItemsPage() {
         </div>
       </div>
 
+      {/* タブ: GAP一覧（既定） / 分析 / 課題一覧・対応表 */}
+      <Tabs defaultValue="list" className="space-y-4">
+        <TabsList className="bg-gray-100 border border-gray-200">
+          <TabsTrigger
+            value="list"
+            className="data-[state=active]:bg-white data-[state=active]:text-gray-900"
+          >
+            <GitCompareArrows className="h-4 w-4 mr-1.5" />
+            GAP一覧
+          </TabsTrigger>
+          <TabsTrigger
+            value="analysis"
+            className="data-[state=active]:bg-white data-[state=active]:text-gray-900"
+          >
+            <BarChart3 className="h-4 w-4 mr-1.5" />
+            分析
+          </TabsTrigger>
+          <TabsTrigger
+            value="ledger"
+            className="data-[state=active]:bg-white data-[state=active]:text-gray-900"
+          >
+            <ClipboardList className="h-4 w-4 mr-1.5" />
+            課題一覧 / 対応表
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-6">
       {/* フィルタ + 集計 */}
       <Card className="bg-white border-gray-200">
         <CardContent className="p-4">
@@ -378,10 +410,10 @@ export default function GapItemsPage() {
               <Filter className="h-4 w-4" />
               フィルタ
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
               <Label className="text-gray-700 text-sm">優先度</Label>
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="w-[140px] bg-white border-gray-300">
+                <SelectTrigger className="w-full sm:w-[140px] bg-white border-gray-300">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white">
@@ -392,10 +424,10 @@ export default function GapItemsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
               <Label className="text-gray-700 text-sm">状態</Label>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[140px] bg-white border-gray-300">
+                <SelectTrigger className="w-full sm:w-[140px] bg-white border-gray-300">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-white">
@@ -666,10 +698,22 @@ export default function GapItemsPage() {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
+
+        {/* 分析タブ: bunseki 公式を実装したミニツール群 */}
+        <TabsContent value="analysis">
+          <AnalysisTab projectId={projectId} />
+        </TabsContent>
+
+        {/* 課題一覧 / 対応表タブ: 既存GAP itemsの台帳＋完備チェック＋優先度スコア＋TOBE3段階 */}
+        <TabsContent value="ledger">
+          <LedgerTab projectId={projectId} items={items} loading={loading} />
+        </TabsContent>
+      </Tabs>
 
       {/* 作成ダイアログ */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="bg-white border-gray-200 max-w-2xl">
+        <DialogContent className="bg-white border-gray-200 max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-gray-900 flex items-center gap-2">
               <GitCompareArrows className="h-5 w-5 text-blue-600" />
@@ -732,7 +776,7 @@ export default function GapItemsPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-gray-700">優先度</Label>
                 <Select

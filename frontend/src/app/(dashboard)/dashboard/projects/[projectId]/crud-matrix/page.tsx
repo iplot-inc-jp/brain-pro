@@ -502,7 +502,7 @@ export default function CrudMatrixPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -860,7 +860,7 @@ export default function CrudMatrixPage() {
                     return (
                       <Card key={t.id} className="bg-white border-gray-200 overflow-hidden">
                         <CardContent className="p-0">
-                          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
                             <Link href={`/dashboard/projects/${projectId}/catalog/${t.id}`} className="font-semibold text-gray-900 hover:text-blue-600 hover:underline">
                               {t.displayName || t.name}
                             </Link>
@@ -871,7 +871,7 @@ export default function CrudMatrixPage() {
                                 onChange={(ev) => setNewStatus((prev) => ({ ...prev, [t.id]: ev.target.value }))}
                                 onKeyDown={(ev) => { if (ev.key === 'Enter') addStatus(t.id); }}
                                 placeholder="新ステータス（例: 申請中）"
-                                className="border border-gray-200 rounded px-2 py-1 text-xs w-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                className="border border-gray-200 rounded px-2 py-1 text-xs w-full sm:w-40 focus:outline-none focus:ring-1 focus:ring-blue-400"
                               />
                               <Button size="sm" variant="outline" onClick={() => addStatus(t.id)} disabled={!(newStatus[t.id] || '').trim()}>
                                 <Plus className="w-3.5 h-3.5 mr-1" />追加

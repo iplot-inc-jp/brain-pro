@@ -16,6 +16,8 @@ import {
   Activity,
   TrendingUp,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
 import { HowToPanel } from '@/components/ui/how-to-panel'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
@@ -114,59 +116,56 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-8 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
-            ダッシュボード
-            <HelpTooltip text="プロジェクト単位で、データカタログ・業務フロー・ロール・フェーズ（Ph.0〜7）をまとめて管理します。" />
-          </h1>
-          <p className="text-muted-foreground mt-1">プロジェクトを選択して作業を開始</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <HowToPanel
-            open={howToOpen}
-            onOpenChange={setHowToOpen}
-            steps={[
-              'まず「新規プロジェクト」からプロジェクトを作成します（または既存プロジェクトを選択）。',
-              'プロジェクトを開いたら、ロール（人・システム）を登録します。',
-              '業務フローを BPMN スタイルで描き、現状（ASIS）とあるべき姿（TOBE）を可視化します。',
-              'データカタログ（テーブル・カラム）を整備し、業務フローと紐付けます。',
-            ]}
-            shortcuts={[
-              { keys: '⌘/Ctrl+Enter', desc: '新規プロジェクト画面へ' },
-              { keys: 'n', desc: '新規プロジェクト画面へ' },
-              { keys: '?', desc: 'この操作方法を開く' },
-            ]}
-          />
-          <Link href="/dashboard/projects">
-            <button className="btn-glow flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              新規プロジェクト
-            </button>
-          </Link>
-        </div>
-      </div>
+    <div className="space-y-5 animate-fade-in">
+      <PageHeader
+        title="ダッシュボード"
+        description="プロジェクトを選択して作業を開始"
+        help="プロジェクト単位で、データカタログ・業務フロー・ロール・フェーズ（Ph.0〜7）をまとめて管理します。"
+        actions={
+          <>
+            <HowToPanel
+              open={howToOpen}
+              onOpenChange={setHowToOpen}
+              steps={[
+                'まず「新規プロジェクト」からプロジェクトを作成します（または既存プロジェクトを選択）。',
+                'プロジェクトを開いたら、ロール（人・システム）を登録します。',
+                '業務フローを BPMN スタイルで描き、現状（ASIS）とあるべき姿（TOBE）を可視化します。',
+                'データカタログ（テーブル・カラム）を整備し、業務フローと紐付けます。',
+              ]}
+              shortcuts={[
+                { keys: '⌘/Ctrl+Enter', desc: '新規プロジェクト画面へ' },
+                { keys: 'n', desc: '新規プロジェクト画面へ' },
+                { keys: '?', desc: 'この操作方法を開く' },
+              ]}
+            />
+            <Link href="/dashboard/projects">
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                新規プロジェクト
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
       {/* Empty state */}
       {projects.length === 0 ? (
-        <div className="blueprint-card p-12">
+        <div className="blueprint-card p-8">
           <div className="flex flex-col items-center text-center">
-            <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 glow-cyan">
-              <Zap className="h-10 w-10 text-primary" />
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
+              <Zap className="h-8 w-8 text-primary" />
             </div>
-            <h2 className="text-2xl font-bold text-foreground mb-3">
-              DataFlowへようこそ！
+            <h2 className="text-xl font-bold text-foreground mb-2">
+              ai-data-flow へようこそ
             </h2>
-            <p className="text-muted-foreground mb-8 max-w-md">
+            <p className="text-muted-foreground mb-6 max-w-md">
               まずはプロジェクトを作成しましょう。プロジェクト内でデータカタログ、業務フロー、ロールを管理できます。
             </p>
             <Link href="/dashboard/projects">
-              <button className="btn-glow flex items-center gap-2 text-lg px-8 py-4">
-                <FolderOpen className="h-5 w-5" />
+              <Button size="lg">
+                <FolderOpen className="h-5 w-5 mr-2" />
                 プロジェクトを作成
-              </button>
+              </Button>
             </Link>
           </div>
         </div>

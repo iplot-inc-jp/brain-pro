@@ -22,9 +22,21 @@ import {
   Users,
   Wand2,
   AlertCircle,
+  GitBranch,
+  ClipboardList,
+  Grid3x3,
+  MousePointerClick,
 } from 'lucide-react';
-import { SwimlaneCanvas } from '@/components/flow-editor/SwimlaneCanvas';
-import type { FlowData, Role } from '@/components/flow-editor/flow-types';
+import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
+import { RecordSheetTable } from '@/components/records/record-sheet-table';
+import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
+import type { RecordTemplate } from '@/lib/record-templates';
+import type {
+  FlowData,
+  FlowLinkDirection,
+  FlowSummary,
+  Role,
+} from '@/components/flow-editor/flow-types';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
@@ -41,14 +53,35 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// 現状把握「業務定義シート」のレンズ（目的/担当/関係者/INPUT/トリガー/DO/OUTPUT/頻度/システム）。
+// このフロー専用に1ステップ=1行で属性化する（RecordSheet にフローごとスコープ保存）。
+const FLOW_DEFINITION_COLUMNS: RecordTemplate['columns'] = [
+  { key: 'gyomuName', label: '業務名・ステップ' },
+  { key: 'purpose', label: '目的（なぜ必要か）' },
+  { key: 'owner', label: '担当者（主担当）' },
+  { key: 'stakeholders', label: '関係者' },
+  { key: 'input', label: 'INPUT（何を受け取るか）' },
+  { key: 'trigger', label: 'トリガー（いつ始まるか）' },
+  { key: 'do', label: 'DO（何をするか）' },
+  { key: 'output', label: 'OUTPUT（何を渡すか）' },
+  { key: 'frequency', label: '頻度' },
+  { key: 'system', label: '使用システム' },
+];
+
+type FlowTab = 'flow' | 'definition' | 'cruoa';
+
 export default function ProjectFlowDetailPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.projectId as string;
   const flowId = params.flowId as string;
 
+  // フロー図 / 業務定義 / 情報の地図(CRUOA) のタブ
+  const [activeTab, setActiveTab] = useState<FlowTab>('flow');
+
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -127,6 +160,19 @@ export default function ProjectFlowDetailPage() {
     }
   }, [flowData, getHeaders]);
 
+  // プロジェクトの他フロー一覧（連携先フローピッカー用）
+  const fetchOtherFlows = useCallback(async () => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, { headers });
+      if (!res.ok) return;
+      const data = (await res.json()) as FlowSummary[];
+      setOtherFlows(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch project flows:', err);
+    }
+  }, [projectId, getHeaders]);
+
   // 初期読み込み
   useEffect(() => {
     if (flowId) {
@@ -134,6 +180,10 @@ export default function ProjectFlowDetailPage() {
       setFlowHistory([flowId]);
     }
   }, [flowId, fetchFlowData]);
+
+  useEffect(() => {
+    if (projectId) fetchOtherFlows();
+  }, [projectId, fetchOtherFlows]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -375,6 +425,97 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders]
   );
 
+  // ノードのダブルクリック → 詳細（子）フローへドリルダウン
+  // childFlowId があればそのまま、無ければ child-flow を作成してから router.push で遷移
+  const handleNodeDrillDown = useCallback(
+    async (nodeId: string) => {
+      const node = flowData?.nodes.find((n) => n.id === nodeId);
+      if (node?.childFlowId) {
+        router.push(`/dashboard/projects/${projectId}/flows/${node.childFlowId}`);
+        return;
+      }
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/nodes/${nodeId}/child-flow`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) throw new Error('Failed to create child flow');
+        const data = await res.json();
+        const childId = data?.childFlow?.id;
+        if (childId) {
+          router.push(`/dashboard/projects/${projectId}/flows/${childId}`);
+        }
+      } catch (err) {
+        console.error('Failed to open child flow:', err);
+      }
+    },
+    [flowData, projectId, router, getHeaders]
+  );
+
+  // ===========================================
+  // クロスフロー入出力リンク（ノード単位）
+  // ===========================================
+  const handleFetchNodeLinks = useCallback(
+    async (nodeId: string): Promise<NodeLinksResult> => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/nodes/${nodeId}/links`, { headers });
+      if (!res.ok) throw new Error('Failed to fetch node links');
+      const data = await res.json();
+      return {
+        nodeId: data.nodeId ?? nodeId,
+        outgoing: Array.isArray(data.outgoing) ? data.outgoing : [],
+        incoming: Array.isArray(data.incoming) ? data.incoming : [],
+      };
+    },
+    [getHeaders]
+  );
+
+  const handleCreateNodeLink = useCallback(
+    async (
+      nodeId: string,
+      input: { direction: FlowLinkDirection; targetFlowId: string; targetNodeId?: string; label?: string }
+    ) => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/nodes/${nodeId}/links`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new Error('Failed to create node link');
+      // ノードの links 表示（連携バッジ）を反映するため再取得
+      if (flowData) fetchFlowData(flowData.id);
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  const handleDeleteNodeLink = useCallback(
+    async (linkId: string) => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/node-links/${linkId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!res.ok) throw new Error('Failed to delete node link');
+      if (flowData) fetchFlowData(flowData.id);
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // 連携先フローのノード一覧（連携先ノード選択用）
+  const handleFetchFlowNodes = useCallback(
+    async (targetFlowId: string): Promise<Array<{ id: string; label: string }>> => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/${targetFlowId}`, { headers });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      return nodes.map((n: { id: string; label: string }) => ({ id: n.id, label: n.label }));
+    },
+    [getHeaders]
+  );
+
   // ===========================================
   // 表示ロール選択（フローごと localStorage 永続化）
   // ===========================================
@@ -577,6 +718,20 @@ export default function ProjectFlowDetailPage() {
     }
   }, [showMermaid, mermaidCode, renderMermaid]);
 
+  // 業務定義シート（このフロー専用に templateKey をスコープ）
+  const flowDefinitionTemplate = useMemo<RecordTemplate>(
+    () => ({
+      key: `flow-definition:${flowId}`,
+      label: '業務定義シート',
+      group: '現状把握',
+      course: 'asis-gyomu-flow',
+      description:
+        '1ステップ=1行で、目的・担当・関係者・INPUT・トリガー・DO・OUTPUT・頻度・使用システムを整理します（このフロー専用に保存）。',
+      columns: FLOW_DEFINITION_COLUMNS,
+    }),
+    [flowId]
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[600px]">
@@ -624,7 +779,7 @@ export default function ProjectFlowDetailPage() {
   return (
     <div className="space-y-4 h-full">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Link href={`/dashboard/projects/${projectId}/flows`}>
             <Button variant="ghost" className="text-gray-600">
@@ -632,12 +787,21 @@ export default function ProjectFlowDetailPage() {
               フロー一覧
             </Button>
           </Link>
+          {/* 詳細フロー（parentId あり）なら親フローへ戻れる */}
+          {flowData.parentId && (
+            <Link href={`/dashboard/projects/${projectId}/flows/${flowData.parentId}`}>
+              <Button variant="outline" className="text-gray-600">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                親フローへ戻る
+              </Button>
+            </Link>
+          )}
           <span className="hidden items-center gap-1.5 text-sm font-medium text-gray-700 sm:inline-flex">
-            業務フロー編集
-            <HelpTooltip text="役割（ロール）ごとのスイムレーン上で処理を並べ、矢印でつなぐ図です。ノードのドラッグでロール移動・並び替えができ、ダブルクリックで子フローに潜れます。" />
+            {flowData.parentId ? '詳細フロー編集' : '業務フロー編集'}
+            <HelpTooltip text="役割（ロール）ごとのスイムレーン上で処理を並べ、矢印でつなぐ図です。ノードのドラッグでロール移動・並び替えができ、ダブルクリックで子フロー（詳細フロー）に潜れます。" />
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* 操作ガイド */}
           <div ref={howToRef}>
             <HowToPanel
@@ -656,6 +820,9 @@ export default function ProjectFlowDetailPage() {
               ]}
             />
           </div>
+          {/* フロー図タブのときだけ表示するツールバー */}
+          {activeTab === 'flow' && (
+          <>
           {/* ロール表示選択 */}
           <div className="relative" ref={rolePanelRef}>
             <Button
@@ -672,7 +839,7 @@ export default function ProjectFlowDetailPage() {
               )}
             </Button>
             {showRolePanel && (
-              <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
+              <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-xs sm:w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3">
                 <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-gray-700">
                   表示するロール
                   <HelpTooltip text="ロールはスイムレーン（担当者・部署）です。チェックを外すと、そのレーンを図から非表示にできます（割り当て済みノードは再割当を求められます）。" />
@@ -733,14 +900,49 @@ export default function ProjectFlowDetailPage() {
             <FileCode className="w-4 h-4 mr-2" />
             Mermaid出力
           </Button>
+          </>
+          )}
         </div>
       </div>
 
-      {/* フロービューアー */}
-      <div className="h-[calc(100vh-200px)] border border-gray-200 rounded-lg overflow-hidden">
+      {/* 現状把握タブ（フロー図 / 業務定義 / 情報の地図 CRUOA） */}
+      <div className="flex flex-wrap gap-1 border-b border-gray-200">
+        {([
+          { key: 'flow', label: 'フロー図', icon: GitBranch },
+          { key: 'definition', label: '業務定義', icon: ClipboardList },
+          { key: 'cruoa', label: '情報の地図(CRUOA)', icon: Grid3x3 },
+        ] as const).map((t) => {
+          const Icon = t.icon;
+          const isActive = activeTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'border-blue-600 text-blue-700 bg-blue-50'
+                  : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* フロービューアー（フロー図タブ） */}
+      <div
+        className={`h-[calc(100vh-240px)] border border-gray-200 rounded-lg overflow-hidden ${
+          activeTab === 'flow' ? '' : 'hidden'
+        }`}
+      >
         <SwimlaneCanvas
           flowData={flowData}
           roles={visibleRoles}
+          projectId={projectId}
+          otherFlows={otherFlows}
           onBack={flowHistory.length > 1 ? handleBack : undefined}
           onUpdateFlow={handleFlowUpdate}
           onCreateNode={handleNodeCreate}
@@ -752,9 +954,52 @@ export default function ProjectFlowDetailPage() {
           onUpdateNode={handleNodeUpdate}
           onCreateChildFlow={handleChildFlowCreate}
           onOpenChildFlow={handleNodeDoubleClick}
+          onNodeDoubleClick={handleNodeDrillDown}
+          onFetchNodeLinks={handleFetchNodeLinks}
+          onCreateNodeLink={handleCreateNodeLink}
+          onDeleteNodeLink={handleDeleteNodeLink}
+          onFetchFlowNodes={handleFetchFlowNodes}
           onAddRole={() => router.push(`/dashboard/projects/${projectId}/roles`)}
         />
       </div>
+
+      {/* 業務定義タブ（業務定義シートのレンズをこのフロー専用に） */}
+      {activeTab === 'definition' && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" />
+            <p className="text-sm text-blue-800">
+              {flowDefinitionTemplate.description}
+              <br />
+              <span className="inline-flex items-center gap-1 text-blue-700">
+                <MousePointerClick className="h-4 w-4" />
+                個別定義シート（1業務の詳細・判断基準・例外処理）は、
+                <strong>フロー図のノードをダブルクリック</strong>
+                すると開ける詳細フロー（子フロー）に対応します。
+              </span>
+            </p>
+          </div>
+          <RecordSheetTable projectId={projectId} template={flowDefinitionTemplate} />
+        </div>
+      )}
+
+      {/* 情報の地図(CRUOA)タブ */}
+      {activeTab === 'cruoa' && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50 p-3">
+            <Grid3x3 className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
+            <p className="text-sm text-violet-800">
+              情報がどう流れるかを可視化します。行=情報項目、列=ロール、各セルに
+              C=作成 / R=参照 / U=更新 / O=出力 / A=承認 を付与し、二重管理（複数ロールが C/U）・属人化（作成者1名）を発見します。
+            </p>
+          </div>
+          <CruoaMatrix
+            projectId={projectId}
+            templateKey={`info-map:${flowId}`}
+            roles={roles}
+          />
+        </div>
+      )}
 
       {/* Mermaidモーダル（プレビュー機能付き） */}
       {showMermaid && mermaidCode && (
@@ -766,7 +1011,7 @@ export default function ProjectFlowDetailPage() {
                 ✕
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-4 p-4 overflow-auto max-h-[65vh]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 overflow-auto max-h-[65vh]">
               {/* コード */}
               <div>
                 <div className="text-sm font-medium text-gray-700 mb-2">コード</div>
@@ -791,7 +1036,7 @@ export default function ProjectFlowDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 p-4 border-t border-gray-200">
+            <div className="flex flex-wrap justify-end gap-2 p-4 border-t border-gray-200">
               <Button
                 variant="outline"
                 onClick={() => {

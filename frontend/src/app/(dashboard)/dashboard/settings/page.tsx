@@ -196,7 +196,7 @@ export default function AccountSettingsPage() {
       )}
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="bg-gray-100 border border-gray-200">
+        <TabsList className="bg-gray-100 border border-gray-200 max-w-full overflow-x-auto">
           <TabsTrigger value="profile" className="data-[state=active]:bg-white data-[state=active]:text-gray-900">
             <User className="h-4 w-4 mr-2" />
             プロフィール
@@ -348,7 +348,7 @@ export default function AccountSettingsPage() {
                     </button>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={handleSaveAiApiKey}
                       disabled={!anthropicApiKey || aiKeyLoading}
@@ -428,22 +428,22 @@ export default function AccountSettingsPage() {
                 <p className="text-sm text-gray-600 mb-4">
                   APIキーを使用して、外部ツールやAIエージェントからDataFlowのデータにアクセスできます。
                 </p>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
                     value={apiKey}
                     readOnly
                     className="bg-white border-gray-300 text-gray-700 font-mono"
                   />
-                  <Button variant="outline" onClick={copyApiKey} className="border-gray-300 text-gray-700">
+                  <Button variant="outline" onClick={copyApiKey} className="border-gray-300 text-gray-700 shrink-0">
                     コピー
                   </Button>
                 </div>
               </div>
-              <div className="flex justify-between items-center">
+              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
                 <p className="text-sm text-gray-500">
                   このキーを再生成すると、既存の連携が無効になります
                 </p>
-                <Button variant="outline" className="border-gray-300 text-gray-700">
+                <Button variant="outline" className="border-gray-300 text-gray-700 shrink-0">
                   キーを再生成
                 </Button>
               </div>

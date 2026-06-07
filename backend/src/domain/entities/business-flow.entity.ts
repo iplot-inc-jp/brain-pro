@@ -12,6 +12,7 @@ export class BusinessFlow extends BaseEntity {
   private _kind: FlowKindValue;
   private _confidence: FlowConfidenceValue;
   private _subProjectId: string | null;
+  private _folderId: string | null;
   private _parentId: string | null;
   private _depth: number;
 
@@ -24,6 +25,7 @@ export class BusinessFlow extends BaseEntity {
     kind?: FlowKindValue;
     confidence?: FlowConfidenceValue;
     subProjectId?: string | null;
+    folderId?: string | null;
     parentId?: string | null;
     depth?: number;
     createdAt?: Date;
@@ -38,6 +40,7 @@ export class BusinessFlow extends BaseEntity {
     this._kind = props.kind ?? 'ASIS';
     this._confidence = props.confidence ?? 'HYPOTHESIS';
     this._subProjectId = props.subProjectId ?? null;
+    this._folderId = props.folderId ?? null;
     this._parentId = props.parentId ?? null;
     this._depth = props.depth ?? 0;
   }
@@ -68,6 +71,10 @@ export class BusinessFlow extends BaseEntity {
 
   get subProjectId(): string | null {
     return this._subProjectId;
+  }
+
+  get folderId(): string | null {
+    return this._folderId;
   }
 
   get parentId(): string | null {
@@ -118,6 +125,10 @@ export class BusinessFlow extends BaseEntity {
     this._subProjectId = subProjectId;
   }
 
+  setFolder(folderId: string | null): void {
+    this._folderId = folderId;
+  }
+
   /** Ph.1 仮説 → Ph.2 確定 への昇格 */
   promoteToConfirmed(): void {
     this._confidence = 'CONFIRMED';
@@ -131,6 +142,7 @@ export class BusinessFlow extends BaseEntity {
     kind?: FlowKindValue;
     confidence?: FlowConfidenceValue;
     subProjectId?: string | null;
+    folderId?: string | null;
     parentId?: string | null;
     depth?: number;
   }): BusinessFlow {

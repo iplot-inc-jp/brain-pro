@@ -12,6 +12,22 @@ export type Role = {
   laneHeight?: number;
 };
 
+/** ノード単位のクロスフロー入出力リンクの向き。 */
+export type FlowLinkDirection = 'INPUT' | 'OUTPUT';
+
+/** ノードに紐づくクロスフロー入出力リンク。 */
+export type FlowNodeLink = {
+  id: string;
+  nodeId: string;
+  direction: FlowLinkDirection;
+  targetFlowId: string;
+  targetFlowName?: string | null;
+  targetNodeId?: string | null;
+  targetNodeLabel?: string | null;
+  label?: string | null;
+  order?: number;
+};
+
 export type FlowDataNode = {
   id: string;
   type: string;
@@ -25,8 +41,19 @@ export type FlowDataNode = {
   hasChildFlow?: boolean;
   childFlowId?: string;
   childFlow?: { id: string; name: string };
+  /** このノードを起点とするクロスフロー入出力リンク（GET フロー詳細に含まれる）。 */
+  links?: FlowNodeLink[];
   /** ノードに紐づく補足情報（処理時間・INPUT・OUTPUT・補足など）。 */
   metadata?: Record<string, unknown>;
+};
+
+/** 連携先フロー選択用の軽量フロー情報（project/:id/all のレスポンス）。 */
+export type FlowSummary = {
+  id: string;
+  name: string;
+  parentId?: string | null;
+  depth?: number;
+  kind?: 'ASIS' | 'TOBE';
 };
 
 export type FlowDataEdge = {

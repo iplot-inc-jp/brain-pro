@@ -8,6 +8,7 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { IsString, IsOptional, IsIn } from 'class-validator';
@@ -21,7 +22,12 @@ import {
 } from '../dto';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
-import { EntityNotFoundError, ForbiddenError } from '../../domain';
+import {
+  EntityNotFoundError,
+  ForbiddenError,
+  PASSWORD_HASH_SERVICE,
+  PasswordHashService,
+} from '../../domain';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
 
 // ========== DTOs ==========
@@ -41,12 +47,29 @@ class AddMemberDto {
 
   @IsOptional()
   @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string; // 管理者が初期パスワードを付与（任意。無ければ招待＝未設定）
+
+  @IsOptional()
+  @IsString()
   role?: string; // '会社管理者' | '一般ユーザー' | MemberRole（OWNER/ADMIN/MEMBER/VIEWER）
 }
 
 class UpdateMemberDto {
+  @IsOptional()
   @IsString()
-  role: string;
+  role?: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string; // 管理者によるパスワード再設定（任意）
 }
 
 // 日本語ロール or MemberRole を受け取り、保存する MemberRole に正規化
@@ -70,6 +93,8 @@ export class OrganizationController {
     private readonly getOrganizationsUseCase: GetOrganizationsUseCase,
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
+    @Inject(PASSWORD_HASH_SERVICE)
+    private readonly passwordHashService: PasswordHashService,
   ) {}
 
   // 会社管理者（OWNER/ADMIN）または全体管理者か検証
@@ -225,12 +250,41 @@ export class OrganizationController {
       throw new EntityNotFoundError('Organization', id);
     }
 
-    const target = await this.prisma.user.findUnique({
-      where: { email: dto.email.toLowerCase() },
-      select: { id: true, email: true, name: true },
+    const email = dto.email.trim().toLowerCase();
+    const superList = (process.env.SUPER_ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    let target = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, name: true, password: true },
     });
+
     if (!target) {
-      throw new EntityNotFoundError('User', dto.email);
+      // 未登録メール：管理者がパスワードを付与すれば即ログイン可、無ければ招待（password空）
+      const hashed = dto.password
+        ? await this.passwordHashService.hash(dto.password)
+        : '';
+      target = await this.prisma.user.create({
+        data: {
+          email,
+          password: hashed,
+          name: dto.name?.trim() || email.split('@')[0],
+          isSuperAdmin: superList.includes(email),
+        },
+        select: { id: true, email: true, name: true, password: true },
+      });
+    } else if (dto.password || dto.name) {
+      // 既存（招待中含む）：管理者がパスワード/氏名を設定
+      const data: { password?: string; name?: string } = {};
+      if (dto.password) data.password = await this.passwordHashService.hash(dto.password);
+      if (dto.name) data.name = dto.name.trim();
+      target = await this.prisma.user.update({
+        where: { id: target.id },
+        data,
+        select: { id: true, email: true, name: true, password: true },
+      });
     }
 
     const role = normalizeRole(dto.role);
@@ -248,11 +302,12 @@ export class OrganizationController {
       email: target.email,
       name: target.name,
       role: member.role,
+      invited: !target.password,
     };
   }
 
   @Put(':id/members/:userId')
-  @ApiOperation({ summary: '会社メンバーのロール変更' })
+  @ApiOperation({ summary: '会社メンバーのロール/氏名/パスワード変更' })
   async updateMember(
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
@@ -269,17 +324,38 @@ export class OrganizationController {
       throw new EntityNotFoundError('OrganizationMember', userId);
     }
 
-    const role = normalizeRole(dto.role);
-    const updated = await this.prisma.organizationMember.update({
-      where: { organizationId_userId: { organizationId: id, userId } },
-      data: { role },
-    });
+    // ロール変更（指定時のみ）
+    let role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' = existing.role;
+    if (dto.role !== undefined) {
+      role = normalizeRole(dto.role);
+      await this.prisma.organizationMember.update({
+        where: { organizationId_userId: { organizationId: id, userId } },
+        data: { role },
+      });
+    }
+
+    // 管理者によるユーザーの氏名/パスワード編集（指定時のみ）
+    const userData: { password?: string; name?: string | null } = {};
+    if (dto.password) {
+      userData.password = await this.passwordHashService.hash(dto.password);
+    }
+    if (dto.name !== undefined) {
+      userData.name = dto.name.trim() || null;
+    }
+    let updatedUser = existing.user;
+    if (Object.keys(userData).length > 0) {
+      updatedUser = await this.prisma.user.update({
+        where: { id: userId },
+        data: userData,
+        select: { email: true, name: true },
+      });
+    }
 
     return {
       userId,
-      email: existing.user.email,
-      name: existing.user.name,
-      role: updated.role,
+      email: updatedUser.email,
+      name: updatedUser.name,
+      role,
     };
   }
 

@@ -171,7 +171,7 @@ export default function CompaniesPage() {
   return (
     <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
             会社管理
@@ -179,7 +179,7 @@ export default function CompaniesPage() {
           </h1>
           <p className="text-gray-500 mt-1">会社（組織）の作成・管理を行います</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <HowToPanel
             open={howToOpen}
             onOpenChange={setHowToOpen}

@@ -158,7 +158,7 @@ export default function ProjectRolesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Link href={`/dashboard/projects/${projectId}`}>
             <Button variant="ghost" size="sm" className="text-gray-600">
@@ -174,7 +174,7 @@ export default function ProjectRolesPage() {
             <p className="text-gray-500 mt-1">業務を担当する主体（人・システム）を定義</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span id="howto-trigger-roles" className="contents">
             <HowToPanel
               steps={[

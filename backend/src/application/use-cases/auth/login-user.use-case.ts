@@ -57,6 +57,13 @@ export class LoginUserUseCase {
       throw new UnauthorizedError('Invalid credentials');
     }
 
+    // 招待中（パスワード未設定）アカウントはログイン不可
+    if (!user.password) {
+      throw new UnauthorizedError(
+        '招待中のアカウントです。サインアップ（登録）でパスワードを設定してください',
+      );
+    }
+
     // 2. パスワード検証
     const isValid = await this.passwordHashService.compare(
       input.password,

@@ -208,7 +208,7 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
             プロジェクト選択
@@ -216,7 +216,7 @@ export default function ProjectsPage() {
           </h1>
           <p className="text-gray-500 mt-1">作業するプロジェクトを選択してください</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <HowToPanel
             open={howToOpen}
             onOpenChange={setHowToOpen}
@@ -302,7 +302,7 @@ export default function ProjectsPage() {
               if (org) setSelectedOrg(org);
             }}
           >
-            <SelectTrigger className="w-[300px] bg-white border-gray-300">
+            <SelectTrigger className="w-full sm:w-[300px] bg-white border-gray-300">
               <SelectValue placeholder="組織を選択" />
             </SelectTrigger>
             <SelectContent className="bg-white border-gray-200">
