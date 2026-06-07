@@ -29,6 +29,7 @@ import {
   EdgeLabelRenderer,
   getSmoothStepPath,
   useReactFlow,
+  useNodesState,
   ConnectionMode,
   type Node,
   type Edge,
@@ -481,6 +482,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return [...laneNodes, ...contentNodes];
   }, [layout, flowData.nodes, orientation, isVertical]);
 
+  // React Flow は制御モードでは onNodesChange が無いとドラッグで位置が動かない。
+  // 決定的レイアウト(rfNodes)を初期値にした内部 state を持ち、ドラッグ中の位置変更を
+  // 反映させる。レイアウトが再計算されたら(rfNodes が変わったら)正規位置へ同期し直す。
+  const [dragNodes, setDragNodes, onNodesChange] = useNodesState(rfNodes);
+  useEffect(() => {
+    setDragNodes(rfNodes);
+  }, [rfNodes, setDragNodes]);
+
   const rfEdges: Edge[] = useMemo(
     () =>
       flowData.edges.map((e) => ({
@@ -616,11 +625,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   return (
     <div ref={wrapperRef} className="relative w-full h-full bg-white">
       <ReactFlow
-        nodes={rfNodes}
+        nodes={dragNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onConnect={onConnect}
+        onNodesChange={onNodesChange}
         nodesDraggable
         nodesConnectable
         elementsSelectable
