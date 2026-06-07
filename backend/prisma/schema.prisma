@@ -239,8 +239,33 @@ model BusinessFlow {
   gapTobeItems        GapItem[]                @relation("GapTobeFlow")
   // 他フローのノードからこのフローへ向かう入出力リンク
   nodeLinkTargets     FlowNodeLink[]           @relation("NodeLinkTargetFlow")
+  definition          FlowDefinition?
 
   @@map("business_flows")
+}
+
+model FlowDefinition {
+  id                String   @id @default(uuid())
+  flowId            String   @unique @map("flow_id")
+  purpose           String?  @db.Text
+  owner             String?
+  stakeholders      String?  @db.Text
+  input             String?  @db.Text
+  inputDetail       String?  @db.Text @map("input_detail")
+  trigger           String?  @db.Text
+  doSteps           Json     @default("[]") @map("do_steps")
+  output            String?  @db.Text
+  nextProcess       String?  @db.Text @map("next_process")
+  exceptionHandling String?  @db.Text @map("exception_handling")
+  frequency         String?
+  system            String?
+  tacitNotes        String?  @db.Text @map("tacit_notes")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@map("flow_definitions")
 }
 
 // 業務ブロック（四角形・ひし形など）
