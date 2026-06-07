@@ -251,6 +251,22 @@ export default function GapItemsPage() {
   const asisFlowOptions = flows.filter((f) => f.kind === 'ASIS');
   const tobeFlowOptions = flows.filter((f) => f.kind === 'TOBE');
 
+  // 既存GAPで使われている gapDescription の重複なし候補（GAPセルのコンボボックス候補）
+  const gapDescriptionOptions = Array.from(
+    new Set(
+      items
+        .map((it) => it.gapDescription?.trim())
+        .filter((v): v is string => !!v),
+    ),
+  );
+
+  // ASISセル: 行の asisFlowId を既存ASISフローから選択して PUT 更新
+  const handleAsisFlowSelect = (item: GapItem, value: string) => {
+    const next = value === NONE ? null : value;
+    if ((item.asisFlowId ?? null) === next) return;
+    patchItem(item.id, { asisFlowId: next });
+  };
+
   // 対象業務フロー選択（フロー名を businessArea に入れる）
   const handleTargetFlowChange = (value: string) => {
     if (value === NONE) {
@@ -601,6 +617,12 @@ export default function GapItemsPage() {
         <Card className="bg-white border-gray-200 overflow-hidden">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
+              {/* GAPセルのコンボボックス候補（既存 gapDescription の重複なし） */}
+              <datalist id="gap-description-options">
+                {gapDescriptionOptions.map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-gray-600">
@@ -693,17 +715,24 @@ export default function GapItemsPage() {
                             </div>
                           )}
                         </td>
-                        {/* ASIS */}
+                        {/* ASIS: 既存ASISフローから選択 */}
                         <td className="px-3 py-2 align-top">
-                          <textarea
-                            defaultValue={item.asisDescription ?? ''}
-                            placeholder="現状（例: 受注処理に1件15分）"
-                            onBlur={(e) =>
-                              handleCellBlur(item, 'asisDescription', e.target.value)
-                            }
-                            rows={2}
-                            className="w-full resize-none bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 placeholder:text-gray-300"
-                          />
+                          <Select
+                            value={item.asisFlowId ?? NONE}
+                            onValueChange={(v) => handleAsisFlowSelect(item, v)}
+                          >
+                            <SelectTrigger className="h-8 bg-white border-gray-300 text-xs text-gray-700">
+                              <SelectValue placeholder="ASISフローを選択" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              <SelectItem value={NONE}>（未設定）</SelectItem>
+                              {asisFlowOptions.map((f) => (
+                                <SelectItem key={f.id} value={f.id}>
+                                  {f.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </td>
                         {/* TOBE */}
                         <td className="px-3 py-2 align-top">
@@ -717,16 +746,16 @@ export default function GapItemsPage() {
                             className="w-full resize-none bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 placeholder:text-gray-300"
                           />
                         </td>
-                        {/* GAP */}
+                        {/* GAP: 既存の値から選択 or 自由入力できるコンボボックス */}
                         <td className="px-3 py-2 align-top bg-amber-50/40">
-                          <textarea
+                          <input
                             defaultValue={item.gapDescription ?? ''}
                             placeholder="差分＝本当の課題（TOBE − ASIS）"
+                            list="gap-description-options"
                             onBlur={(e) =>
                               handleCellBlur(item, 'gapDescription', e.target.value)
                             }
-                            rows={2}
-                            className="w-full resize-none bg-transparent text-gray-900 outline-none focus:bg-white focus:ring-1 focus:ring-amber-400 rounded px-1 py-0.5 placeholder:text-gray-400"
+                            className="w-full bg-transparent text-gray-900 outline-none focus:bg-white focus:ring-1 focus:ring-amber-400 rounded px-1 py-1 placeholder:text-gray-400"
                           />
                         </td>
                         {/* 優先度 */}

@@ -15,6 +15,7 @@ export class BusinessFlow extends BaseEntity {
   private _folderId: string | null;
   private _parentId: string | null;
   private _depth: number;
+  private _laneHeights: Record<string, number>;
 
   constructor(props: {
     id: string;
@@ -28,6 +29,7 @@ export class BusinessFlow extends BaseEntity {
     folderId?: string | null;
     parentId?: string | null;
     depth?: number;
+    laneHeights?: Record<string, number> | null;
     createdAt?: Date;
     updatedAt?: Date;
   }) {
@@ -43,6 +45,7 @@ export class BusinessFlow extends BaseEntity {
     this._folderId = props.folderId ?? null;
     this._parentId = props.parentId ?? null;
     this._depth = props.depth ?? 0;
+    this._laneHeights = props.laneHeights ?? {};
   }
 
   get projectId(): string {
@@ -83,6 +86,11 @@ export class BusinessFlow extends BaseEntity {
 
   get depth(): number {
     return this._depth;
+  }
+
+  /** ロール別レーン高さの手動オーバーライド（{ [roleId]: height }）。 */
+  get laneHeights(): Record<string, number> {
+    return this._laneHeights;
   }
 
   get isRootFlow(): boolean {

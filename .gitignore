@@ -44,3 +44,6 @@ coverage/
 # Prisma
 backend/prisma/*.db
 backend/prisma/*.db-journal
+
+# superpowers brainstorm visual companion
+.superpowers/

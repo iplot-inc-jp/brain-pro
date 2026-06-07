@@ -223,6 +223,8 @@ model BusinessFlow {
   subProjectId String?       @map("sub_project_id")
   // フォルダによるグルーピング（任意）
   folderId    String?        @map("folder_id")
+  // スイムレーンのロール別レーン高さ（手動リサイズの永続化）。{ [roleId]: height } のマップ
+  laneHeights Json           @default("{}") @map("lane_heights")
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
