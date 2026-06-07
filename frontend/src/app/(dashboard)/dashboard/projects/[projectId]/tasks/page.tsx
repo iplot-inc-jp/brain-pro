@@ -27,6 +27,12 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from '@hello-pangea/dnd';
+import {
   Plus,
   Loader2,
   ListTodo,
@@ -36,6 +42,10 @@ import {
   GanttChartSquare,
   Search,
   X,
+  ListChecks,
+  Columns3,
+  User,
+  CalendarDays,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -52,6 +62,7 @@ import {
   type TaskPriority,
   type TaskDependency,
   type TaskRole,
+  type TaskTreeNode,
 } from '@/lib/tasks';
 
 type FormState = {
@@ -101,6 +112,9 @@ export default function TasksPage() {
   const [roles, setRoles] = useState<TaskRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // 表示モード（一覧 / ボード）
+  const [view, setView] = useState<'list' | 'board'>('list');
 
   // フィルタ
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -245,6 +259,21 @@ export default function TasksPage() {
       orderedNodes.filter((n) => visibleIds === null || visibleIds.has(n.id)),
     [orderedNodes, visibleIds]
   );
+
+  // ボード用：表示中タスク（フィルタ後）を状態ごとにグルーピング。
+  // サブタスクも含めフラットに、それぞれの状態カラムへ並べる。
+  const tasksByStatus = useMemo(() => {
+    const map: Record<TaskStatus, TaskTreeNode[]> = {
+      OPEN: [],
+      IN_PROGRESS: [],
+      RESOLVED: [],
+      CLOSED: [],
+    };
+    for (const node of rows) {
+      map[node.status]?.push(node);
+    }
+    return map;
+  }, [rows]);
 
   const hasActiveFilters =
     filterStatus !== 'ALL' ||
@@ -417,6 +446,39 @@ export default function TasksPage() {
     }
   };
 
+  // ボードでカードを別の状態カラムへドロップしたとき：状態を楽観的更新→失敗時はロールバック
+  const handleBoardDragEnd = async (result: DropResult) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (
+      destination.droppableId === source.droppableId &&
+      destination.index === source.index
+    ) {
+      return;
+    }
+    const newStatus = destination.droppableId as TaskStatus;
+    if (!TASK_STATUSES.includes(newStatus)) return;
+
+    const current = tasks.find((t) => t.id === draggableId);
+    if (!current || current.status === newStatus) return; // 同一カラム内の並べ替えはローカル状態のみ
+
+    const prevStatus = current.status;
+    setTasks((prev) =>
+      prev.map((t) => (t.id === draggableId ? { ...t, status: newStatus } : t))
+    );
+    try {
+      await tasksApi.update(draggableId, { status: newStatus });
+    } catch (err) {
+      console.error('Failed to update status (board):', err);
+      // ロールバック
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === draggableId ? { ...t, status: prevStatus } : t
+        )
+      );
+    }
+  };
+
   const togglePredecessor = (id: string) => {
     setForm((f) => ({
       ...f,
@@ -452,9 +514,39 @@ export default function TasksPage() {
                 '親タスクを選ぶとサブタスクとして WBS 番号（例 1.2.3）付きでインデント表示されます。',
                 '先行タスクを指定すると依存関係が登録され、ガント／WBS 画面に反映されます。',
                 '各行の状態バッジから直接ステータスを変更でき、鉛筆で編集・ゴミ箱で削除できます。',
+                '上部の「一覧／ボード」で表示を切り替えられます。ボードではカードを別の列にドラッグして状態を変更できます。',
                 '上部のフィルタ（状態・担当・マイルストーン・カテゴリ・キーワード）で絞り込めます。',
               ]}
             />
+            {/* 表示切替：一覧 / ボード */}
+            <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
+              <button
+                type="button"
+                onClick={() => setView('list')}
+                className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  view === 'list'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                aria-pressed={view === 'list'}
+              >
+                <ListChecks className="h-4 w-4" />
+                一覧
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('board')}
+                className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                  view === 'board'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                aria-pressed={view === 'board'}
+              >
+                <Columns3 className="h-4 w-4" />
+                ボード
+              </button>
+            </div>
             <Link href="./tasks/gantt">
               <Button variant="outline" className="gap-1.5">
                 <GanttChartSquare className="h-4 w-4" />
@@ -549,7 +641,7 @@ export default function TasksPage() {
         </CardContent>
       </Card>
 
-      {/* 一覧 */}
+      {/* 一覧 / ボード */}
       {tasks.length === 0 ? (
         <Card className="bg-white border-gray-200">
           <CardContent className="flex flex-col items-center justify-center py-12">
@@ -569,6 +661,13 @@ export default function TasksPage() {
             </Button>
           </CardContent>
         </Card>
+      ) : view === 'board' ? (
+        <KanbanBoard
+          tasksByStatus={tasksByStatus}
+          wbs={wbs}
+          roleNameById={roleNameById}
+          onDragEnd={handleBoardDragEnd}
+        />
       ) : (
         <Card className="bg-white border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
@@ -1104,5 +1203,174 @@ function FilterSelect({
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KANBAN ボード
+// ---------------------------------------------------------------------------
+
+function KanbanBoard({
+  tasksByStatus,
+  wbs,
+  roleNameById,
+  onDragEnd,
+}: {
+  tasksByStatus: Record<TaskStatus, TaskTreeNode[]>;
+  wbs: Map<string, string>;
+  roleNameById: Map<string, string>;
+  onDragEnd: (result: DropResult) => void;
+}) {
+  return (
+    <DragDropContext onDragEnd={onDragEnd}>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {TASK_STATUSES.map((status) => {
+          const meta = taskStatusLabels[status];
+          const cards = tasksByStatus[status] ?? [];
+          return (
+            <Droppable droppableId={status} key={status}>
+              {(provided, snapshot) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                  className={`flex min-h-[160px] flex-col rounded-lg border bg-gray-50/60 transition-colors ${
+                    snapshot.isDraggingOver
+                      ? 'border-blue-300 bg-blue-50/60'
+                      : 'border-gray-200'
+                  }`}
+                >
+                  {/* カラムヘッダ */}
+                  <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs font-medium ${meta.color}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                      {meta.label}
+                    </span>
+                    <span className="text-xs font-medium text-gray-400 tabular-nums">
+                      {cards.length}
+                    </span>
+                  </div>
+
+                  {/* カード一覧 */}
+                  <div className="flex-1 space-y-2 p-2">
+                    {cards.length === 0 && !snapshot.isDraggingOver && (
+                      <p className="px-1 py-6 text-center text-xs text-gray-300">
+                        タスクなし
+                      </p>
+                    )}
+                    {cards.map((node, index) => (
+                      <KanbanCard
+                        key={node.id}
+                        node={node}
+                        index={index}
+                        wbsNo={wbs.get(node.id)}
+                        roleNameById={roleNameById}
+                      />
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                </div>
+              )}
+            </Droppable>
+          );
+        })}
+      </div>
+    </DragDropContext>
+  );
+}
+
+function KanbanCard({
+  node,
+  index,
+  wbsNo,
+  roleNameById,
+}: {
+  node: TaskTreeNode;
+  index: number;
+  wbsNo?: string;
+  roleNameById: Map<string, string>;
+}) {
+  const priority = taskPriorityLabels[node.priority];
+  const assignee =
+    node.assigneeName ||
+    (node.assigneeRoleId ? roleNameById.get(node.assigneeRoleId) : '') ||
+    '';
+  const progress = clampProgress(node.progress);
+
+  return (
+    <Draggable draggableId={node.id} index={index}>
+      {(provided, snapshot) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          style={provided.draggableProps.style as React.CSSProperties}
+          className={`rounded-md border bg-white p-2.5 shadow-sm transition-shadow ${
+            snapshot.isDragging
+              ? 'border-blue-300 shadow-md ring-1 ring-blue-200'
+              : 'border-gray-200 hover:border-gray-300 hover:shadow'
+          }`}
+        >
+          {/* 上段：優先度・WBS */}
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span
+              className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${priority.color}`}
+            >
+              優先度 {priority.label}
+            </span>
+            {wbsNo && (
+              <span className="font-mono text-[10px] tabular-nums text-gray-400">
+                {wbsNo}
+              </span>
+            )}
+          </div>
+
+          {/* タイトル（クリックで詳細へ） */}
+          <div className="flex items-start gap-1.5">
+            {node.milestone && (
+              <Flag className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+            )}
+            <Link
+              href={`./tasks/${node.id}`}
+              className="block text-sm font-medium leading-snug text-gray-900 hover:text-blue-600 hover:underline"
+            >
+              {node.title}
+            </Link>
+          </div>
+
+          {node.category && (
+            <span className="mt-1 inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+              {node.category}
+            </span>
+          )}
+
+          {/* メタ：担当・期限 */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
+            <span className="inline-flex items-center gap-1">
+              <User className="h-3 w-3 text-gray-400" />
+              {assignee || <span className="text-gray-300">未割当</span>}
+            </span>
+            <span className="inline-flex items-center gap-1 tabular-nums">
+              <CalendarDays className="h-3 w-3 text-gray-400" />
+              {node.dueDate ? node.dueDate.slice(0, 10) : '-'}
+            </span>
+          </div>
+
+          {/* 進捗 */}
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1.5 flex-1 rounded-full bg-gray-100">
+              <div
+                className="h-1.5 rounded-full bg-blue-500"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <span className="w-8 text-right text-[10px] tabular-nums text-gray-500">
+              {progress}%
+            </span>
+          </div>
+        </div>
+      )}
+    </Draggable>
   );
 }
