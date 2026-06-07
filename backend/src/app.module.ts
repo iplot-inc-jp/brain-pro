@@ -15,6 +15,7 @@ import {
   BUSINESS_FLOW_REPOSITORY,
   FLOW_NODE_REPOSITORY,
   FLOW_FOLDER_REPOSITORY,
+  FLOW_DEFINITION_REPOSITORY,
   FLOW_NODE_LINK_REPOSITORY,
   CRUD_MAPPING_REPOSITORY,
   PROJECT_PHASE_REPOSITORY,
@@ -71,6 +72,10 @@ import {
   RenameFlowFolderUseCase,
   MoveFlowFolderUseCase,
   DeleteFlowFolderUseCase,
+  // FlowDefinition
+  GetFlowDefinitionUseCase,
+  UpsertFlowDefinitionUseCase,
+  ListFlowDefinitionsUseCase,
   // FlowNodeLink
   CreateNodeLinkUseCase,
   GetNodeLinksUseCase,
@@ -106,6 +111,7 @@ import {
   PrismaBusinessFlowRepository,
   PrismaFlowNodeRepository,
   FlowFolderRepositoryImpl,
+  FlowDefinitionRepositoryImpl,
   FlowNodeLinkRepositoryImpl,
   PrismaCrudMappingRepository,
   ProjectPhaseRepositoryImpl,
@@ -129,6 +135,7 @@ import {
   BusinessFlowController,
   FlowFolderController,
   FlowFolderByIdController,
+  FlowDefinitionController,
   ProjectPhaseController,
   PhaseByIdController,
   GapItemController,
@@ -189,6 +196,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     BusinessFlowController,
     FlowFolderController,
     FlowFolderByIdController,
+    FlowDefinitionController,
     ProjectPhaseController,
     PhaseByIdController,
     GapItemController,
@@ -255,6 +263,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: FLOW_FOLDER_REPOSITORY,
       useClass: FlowFolderRepositoryImpl,
+    },
+    {
+      provide: FLOW_DEFINITION_REPOSITORY,
+      useClass: FlowDefinitionRepositoryImpl,
     },
     {
       provide: FLOW_NODE_LINK_REPOSITORY,
@@ -332,6 +344,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     RenameFlowFolderUseCase,
     MoveFlowFolderUseCase,
     DeleteFlowFolderUseCase,
+    // FlowDefinition
+    GetFlowDefinitionUseCase,
+    UpsertFlowDefinitionUseCase,
+    ListFlowDefinitionsUseCase,
     // FlowNodeLink
     CreateNodeLinkUseCase,
     GetNodeLinksUseCase,

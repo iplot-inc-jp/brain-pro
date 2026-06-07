@@ -5,6 +5,7 @@ export * from './role.controller';
 export * from './table.controller';
 export * from './business-flow.controller';
 export * from './flow-folder.controller';
+export * from './flow-definition.controller';
 export * from './project-phase.controller';
 export * from './gap-item.controller';
 export * from './issue-tree.controller';
