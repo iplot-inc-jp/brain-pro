@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Trash2, Plus, UserPlus, GripVertical } from 'lucide-react';
+import { Loader2, Trash2, Plus, UserPlus, GripVertical, Pencil, X, Save } from 'lucide-react';
 import type { RecordTemplate } from '@/lib/record-templates';
 import { useSheetStore, type SheetRow } from './sheet-store';
 import { SaveBar } from './save-bar';
@@ -11,6 +11,16 @@ const INFLUENCE_LEVELS = ['高', '中', '低'] as const;
 const SUPPORT_LEVELS = ['支持', '中立', '反対'] as const;
 type Influence = (typeof INFLUENCE_LEVELS)[number];
 type Support = (typeof SUPPORT_LEVELS)[number];
+
+// 編集モーダルで複数行入力にする列キー（長文項目）。
+const MULTILINE_KEYS = new Set([
+  'interest',
+  'concern',
+  'engagement',
+  'note',
+  'asisHearing',
+  'tobeSparring',
+]);
 
 const DND_MIME = 'application/x-stakeholder-index';
 
@@ -106,6 +116,10 @@ export function StakeholderMapBoard({
 
   const deleteRow = (rowIndex: number) =>
     update((prev) => prev.filter((_, i) => i !== rowIndex));
+
+  // ── カードからの全項目編集モーダル ──
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const editRow = editIndex != null ? rows[editIndex] : null;
 
   // ── ドラッグ&ドロップ（カードを掴んでセルへ配置） ──
   const [dragRow, setDragRow] = useState<number | null>(null);
@@ -229,19 +243,35 @@ export function StakeholderMapBoard({
                               )} ${dragRow === rowIndex ? 'opacity-40' : ''}`}
                             >
                               <div className="flex items-start justify-between gap-1">
-                                <span className="flex items-center gap-1 font-semibold leading-tight">
-                                  <GripVertical className="h-3 w-3 shrink-0 opacity-40" />
-                                  {row.name || '（無名）'}
-                                </span>
                                 <button
                                   type="button"
-                                  onClick={() => deleteRow(rowIndex)}
-                                  className="shrink-0 rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:bg-white/60 hover:text-rose-600 group-hover:opacity-100"
-                                  title="削除"
-                                  aria-label="このステークホルダーを削除"
+                                  onClick={() => setEditIndex(rowIndex)}
+                                  className="flex items-center gap-1 text-left font-semibold leading-tight hover:underline"
+                                  title="クリックして編集"
                                 >
-                                  <Trash2 className="h-3 w-3" />
+                                  <GripVertical className="h-3 w-3 shrink-0 opacity-40" />
+                                  {row.name || '（無名）'}
                                 </button>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditIndex(rowIndex)}
+                                    className="rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:bg-white/60 hover:text-blue-600 group-hover:opacity-100"
+                                    title="編集"
+                                    aria-label="このステークホルダーを編集"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteRow(rowIndex)}
+                                    className="rounded p-0.5 text-gray-400 opacity-0 transition-opacity hover:bg-white/60 hover:text-rose-600 group-hover:opacity-100"
+                                    title="削除"
+                                    aria-label="このステークホルダーを削除"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
                               </div>
                               {row.affiliation && (
                                 <div className="mt-0.5 text-[11px] text-gray-500">
@@ -328,9 +358,23 @@ export function StakeholderMapBoard({
                     }`}
                   >
                     <GripVertical className="h-3 w-3 shrink-0 text-amber-400" />
-                    <span className="font-medium text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setEditIndex(i)}
+                      className="font-medium text-gray-800 hover:underline"
+                      title="クリックして編集"
+                    >
                       {row.name || '（無名）'}
-                    </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditIndex(i)}
+                      className="rounded p-0.5 text-amber-500 hover:bg-amber-100"
+                      title="編集"
+                      aria-label="編集"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
                     <select
                       value={pickLevel(row.influence ?? '', INFLUENCE_LEVELS)}
                       onChange={(e) => setCell(i, 'influence', e.target.value)}
@@ -451,6 +495,112 @@ export function StakeholderMapBoard({
           </CardContent>
         </Card>
       </div>
+
+      {/* カードからの全項目編集モーダル */}
+      {editRow && editIndex != null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setEditIndex(null)}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+              <h3 className="text-sm font-semibold text-[#050f3e]">
+                {editRow.name || '（無名）'} を編集
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditIndex(null)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                aria-label="閉じる"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="max-h-[60vh] space-y-3 overflow-auto px-5 py-4">
+              {template.columns.map((col) => {
+                const value = editRow[col.key] ?? '';
+                if (col.key === 'influence' || col.key === 'support') {
+                  const levels =
+                    col.key === 'influence' ? INFLUENCE_LEVELS : SUPPORT_LEVELS;
+                  return (
+                    <div key={col.key} className="space-y-1">
+                      <label className="block text-[11px] font-medium text-gray-500">
+                        {col.label}
+                      </label>
+                      <select
+                        value={pickLevel(value, levels)}
+                        onChange={(e) => setCell(editIndex, col.key, e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="">（未設定）</option>
+                        {levels.map((lv) => (
+                          <option key={lv} value={lv}>
+                            {lv}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={col.key} className="space-y-1">
+                    <label className="block text-[11px] font-medium text-gray-500">
+                      {col.label}
+                    </label>
+                    {MULTILINE_KEYS.has(col.key) ? (
+                      <textarea
+                        value={value}
+                        onChange={(e) => setCell(editIndex, col.key, e.target.value)}
+                        rows={2}
+                        placeholder={col.label}
+                        className="w-full resize-y rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={(e) => setCell(editIndex, col.key, e.target.value)}
+                        placeholder={col.label}
+                        className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-gray-200 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setEditIndex(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+              >
+                閉じる
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await save(rows);
+                  setEditIndex(null);
+                }}
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-md bg-[#050f3e] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                保存して閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
