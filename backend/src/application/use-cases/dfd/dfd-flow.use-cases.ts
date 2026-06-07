@@ -3,7 +3,7 @@ import {
   DFD_REPOSITORY, IDfdRepository,
   PROJECT_REPOSITORY, ProjectRepository,
   ORGANIZATION_REPOSITORY, OrganizationRepository,
-  EntityNotFoundError, ForbiddenError,
+  EntityNotFoundError,
   DfdFlow,
 } from '../../../domain';
 import { authorizeDiagram } from './dfd-authz';

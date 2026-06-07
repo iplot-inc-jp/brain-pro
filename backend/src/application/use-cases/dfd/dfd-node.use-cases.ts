@@ -3,7 +3,7 @@ import {
   DFD_REPOSITORY, IDfdRepository,
   PROJECT_REPOSITORY, ProjectRepository,
   ORGANIZATION_REPOSITORY, OrganizationRepository,
-  EntityNotFoundError, ForbiddenError,
+  EntityNotFoundError,
   DfdNode,
 } from '../../../domain';
 import { DfdNodeKindValue } from '../../../domain/entities/dfd-node.entity';

@@ -124,7 +124,7 @@ export class GenerateFlowDfdUseCase {
         e.label || srcNodeById.get(e.sourceNodeId)?.output || '情報';
       const existing = existingAutoFlowKey.get(key);
       if (existing) {
-        // dataItem が空(初期'情報')のままなら更新、手動編集は保持
+        // 既存の自動フローは order のみ同期し、dataItem の手動編集は保持する。
         existing.updateOrder(order);
         await this.repo.saveFlow(existing);
       } else {
