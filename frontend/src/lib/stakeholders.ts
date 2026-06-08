@@ -94,6 +94,61 @@ export interface Role {
   updatedAt?: string;
 }
 
+/** 報告・連絡カレンダー（ReportCalendar テーブル） */
+export interface ReportCalendar {
+  id: string;
+  projectId: string;
+  /** 報告対象（誰に）。Stakeholder の FK。 */
+  stakeholderId: string | null;
+  /** 報告対象のフリーテキスト fallback（stakeholderId が無いとき） */
+  reportTo: string | null;
+  /** 関連会議。Meeting の FK。 */
+  meetingId: string | null;
+  reportContent: string | null;
+  frequency: string | null;
+  dayTime: string | null;
+  format: string | null;
+  medium: string | null;
+  drafter: string | null;
+  approver: string | null;
+  templateRef: string | null;
+  note: string | null;
+  order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** 作成・更新で送る入力（全項目任意） */
+export type ReportCalendarInput = Partial<
+  Omit<ReportCalendar, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>
+>;
+
+/** 関心ごとマトリクス行（InterestMatrixRow テーブル、フェーズ×視点） */
+export interface InterestMatrixRow {
+  id: string;
+  projectId: string;
+  /** フェーズ */
+  phase: string | null;
+  /** 期間目安 */
+  duration: string | null;
+  /** 主要ミーティング体 */
+  mainMeetings: string | null;
+  /** 現場（実務担当） */
+  fieldStaff: string | null;
+  /** 先方プロマネ */
+  clientPm: string | null;
+  /** 役員（経営層） */
+  executive: string | null;
+  order: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** 作成・更新で送る入力（全項目任意） */
+export type InterestMatrixRowInput = Partial<
+  Omit<InterestMatrixRow, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>
+>;
+
 // ---------------------------------------------------------------------------
 // Stakeholder API
 // ---------------------------------------------------------------------------
@@ -228,6 +283,110 @@ export async function updateRole(
   if (!res.ok) throw new Error('ロールの更新に失敗しました');
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// ReportCalendar API（報告・連絡カレンダー）
+// ---------------------------------------------------------------------------
+
+export const reportCalendarsApi = {
+  async list(projectId: string): Promise<ReportCalendar[]> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/report-calendars`,
+      { headers: getHeaders() },
+    );
+    if (!res.ok) throw new Error('報告・連絡カレンダーの読み込みに失敗しました');
+    return res.json();
+  },
+
+  async create(
+    projectId: string,
+    input: ReportCalendarInput = {},
+  ): Promise<ReportCalendar> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/report-calendars`,
+      {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) throw new Error('報告・連絡カレンダーの作成に失敗しました');
+    return res.json();
+  },
+
+  async update(
+    id: string,
+    input: ReportCalendarInput,
+  ): Promise<ReportCalendar> {
+    const res = await fetch(`${API_URL}/api/report-calendars/${id}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error('報告・連絡カレンダーの更新に失敗しました');
+    return res.json();
+  },
+
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/report-calendars/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error('報告・連絡カレンダーの削除に失敗しました');
+  },
+};
+
+// ---------------------------------------------------------------------------
+// InterestMatrixRow API（関心ごとマトリクス）
+// ---------------------------------------------------------------------------
+
+export const interestRowsApi = {
+  async list(projectId: string): Promise<InterestMatrixRow[]> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/interest-rows`,
+      { headers: getHeaders() },
+    );
+    if (!res.ok) throw new Error('関心ごとマトリクスの読み込みに失敗しました');
+    return res.json();
+  },
+
+  async create(
+    projectId: string,
+    input: InterestMatrixRowInput = {},
+  ): Promise<InterestMatrixRow> {
+    const res = await fetch(
+      `${API_URL}/api/projects/${projectId}/interest-rows`,
+      {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) throw new Error('関心ごとマトリクスの作成に失敗しました');
+    return res.json();
+  },
+
+  async update(
+    id: string,
+    input: InterestMatrixRowInput,
+  ): Promise<InterestMatrixRow> {
+    const res = await fetch(`${API_URL}/api/interest-rows/${id}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error('関心ごとマトリクスの更新に失敗しました');
+    return res.json();
+  },
+
+  async delete(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/interest-rows/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error('関心ごとマトリクスの削除に失敗しました');
+  },
+};
 
 // ---------------------------------------------------------------------------
 // 影響度 × 支持度 マトリクスの区分定義（純粋・テスト可能）

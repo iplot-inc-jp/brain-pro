@@ -6,17 +6,16 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Users, Grid3x3, CalendarClock, type LucideIcon } from 'lucide-react';
-import { RECORD_TEMPLATES } from '@/lib/record-templates';
-import { RecordSheetTable } from '@/components/records/record-sheet-table';
 import { StakeholderTableBoard } from './_components/stakeholder-table-board';
 import { MeetingReportBoard } from './_components/meeting-report-board';
+import { InterestMatrixBoard } from './_components/interest-matrix-board';
 
 /**
  * ステークホルダーマネジメント ワークスペース。
  *
  * 関係者・関心ごと・会議/報告の3タブに集約。
- * - ステークホルダー / 会議体は専用テーブル（Stakeholder / Meeting / Role）を直接 CRUD。
- * - 関心ごとマトリクス・報告連絡カレンダーは当面 RecordSheet のまま。
+ * すべて専用テーブル（Stakeholder / Meeting / Role / ReportCalendar /
+ * InterestMatrixRow）を直接 CRUD する（RecordSheet は使わない）。
  */
 type TabKey = 'stakeholders' | 'interests' | 'meetings';
 
@@ -30,11 +29,6 @@ export default function StakeholderManagementPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const [active, setActive] = useState<TabKey>('stakeholders');
-
-  const interestTemplate =
-    RECORD_TEMPLATES.find((t) => t.key === 'interest-matrix') ?? null;
-  const reportCalendarTemplate =
-    RECORD_TEMPLATES.find((t) => t.key === 'report-calendar') ?? null;
 
   return (
     <div className="space-y-6">
@@ -87,31 +81,14 @@ export default function StakeholderManagementPage() {
         <StakeholderTableBoard projectId={projectId} />
       </div>
 
-      {/* 関心ごと（RecordSheet 'interest-matrix'） */}
-      <div className={active === 'interests' ? 'space-y-2' : 'hidden'}>
-        {interestTemplate ? (
-          <>
-            <p className="text-sm text-gray-500">
-              {interestTemplate.description}
-            </p>
-            <RecordSheetTable
-              projectId={projectId}
-              template={interestTemplate}
-            />
-          </>
-        ) : (
-          <p className="text-sm text-gray-400">
-            関心ごとマトリクスのテンプレが見つかりませんでした。
-          </p>
-        )}
+      {/* 関心ごと（InterestMatrixRow テーブル：フェーズ×視点） */}
+      <div className={active === 'interests' ? '' : 'hidden'}>
+        <InterestMatrixBoard projectId={projectId} />
       </div>
 
-      {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー RecordSheet） */}
+      {/* 会議・報告（Meeting テーブル + 報告連絡カレンダー テーブル） */}
       <div className={active === 'meetings' ? '' : 'hidden'}>
-        <MeetingReportBoard
-          projectId={projectId}
-          reportCalendarTemplate={reportCalendarTemplate}
-        />
+        <MeetingReportBoard projectId={projectId} />
       </div>
     </div>
   );
