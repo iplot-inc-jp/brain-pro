@@ -6,6 +6,7 @@ import {
   PATTERN_META,
   ROOT_PRIMARY_KIND,
   rootKindForPattern,
+  childKindForPattern,
   patternFromLegacyType,
   legacyTreeTypeForPattern,
   emptyRollupCounts,
@@ -22,6 +23,40 @@ describe('issue-tree-patterns config', () => {
       expect(PATTERN_META[p].label.length).toBeGreaterThan(0);
       expect(ROOT_PRIMARY_KIND[p].length).toBeGreaterThan(0);
     }
+  });
+
+  it('defines guide + example (root + children) for all 6 patterns', () => {
+    for (const p of ISSUE_TREE_PATTERNS) {
+      const meta = PATTERN_META[p];
+      expect(meta.guide.length).toBeGreaterThan(0);
+      expect(meta.example.rootLabel.length).toBeGreaterThan(0);
+      expect(meta.example.children.length).toBeGreaterThan(0);
+      for (const c of meta.example.children) {
+        expect(c.trim().length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('example matches 教材 早見表 (root labels)', () => {
+    expect(PATTERN_META.ISSUE_POINT.example.rootLabel).toBe('営業利益率が低下している');
+    expect(PATTERN_META.WHY.example.rootLabel).toBe('売上が前年比 -10%');
+    expect(PATTERN_META.WHAT.example.rootLabel).toBe('購買業務');
+    expect(PATTERN_META.HOW.example.rootLabel).toBe('在庫予測精度の向上');
+    expect(PATTERN_META.MECE_ACTION.example.rootLabel).toBe('営業利益率 6.0% を達成する');
+    expect(PATTERN_META.KPI.example.rootLabel).toBe('営業利益率 6.0%');
+  });
+
+  it('childKindForPattern mirrors backend decideSuggestKind', () => {
+    expect(childKindForPattern('ISSUE_POINT')).toBe('POINT');
+    expect(childKindForPattern('WHY')).toBe('CAUSE');
+    expect(childKindForPattern('WHAT')).toBe('ELEMENT');
+    expect(childKindForPattern('HOW')).toBe('OPTION');
+    expect(childKindForPattern('MECE_ACTION')).toBe('ACTION');
+    expect(childKindForPattern('KPI')).toBe('METRIC');
+    // target kind overrides pattern default
+    expect(childKindForPattern('ISSUE_POINT', 'CAUSE')).toBe('CAUSE');
+    expect(childKindForPattern('WHY', 'HYPOTHESIS')).toBe('VERIFICATION');
+    expect(childKindForPattern('HOW', 'VERIFICATION')).toBe('VERIFICATION');
   });
 
   it('defines config for all 11 kinds with a valid affordance', () => {

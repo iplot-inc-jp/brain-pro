@@ -6,7 +6,7 @@ import {
   IsEnum,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IssueTreeTypeDto } from './create-issue-tree.dto';
+import { IssueTreeTypeDto, IssueTreePatternDto } from './create-issue-tree.dto';
 
 /**
  * イシューツリー更新リクエストDTO
@@ -38,4 +38,14 @@ export class UpdateIssueTreeRequestDto {
     message: '型はWHYまたはSOLUTIONを指定してください',
   })
   type?: IssueTreeTypeDto;
+
+  @ApiPropertyOptional({
+    enum: IssueTreePatternDto,
+    example: 'ISSUE_POINT',
+    description:
+      'ツリーパターン（ISSUE_POINT / WHY / WHAT / HOW / MECE_ACTION / KPI）',
+  })
+  @IsOptional()
+  @IsEnum(IssueTreePatternDto)
+  pattern?: IssueTreePatternDto;
 }

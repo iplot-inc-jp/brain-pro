@@ -67,6 +67,9 @@ import {
   Boxes,
   BarChart3,
   CheckCircle2,
+  MoreHorizontal,
+  Wand2,
+  ListPlus,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -77,6 +80,15 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { AiSuggestDialog } from '@/components/issue-trees/ai-suggest-dialog';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { IdeationAssistDialog } from '@/components/issue-trees/ideation-assist-dialog';
 import {
@@ -99,6 +111,7 @@ import {
   ISSUE_NODE_KINDS,
   ROOT_PRIMARY_KIND,
   rootKindForPattern,
+  childKindForPattern,
   patternFromLegacyType,
   legacyTreeTypeForPattern,
   emptyRollupCounts,
@@ -159,6 +172,10 @@ type MindNodeData = {
   onSelect: (id: string | null) => void;
   onAddChild: (parentId: string | null, kind: IssueNodeKind, label: string) => void;
   onIdeate: (id: string | null) => void;
+  /** AIで候補生成（生成AIアシスト） */
+  onAiSuggest: (id: string | null) => void;
+  /** このパターンの開始例（example.children）を子として一括挿入 */
+  onInsertExample: (id: string | null) => void;
   onDelete: (id: string) => void;
 };
 
@@ -357,6 +374,165 @@ const ROLLUP_META: Record<
   none: null,
 };
 
+/**
+ * ノードの追加ボタン群（spec D/E/F）。
+ * - 先頭3件は種別連動チップ。残りの種別連動ボタン＋全 childKind は「他」オーバーフローへ。
+ * - 「AI候補」「例を挿入」「発想法」を併設。
+ * nodeId は対象（親）ノードID。ルートの問いは null。
+ */
+function NodeAddControls({
+  nodeId,
+  pattern,
+  buttons,
+  onAddChild,
+  onAiSuggest,
+  onInsertExample,
+  onIdeate,
+}: {
+  nodeId: string | null;
+  pattern: IssueTreePattern;
+  buttons: ChildAddButton[];
+  onAddChild: (parentId: string | null, kind: IssueNodeKind, label: string) => void;
+  onAiSuggest: (id: string | null) => void;
+  onInsertExample: (id: string | null) => void;
+  onIdeate: (id: string | null) => void;
+}) {
+  const primary = buttons.slice(0, 3);
+  const overflowConfigured = buttons.slice(3);
+  // 「他」: 設定済みの残りボタン + 設定に出ていない全 childKind（救済・自由配置）。
+  const shownKinds = new Set(buttons.map((b) => b.childKind));
+  const extraKinds = ISSUE_NODE_KINDS.filter((k) => !shownKinds.has(k));
+  const hasOverflow = overflowConfigured.length > 0 || extraKinds.length > 0;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1">
+      {primary.map((b) => (
+        <button
+          key={b.childKind + b.label}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddChild(nodeId, b.childKind, b.defaultLabel);
+          }}
+          className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] hover:brightness-95 ${KIND_CONFIG[b.childKind].chip} border-transparent`}
+          title={b.label}
+        >
+          <Plus className="h-3 w-3" />
+          {b.label}
+        </button>
+      ))}
+
+      {/* 他: 残り全 childKind を追加できるオーバーフローメニュー（F） */}
+      {hasOverflow && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              className="nodrag nopan inline-flex items-center gap-0.5 rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
+              title="他の種別の子ノードを追加"
+            >
+              <MoreHorizontal className="h-3 w-3" />他
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="bg-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {overflowConfigured.length > 0 && (
+              <>
+                <DropdownMenuLabel className="text-[11px] text-gray-500">
+                  このノードの定番
+                </DropdownMenuLabel>
+                {overflowConfigured.map((b) => {
+                  const Icon = KIND_ICON[b.childKind];
+                  return (
+                    <DropdownMenuItem
+                      key={b.childKind + b.label}
+                      onSelect={() => onAddChild(nodeId, b.childKind, b.defaultLabel)}
+                      className="gap-2 text-xs"
+                    >
+                      <Icon className="h-3.5 w-3.5 text-gray-500" />
+                      {b.label}
+                    </DropdownMenuItem>
+                  );
+                })}
+                {extraKinds.length > 0 && <DropdownMenuSeparator />}
+              </>
+            )}
+            {extraKinds.length > 0 && (
+              <>
+                <DropdownMenuLabel className="text-[11px] text-gray-500">
+                  他の種別で追加（自由配置）
+                </DropdownMenuLabel>
+                {extraKinds.map((k) => {
+                  const kc = KIND_CONFIG[k];
+                  const Icon = KIND_ICON[k];
+                  return (
+                    <DropdownMenuItem
+                      key={k}
+                      onSelect={() => onAddChild(nodeId, k, `新しい${kc.label}`)}
+                      className="gap-2 text-xs"
+                    >
+                      <Icon className="h-3.5 w-3.5 text-gray-500" />
+                      {kc.label}を追加
+                    </DropdownMenuItem>
+                  );
+                })}
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {/* AIで候補生成（D）。生成AIは対象ノードが必要なため、ルートの問い(null)では出さない。 */}
+      {nodeId !== null && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAiSuggest(nodeId);
+          }}
+          className="inline-flex items-center gap-0.5 rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700 hover:bg-violet-100"
+          title="AIで子ノード候補を生成"
+        >
+          <Wand2 className="h-3 w-3" />
+          AI候補
+        </button>
+      )}
+
+      {/* 例を挿入（E） */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onInsertExample(nodeId);
+        }}
+        className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 hover:bg-amber-100"
+        title={`このパターンの開始例を子ノードに追加（${PATTERN_META[pattern].example.children.length}件）`}
+      >
+        <ListPlus className="h-3 w-3" />
+        例を挿入
+      </button>
+
+      {/* 発想法 */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onIdeate(nodeId);
+        }}
+        className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
+        title="発想法で子ノードに分解"
+      >
+        <Sparkles className="h-3 w-3" />
+        発想法
+      </button>
+    </div>
+  );
+}
+
 const MindNode = memo(function MindNode({ data }: NodeProps) {
   const d = data as unknown as MindNodeData;
   const { node, isRoot, pattern, selected } = d;
@@ -393,35 +569,15 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
         <div className="text-sm font-bold leading-snug text-gray-900 break-words">
           {d.rootQuestion || '（問い未設定）'}
         </div>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {buttons.slice(0, 3).map((b) => (
-            <button
-              key={b.childKind + b.label}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                d.onAddChild(null, b.childKind, b.defaultLabel);
-              }}
-              className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] hover:brightness-95 ${KIND_CONFIG[b.childKind].chip} border-transparent`}
-              title={b.label}
-            >
-              <Plus className="h-3 w-3" />
-              {b.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onIdeate(null);
-            }}
-            className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-            title="発想法で子ノードに分解"
-          >
-            <Sparkles className="h-3 w-3" />
-            発想法
-          </button>
-        </div>
+        <NodeAddControls
+          nodeId={null}
+          pattern={pattern}
+          buttons={buttons}
+          onAddChild={d.onAddChild}
+          onAiSuggest={d.onAiSuggest}
+          onInsertExample={d.onInsertExample}
+          onIdeate={d.onIdeate}
+        />
       </div>
     );
   }
@@ -509,41 +665,24 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
             {flavor.titlePrefix}タスク {d.taskCount}
           </div>
         )}
-        <div className="mt-2 flex flex-wrap gap-1">
-          {buttons.slice(0, 3).map((b) => (
-            <button
-              key={b.childKind + b.label}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                d.onAddChild(node.id, b.childKind, b.defaultLabel);
-              }}
-              className={`inline-flex items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] hover:brightness-95 ${KIND_CONFIG[b.childKind].chip} border-transparent`}
-              title={b.label}
-            >
-              <Plus className="h-3 w-3" />
-              {b.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              d.onIdeate(node.id);
-            }}
-            className="inline-flex items-center gap-0.5 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700 hover:bg-blue-100"
-            title="発想法で子ノードに分解"
-          >
-            <Sparkles className="h-3 w-3" />
-            発想法
-          </button>
+        <div className="flex flex-wrap items-end gap-1">
+          <NodeAddControls
+            nodeId={node.id}
+            pattern={pattern}
+            buttons={buttons}
+            onAddChild={d.onAddChild}
+            onAiSuggest={d.onAiSuggest}
+            onInsertExample={d.onInsertExample}
+            onIdeate={d.onIdeate}
+          />
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               d.onDelete(node.id);
             }}
-            className="inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-100"
+            className="mt-2 inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 hover:bg-red-100"
+            title="このノードを削除"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -779,6 +918,16 @@ function IssueTreeMindMap() {
   const [ideateOpen, setIdeateOpen] = useState(false);
   const [ideateParentId, setIdeateParentId] = useState<string | null>(null);
 
+  // 生成AI候補ダイアログ
+  const [aiSuggestOpen, setAiSuggestOpen] = useState(false);
+  const [aiSuggestParentId, setAiSuggestParentId] = useState<string | null>(null);
+
+  // このツリーに紐づくGAP（あれば上部に文脈表示）
+  const [linkedGap, setLinkedGap] = useState<{
+    businessArea: string;
+    gapDescription: string | null;
+  } | null>(null);
+
   // ノードに紐づくタスク（nodeId -> Task[]）。カードのカウントバッジと右パネルの一覧で使う。
   const [tasksByNode, setTasksByNode] = useState<Record<string, Task[]>>({});
   const [creatingTaskNodeId, setCreatingTaskNodeId] = useState<string | null>(null);
@@ -810,6 +959,36 @@ function IssueTreeMindMap() {
   useEffect(() => {
     if (treeId) fetchTree();
   }, [treeId, fetchTree]);
+
+  // このツリーに紐づくGAP（課題）を取得（あれば上部に文脈表示）。
+  // プロジェクトの gap-items から issueTreeId 一致を探す（専用APIが無いため）。
+  const fetchLinkedGap = useCallback(async () => {
+    if (!projectId || !treeId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/gap-items`, {
+        headers: getHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const arr: Array<{
+        issueTreeId: string | null;
+        businessArea: string;
+        gapDescription: string | null;
+      }> = Array.isArray(data) ? data : [];
+      const match = arr.find((g) => g.issueTreeId === treeId);
+      setLinkedGap(
+        match
+          ? { businessArea: match.businessArea, gapDescription: match.gapDescription ?? null }
+          : null,
+      );
+    } catch {
+      // GAP 取得失敗はツリー編集を妨げない
+    }
+  }, [projectId, treeId, getHeaders]);
+
+  useEffect(() => {
+    fetchLinkedGap();
+  }, [fetchLinkedGap]);
 
   // パターン（旧 type しか無い既存ツリーはフォールバック）。種別連動ボタン・ルート kind に使う。
   const pattern: IssueTreePattern = tree?.pattern ?? patternFromLegacyType(tree?.type);
@@ -955,10 +1134,128 @@ function IssueTreeMindMap() {
     [tree, treeId, getHeaders, fetchTree],
   );
 
+  // 種別が異なる候補をまとめて子ノードとして追加（AI候補の採用・例の挿入で使う）。
+  const addNodesMixed = useCallback(
+    async (
+      parentId: string | null,
+      items: { label: string; kind: IssueNodeKind }[],
+    ): Promise<boolean> => {
+      if (!tree || items.length === 0) return false;
+      setBusy(true);
+      setActionError(null);
+      try {
+        const headers = getHeaders();
+        for (const it of items) {
+          const res = await fetch(`${API_URL}/api/issue-trees/${treeId}/nodes`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ parentId, label: it.label, kind: it.kind }),
+          });
+          if (!res.ok) throw new Error('ノードの作成に失敗しました');
+        }
+        await fetchTree();
+        return true;
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'ノードの作成に失敗しました');
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [tree, treeId, getHeaders, fetchTree],
+  );
+
   const openIdeate = useCallback((parentId: string | null) => {
     setIdeateParentId(parentId);
     setIdeateOpen(true);
   }, []);
+
+  // 例を挿入（spec E）: このパターンの開始例(example.children)を対象ノードの子として一括追加。
+  // 子の種別はパターン×対象ノード種別から決める（バックエンドの decideSuggestKind と整合）。
+  const insertExample = useCallback(
+    (parentId: string | null) => {
+      const targetKind =
+        parentId === null
+          ? undefined
+          : (tree?.nodes ?? []).find((n) => n.id === parentId)?.kind;
+      const childKind = childKindForPattern(pattern, targetKind);
+      const labels = PATTERN_META[pattern].example.children;
+      void addNodesMixed(
+        parentId,
+        labels.map((label) => ({ label, kind: childKind })),
+      );
+    },
+    [tree, pattern, addNodesMixed],
+  );
+
+  // ===========================================
+  // 生成AI候補（spec D）
+  // ===========================================
+
+  // チェック済みのAI候補を子ノードとして採用（一括追加）。
+  const adoptAiSuggestions = useCallback(
+    (parentId: string | null, items: { label: string; kind: IssueNodeKind }[]) =>
+      addNodesMixed(parentId, items),
+    [addNodesMixed],
+  );
+
+  const openAiSuggest = useCallback((parentId: string | null) => {
+    if (parentId === null) return; // 生成AIは対象ノードが必須
+    setAiSuggestParentId(parentId);
+    setAiSuggestOpen(true);
+  }, []);
+
+  // 生成AI候補を取得（POST .../nodes/:nodeId/ai-suggest）。
+  // 4xx（鍵未設定など）は keyMissing で返し、ダイアログ側が設定導線に切り替える。
+  const fetchAiSuggestions = useCallback(
+    async (
+      nodeId: string,
+      context: string | undefined,
+    ): Promise<{
+      ok: boolean;
+      suggestions: { label: string; kind: IssueNodeKind }[];
+      keyMissing: boolean;
+      message?: string;
+    }> => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/issue-trees/${treeId}/nodes/${nodeId}/ai-suggest`,
+          {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify(context ? { context } : {}),
+          },
+        );
+        if (!res.ok) {
+          const keyMissing = res.status === 400;
+          let message: string | undefined;
+          try {
+            const data = await res.json();
+            message = data?.error ?? data?.message;
+          } catch {
+            // noop
+          }
+          return { ok: false, suggestions: [], keyMissing, message };
+        }
+        const data = await res.json();
+        const suggestions = Array.isArray(data?.suggestions)
+          ? data.suggestions.map((s: { label: string; kind: IssueNodeKind }) => ({
+              label: s.label,
+              kind: s.kind,
+            }))
+          : [];
+        return { ok: true, suggestions, keyMissing: false };
+      } catch {
+        return {
+          ok: false,
+          suggestions: [],
+          keyMissing: false,
+          message: '通信エラーが発生しました',
+        };
+      }
+    },
+    [treeId, getHeaders],
+  );
 
   const patchNode = useCallback(
     async (nodeId: string, body: Record<string, unknown>) => {
@@ -1185,6 +1482,8 @@ function IssueTreeMindMap() {
       onSelect: setSelectedId,
       onAddChild: addChild,
       onIdeate: openIdeate,
+      onAiSuggest: openAiSuggest,
+      onInsertExample: insertExample,
       onDelete: deleteNode,
     };
 
@@ -1252,6 +1551,8 @@ function IssueTreeMindMap() {
     tasksByNode,
     addChild,
     openIdeate,
+    openAiSuggest,
+    insertExample,
     deleteNode,
     detachNode,
   ]);
@@ -1390,9 +1691,12 @@ function IssueTreeMindMap() {
           {busy && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
           <div ref={howToRef}>
             <HowToPanel
-              title="課題ツリー（マインドマップ）の使い方"
+              title={`課題ツリーの使い方（${patternMeta.label}）`}
               steps={[
-                'ノード上の「＋原因」でその下に原因を、「＋打ち手」で打ち手を追加します。ルートの問いからも追加できます。',
+                `このツリーは「${patternMeta.label}」パターンです。${patternMeta.guide}`,
+                `開始例：「${patternMeta.example.rootLabel}」→ ${patternMeta.example.children.join(' / ')}（ノードの「例を挿入」で取り込めます）。`,
+                'ノード上の「＋原因」でその下に原因を、「＋打ち手」で打ち手を追加します。ルートの問いからも追加できます。先頭3件以外の種別は「他」メニューから追加できます。',
+                'ノードを選んで「AIで候補生成」を押すと、文脈に沿った子ノード候補を生成AIが提案します。チェックして採用すると子ノードになります（AI鍵の設定が必要）。',
                 'ノードをクリックすると右パネルが開き、種別・ラベル・根拠を編集できます。',
                 'ノードの「発想法で分解」から IPLoT 発想法（SDF/RTOCS/横展開ほか）のレンズを選び、子ノード候補を一括で生成できます。',
                 '原因ノードは検証マーク（○確定／×否定／△未確認／?要ヒアリング）で確からしさを記録します。',
@@ -1438,6 +1742,24 @@ function IssueTreeMindMap() {
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {actionError}
+        </div>
+      )}
+
+      {/* GAP（課題）紐づけ: このツリーが GAP 起点なら文脈を上部に表示（spec E） */}
+      {linkedGap && (
+        <div className="flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-2.5 text-sm">
+          <Target className="mt-0.5 h-4 w-4 shrink-0 text-indigo-500" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-indigo-700">起点のGAP（課題）</span>
+              <span className="rounded border border-indigo-200 bg-white px-1.5 py-0.5 text-[10px] text-indigo-600">
+                {linkedGap.businessArea}
+              </span>
+            </div>
+            {linkedGap.gapDescription && (
+              <p className="mt-0.5 text-[13px] text-gray-700">{linkedGap.gapDescription}</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -1516,6 +1838,10 @@ function IssueTreeMindMap() {
             onPatch={patchNode}
             onSetVerification={setVerification}
             onIdeate={openIdeate}
+            onAiSuggest={openAiSuggest}
+            onInsertExample={insertExample}
+            patternLabel={patternMeta.label}
+            exampleCount={patternMeta.example.children.length}
             onDelete={deleteNode}
           />
         )}
@@ -1579,6 +1905,21 @@ function IssueTreeMindMap() {
         treeType={legacyTreeTypeForPattern(pattern)}
         onAdd={addNodesBulk}
       />
+
+      {/* 生成AI候補ダイアログ（spec D） */}
+      <AiSuggestDialog
+        open={aiSuggestOpen}
+        onOpenChange={setAiSuggestOpen}
+        parentId={aiSuggestParentId}
+        parentLabel={
+          aiSuggestParentId === null
+            ? tree.rootQuestion ?? ''
+            : (tree.nodes ?? []).find((n) => n.id === aiSuggestParentId)?.label ?? ''
+        }
+        settingsHref="/dashboard/settings"
+        onFetch={fetchAiSuggestions}
+        onAdopt={adoptAiSuggestions}
+      />
     </div>
   );
 }
@@ -1598,6 +1939,10 @@ function NodeEditPanel({
   onPatch,
   onSetVerification,
   onIdeate,
+  onAiSuggest,
+  onInsertExample,
+  patternLabel,
+  exampleCount,
   onDelete,
 }: {
   node: BackendNode;
@@ -1610,6 +1955,10 @@ function NodeEditPanel({
   onPatch: (nodeId: string, body: Record<string, unknown>) => void;
   onSetVerification: (nodeId: string, verification: Verification) => void;
   onIdeate: (nodeId: string | null) => void;
+  onAiSuggest: (nodeId: string | null) => void;
+  onInsertExample: (nodeId: string | null) => void;
+  patternLabel: string;
+  exampleCount: number;
   onDelete: (nodeId: string) => void;
 }) {
   const [label, setLabel] = useState(node.label);
@@ -1881,15 +2230,43 @@ function NodeEditPanel({
           </div>
         )}
 
-        <Button
-          size="sm"
-          disabled={busy}
-          onClick={() => onIdeate(node.id)}
-          className="w-full bg-blue-600 text-white hover:bg-blue-700"
-        >
-          <Sparkles className="mr-1 h-4 w-4" />
-          発想法で分解
-        </Button>
+        {/* 子ノードを増やす導線（AI候補生成 / 例の挿入 / 発想法） */}
+        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-gray-700">子ノードを増やす</span>
+            <HelpTooltip text="このノードの下に子ノードを足す3つの方法です。AIで候補生成＝文脈に沿った候補を生成AIが提案／例を挿入＝このパターンの開始例を取り込む／発想法で分解＝IPLoT発想法のレンズで分解。" />
+          </div>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => onAiSuggest(node.id)}
+            className="w-full bg-violet-600 text-white hover:bg-violet-700"
+          >
+            <Wand2 className="mr-1 h-4 w-4" />
+            AIで候補生成
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onInsertExample(node.id)}
+            className="w-full border-amber-200 text-amber-700 hover:bg-amber-50"
+            title={`「${patternLabel}」の開始例を子ノードに追加（${exampleCount}件）`}
+          >
+            <ListPlus className="mr-1 h-4 w-4" />
+            例を挿入（{exampleCount}件）
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onIdeate(node.id)}
+            className="w-full border-blue-200 text-blue-700 hover:bg-blue-50"
+          >
+            <Sparkles className="mr-1 h-4 w-4" />
+            発想法で分解
+          </Button>
+        </div>
 
         <Button
           variant="outline"

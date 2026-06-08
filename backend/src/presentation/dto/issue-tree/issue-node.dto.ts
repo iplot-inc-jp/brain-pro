@@ -167,6 +167,38 @@ export class UpdateIssueNodeRequestDto {
 }
 
 /**
+ * 生成AI候補リクエストDTO
+ */
+export class SuggestIssueNodesRequestDto {
+  @ApiPropertyOptional({
+    example: '直近3ヶ月の解約データを踏まえて',
+    description: 'AIへの任意の補足コンテキスト',
+  })
+  @IsOptional()
+  @IsString()
+  context?: string;
+}
+
+/**
+ * 生成AI候補の1件（採用時にフロントが node-create で作る）
+ */
+export class IssueNodeSuggestionDto {
+  @ApiProperty({ example: 'なぜオンボーディングが分かりにくいのか？' })
+  label: string;
+
+  @ApiProperty({ enum: IssueNodeKindDto, example: 'CAUSE' })
+  kind: IssueNodeKindDto;
+}
+
+/**
+ * 生成AI候補レスポンスDTO
+ */
+export class SuggestIssueNodesResponseDto {
+  @ApiProperty({ type: [IssueNodeSuggestionDto] })
+  suggestions: IssueNodeSuggestionDto[];
+}
+
+/**
  * イシューノード検証状態設定リクエストDTO
  */
 export class SetNodeVerificationRequestDto {

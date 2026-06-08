@@ -40,6 +40,7 @@ import {
   Layers,
   ListChecks,
   BarChart3,
+  Download,
 } from 'lucide-react';
 import {
   ISSUE_TREE_PATTERNS,
@@ -240,6 +241,12 @@ export default function IssueTreesPage() {
 
   const filteredTrees =
     filter === 'ALL' ? trees : trees.filter((t) => patternOf(t) === filter);
+
+  // 作成ダイアログで選択中の GAP（「GAPから取り込む」ボタンの出し分けに使う）。
+  const selectedGap =
+    newTree.gapItemId !== NO_GAP
+      ? gapItems.find((g) => g.id === newTree.gapItemId) ?? null
+      : null;
 
   const filterTabs: { value: FilterType; label: string; count: number }[] = [
     { value: 'ALL', label: 'すべて', count: trees.length },
@@ -495,9 +502,35 @@ export default function IssueTreesPage() {
                   );
                 })}
               </div>
-              <p className="text-xs text-gray-400">
-                {PATTERN_META[newTree.pattern].description}
-              </p>
+              {/* 選択中パターンの ガイド + 開始例（ルート例＋子例） */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                <p className="text-xs leading-relaxed text-gray-600">
+                  {PATTERN_META[newTree.pattern].guide}
+                </p>
+                <div className="rounded-md border border-gray-200 bg-white p-2.5">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-gray-500">
+                    <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                    開始例
+                  </div>
+                  <div className="flex items-start gap-1.5 text-xs text-gray-800">
+                    <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
+                    <span className="font-medium">
+                      {PATTERN_META[newTree.pattern].example.rootLabel}
+                    </span>
+                  </div>
+                  <ul className="mt-1.5 space-y-1 pl-5">
+                    {PATTERN_META[newTree.pattern].example.children.map((c, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-1.5 text-[11px] text-gray-600"
+                      >
+                        <ChevronRight className="mt-0.5 h-3 w-3 shrink-0 text-gray-300" />
+                        <span>{c}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
             </div>
 
             {/* GAP（課題）を起点にする */}
@@ -549,7 +582,24 @@ export default function IssueTreesPage() {
 
             {/* ルートの問い */}
             <div className="space-y-2">
-              <Label className="text-gray-700">ルートの問い（任意）</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-gray-700">ルートの問い（任意）</Label>
+                {selectedGap && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const text = selectedGap.gapDescription?.trim() || selectedGap.businessArea;
+                      setNewTree((prev) => ({ ...prev, rootQuestion: text }));
+                    }}
+                    className="h-7 gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    GAPから取り込む
+                  </Button>
+                )}
+              </div>
               <Textarea
                 placeholder={PATTERN_META[newTree.pattern].rootExample}
                 value={newTree.rootQuestion}

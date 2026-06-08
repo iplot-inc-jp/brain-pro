@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  HttpException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -46,11 +47,17 @@ import {
   IssueNodeResponseDto,
   IssueTreeWithNodesResponseDto,
   ProjectIssueNodeListItemDto,
+  SuggestIssueNodesRequestDto,
+  SuggestIssueNodesResponseDto,
 } from '../dto';
 import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
+import { ClaudeService } from '../../infrastructure/services/claude.service';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
+import { IssueNodeKind } from '../../domain';
 
 @ApiTags('イシューツリー')
 @ApiBearerAuth()
@@ -67,6 +74,9 @@ export class IssueTreeController {
     private readonly deleteIssueNodeUseCase: DeleteIssueNodeUseCase,
     private readonly setNodeVerificationUseCase: SetNodeVerificationUseCase,
     private readonly listProjectIssueNodesUseCase: ListProjectIssueNodesUseCase,
+    private readonly prisma: PrismaService,
+    private readonly claudeService: ClaudeService,
+    private readonly companyKeyService: CompanyKeyService,
   ) {}
 
   // ===========================================
@@ -202,6 +212,7 @@ export class IssueTreeController {
       name: dto.name,
       rootQuestion: dto.rootQuestion,
       type: dto.type,
+      pattern: dto.pattern,
     });
     return {
       ...result,
@@ -349,4 +360,163 @@ export class IssueTreeController {
       recommendation: result.recommendation as NodeRecommendationDto,
     };
   }
+
+  // ===========================================
+  // 生成AI候補
+  // ===========================================
+
+  @Post('issue-trees/:treeId/nodes/:nodeId/ai-suggest')
+  @ApiOperation({
+    summary: '生成AIによる子ノード候補の提案（永続化しない）',
+  })
+  @ApiParam({ name: 'treeId', description: 'イシューツリーID' })
+  @ApiParam({ name: 'nodeId', description: '対象ノードID' })
+  @ApiResponse({
+    status: 200,
+    description: '成功',
+    type: SuggestIssueNodesResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'AI鍵未設定 / バリデーションエラー' })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({ status: 404, description: 'ツリー/ノードが見つかりません' })
+  @HttpCode(HttpStatus.OK)
+  async aiSuggest(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('treeId') treeId: string,
+    @Param('nodeId') nodeId: string,
+    @Body() dto: SuggestIssueNodesRequestDto,
+  ): Promise<SuggestIssueNodesResponseDto> {
+    // 1. 認可 + ツリー/ノード取得（ツリー→project→org メンバー確認は use-case 側で実施）
+    const tree = await this.getIssueTreeUseCase.execute({
+      userId: user.id,
+      treeId,
+    });
+
+    // 2. 対象ノードの解決（同一ツリー内）
+    const target = tree.nodes.find((n) => n.id === nodeId);
+    if (!target) {
+      throw new HttpException(
+        '対象ノードが見つかりません',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    // 3. 親チェーン（ルート→対象の親）のラベルを集める
+    const nodeById = new Map(tree.nodes.map((n) => [n.id, n]));
+    const parentLabels: string[] = [];
+    let cursor = target.parentId ? nodeById.get(target.parentId) : undefined;
+    const guard = new Set<string>();
+    while (cursor && !guard.has(cursor.id)) {
+      guard.add(cursor.id);
+      parentLabels.unshift(cursor.label);
+      cursor = cursor.parentId ? nodeById.get(cursor.parentId) : undefined;
+    }
+
+    // 4. このツリーに紐づくGAP（あれば）を取得
+    let gapBusinessArea: string | null = null;
+    let gapDescription: string | null = null;
+    const gap = await this.prisma.gapItem.findFirst({
+      where: { issueTreeId: treeId },
+      select: { businessArea: true, gapDescription: true },
+    });
+    if (gap) {
+      gapBusinessArea = gap.businessArea ?? null;
+      gapDescription = gap.gapDescription ?? null;
+    }
+
+    // 5. 候補の種別（kind）を文脈から決定
+    const expectedKind = this.decideSuggestKind(tree.pattern, target.kind);
+    const expectedKindLabel = SUGGEST_KIND_LABELS[expectedKind];
+
+    // 6. APIキー解決（project の org > ユーザー設定 > 環境変数）。無ければ 400。
+    const apiKey = await this.companyKeyService.resolveForProject(
+      tree.projectId,
+      user.id,
+    );
+    if (!apiKey) {
+      // 500にせず、フロントが扱いやすい 400 + { error } で返す
+      throw new HttpException({ error: 'AI鍵未設定' }, HttpStatus.BAD_REQUEST);
+    }
+
+    // 7. 生成AIで構造化候補を取得（永続化はしない）
+    const suggestions = await this.claudeService.suggestIssueNodes(
+      {
+        pattern: tree.pattern,
+        treeName: tree.name,
+        rootQuestion: tree.rootQuestion,
+        targetLabel: target.label,
+        targetKind: target.kind,
+        parentLabels,
+        expectedKind,
+        expectedKindLabel,
+        gapBusinessArea,
+        gapDescription,
+        userContext: dto.context ?? null,
+      },
+      apiKey,
+    );
+
+    return {
+      suggestions: suggestions.map((s) => ({
+        label: s.label,
+        kind: expectedKind as IssueNodeKindDto,
+      })),
+    };
+  }
+
+  /**
+   * ツリーパターンと対象ノードの種別から、子候補の種別（kind）を決定する。
+   * - WHY系（WHYツリー / 対象がCAUSE）→ CAUSE（なぜ候補）
+   * - HOW（打ち手・発散）→ OPTION（打ち手候補）
+   * - MECE_ACTION（打ち手・網羅）→ ACTION（打ち手候補）
+   * - WHAT（対象分割）→ ELEMENT（構成要素）
+   * - KPI → METRIC
+   * - ISSUE_POINT（論点・調査）/ 対象がPOINT → POINT（論点候補）
+   * - 対象がVERIFICATION / HYPOTHESIS → VERIFICATION（検証候補）
+   */
+  private decideSuggestKind(
+    pattern: string,
+    targetKind: string,
+  ): IssueNodeKind {
+    // 対象ノードの種別が強いシグナルになるケースを先に判定
+    if (targetKind === 'HYPOTHESIS' || targetKind === 'VERIFICATION') {
+      return 'VERIFICATION';
+    }
+    if (targetKind === 'CAUSE') {
+      return 'CAUSE';
+    }
+
+    switch (pattern) {
+      case 'WHY':
+        return 'CAUSE';
+      case 'HOW':
+        return 'OPTION';
+      case 'MECE_ACTION':
+        return 'ACTION';
+      case 'WHAT':
+        return 'ELEMENT';
+      case 'KPI':
+        return 'METRIC';
+      case 'ISSUE_POINT':
+      default:
+        return 'POINT';
+    }
+  }
 }
+
+/**
+ * 候補種別ごとの日本語ラベル（プロンプト・説明用）
+ */
+const SUGGEST_KIND_LABELS: Record<IssueNodeKind, string> = {
+  ISSUE: '課題',
+  CAUSE: 'なぜ候補（原因）',
+  COUNTERMEASURE: '打ち手候補',
+  POINT: '論点候補',
+  HYPOTHESIS: '仮説',
+  VERIFICATION: '検証候補',
+  RESULT: '検証結果',
+  ELEMENT: '構成要素',
+  OPTION: '打ち手候補（How）',
+  ACTION: '打ち手候補（MECEアクション）',
+  METRIC: 'KPI（指標）',
+};
