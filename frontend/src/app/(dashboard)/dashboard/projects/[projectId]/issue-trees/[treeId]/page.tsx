@@ -26,6 +26,7 @@ import {
   getSmoothStepPath,
   getBezierPath,
   useNodesState,
+  SelectionMode,
   type Node,
   type Edge,
   type NodeProps,
@@ -72,6 +73,8 @@ import {
   MoreHorizontal,
   Wand2,
   ListPlus,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 import {
   parseIssueMarkdown,
@@ -258,33 +261,42 @@ const KIND_OPTIONS: IssueNodeKind[] = ISSUE_NODE_KINDS;
 
 const NODE_W = 220;
 const NODE_H = 84;
-const X_GAP = 260; // depth ごとの水平間隔
-const Y_GAP = 24; // 兄弟ノードの最小垂直間隔
+const X_GAP = 300; // depth ごとの水平間隔（広めにして子の差し込みでも重ならない）
+// 葉ノードの行送り。実際のマインドマップカードは複数行ラベル＋追加/他/AI候補/例/発想法/削除ボタンで
+// 概ね 140〜170px の高さになるため、旧 NODE_H(84)+Y_GAP(24)=108 では一括追加時に縦で重なる。
+// 葉は MIND_ROW_H ずつ送ることでカード実高に足りる縦間隔を確保する。
+const MIND_ROW_H = 170;
 
-type LayoutNode = {
-  id: string;
-  parentId: string | null;
-  children: string[];
-};
+// 「距離を空ける/狭める」の間隔係数の範囲。X_GAP / MIND_ROW_H に乗算する。
+const SPACING_MIN = 0.6;
+const SPACING_MAX = 1.8;
+const SPACING_STEP = 0.2;
+const SPACING_DEFAULT = 1.0;
+const clampSpacing = (s: number) =>
+  Math.min(SPACING_MAX, Math.max(SPACING_MIN, Math.round(s * 100) / 100));
 
 /**
  * 親→子の隣接から再帰的に座標を求める。
  * x = depth * X_GAP、y は部分木の高さに応じて子を縦に広げ、親はその中央に置く。
+ * spacing（間隔係数, 既定1.0）を X_GAP / MIND_ROW_H に乗算して全体の粗密を調整する。
  */
 function computeLayout(
   rootId: string,
   childrenMap: Map<string, string[]>,
+  spacing = 1,
 ): Map<string, { x: number; y: number }> {
   const pos = new Map<string, { x: number; y: number }>();
+  const xGap = X_GAP * spacing;
+  const rowH = MIND_ROW_H * spacing;
   let cursorY = 0;
 
   const place = (id: string, depth: number): number => {
     const children = childrenMap.get(id) ?? [];
-    const x = depth * X_GAP;
+    const x = depth * xGap;
 
     if (children.length === 0) {
       const y = cursorY;
-      cursorY += NODE_H + Y_GAP;
+      cursorY += rowH;
       pos.set(id, { x, y });
       return y;
     }
@@ -338,8 +350,9 @@ function computeRollups(
     return result;
   };
 
-  // 全ノード（と仮想ルート）を確実に埋める。
-  walk(ROOT_ID);
+  // 全ノードを確実に埋める。仮想ルートを使う場合のみ ROOT_ID も埋める
+  // （実ルート起点では childrenMap に ROOT_ID キーが無いので埋めなくてよい）。
+  if (childrenMap.has(ROOT_ID)) walk(ROOT_ID);
   for (const n of backendNodes) walk(n.id);
   return memo;
 }
@@ -909,6 +922,9 @@ function IssueTreeMindMap() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   // 線の形（角ばり / 曲線）。永続化フィールドが無いためセッション内のみ（見た目だけ）。
   const [edgeShape, setEdgeShape] = useState<IssueEdgeShape>('smoothstep');
+  // レイアウトの間隔係数（「広げる/狭める」）。X_GAP / MIND_ROW_H に乗算。既定1.0。
+  // 永続化フィールドが無いためセッション内のみ。変更すると computeLayout を再適用する。
+  const [spacing, setSpacing] = useState<number>(SPACING_DEFAULT);
 
   // 取り込みダイアログ
   const [importOpen, setImportOpen] = useState(false);
@@ -994,6 +1010,13 @@ function IssueTreeMindMap() {
 
   // パターン（旧 type しか無い既存ツリーはフォールバック）。種別連動ボタン・ルート kind に使う。
   const pattern: IssueTreePattern = tree?.pattern ?? patternFromLegacyType(tree?.type);
+
+  // 実ルート: parentId===null の実ノードが「ちょうど1つ」なら、それを木のトップとして扱う
+  // （仮想ルートを描画しない）。0個 / 2個以上(レガシー)の時は null=従来の仮想ルートを使う。
+  const realRootId = useMemo<string | null>(() => {
+    const top = (tree?.nodes ?? []).filter((n) => n.parentId == null);
+    return top.length === 1 ? top[0].id : null;
+  }, [tree]);
 
   // ===========================================
   // ノードに紐づくタスク（調査 / 実行）
@@ -1097,12 +1120,14 @@ function IssueTreeMindMap() {
   );
   // ルート直下に「最初の子」を追加（N ショートカット / ヘッダーボタン用）。
   // パターンに合う主役 kind を使う（ISSUE_POINT/WHY→論点/原因、How→打ち手候補 等）。
+  // 実ルートがある時はその実ルートの子として足す（=二重ルートを作らない）。
+  // 実ルートが無い（0個 / 2個以上）時は従来どおり parentId=null（仮想ルート直下）に足す。
   const addRootChild = useCallback(() => {
     const rootKind = rootKindForPattern(pattern);
     const buttons = addButtonsFor(rootKind, pattern);
     const first = buttons[0] ?? { childKind: 'POINT' as IssueNodeKind, defaultLabel: '新しい論点' };
-    addNode(null, first.childKind, first.defaultLabel);
-  }, [addNode, pattern]);
+    addNode(realRootId, first.childKind, first.defaultLabel);
+  }, [addNode, pattern, realRootId]);
 
   // 発想法アシスト: チェック済み候補を子ノードとして一括追加（既存の add-node API を再利用）
   const addNodesBulk = useCallback(
@@ -1458,20 +1483,30 @@ function IssueTreeMindMap() {
     const backendNodes = tree.nodes ?? [];
     const rootQuestion = tree.rootQuestion ?? '';
 
-    // 親→子の隣接マップ（order でソート）。ルート直下のノードは仮想ルートにぶら下げる。
+    // 実ルートの判定（コンポーネント上位の realRootId memo を共有）。
+    // parentId===null の実ノードが「ちょうど1つ」なら、それを木のトップに据え、
+    // 仮想ルート(ROOT_ID)ノード/エッジは描画しない（「ルートの問い」と実「課題」の二重表示を解消）。
+    // 0個 / 2個以上（レガシー・複数ルート）の時のみ従来の仮想ルートにぶら下げる。
+    const useVirtualRoot = realRootId === null;
+    const layoutRootId = realRootId ?? ROOT_ID;
+
+    // 親→子の隣接マップ（order でソート）。
+    // 実ルート時は実ルートを根に構築（ROOT_ID キーは作らない）。
+    // 仮想ルート時はルート直下のノードを ROOT_ID にぶら下げる。
     const childrenMap = new Map<string, string[]>();
-    childrenMap.set(ROOT_ID, []);
+    if (useVirtualRoot) childrenMap.set(ROOT_ID, []);
     const sorted = [...backendNodes].sort((a, b) =>
       a.depth !== b.depth ? a.depth - b.depth : a.order - b.order,
     );
     for (const n of sorted) {
-      const parentKey = n.parentId ?? ROOT_ID;
+      const parentKey = n.parentId ?? (useVirtualRoot ? ROOT_ID : n.id);
       if (!childrenMap.has(parentKey)) childrenMap.set(parentKey, []);
-      childrenMap.get(parentKey)!.push(n.id);
+      // 実ルート（parentId=null & 実ルート採用）は自分自身が根なので子リストに足さない。
+      if (!(realRootId && n.parentId == null)) childrenMap.get(parentKey)!.push(n.id);
       if (!childrenMap.has(n.id)) childrenMap.set(n.id, []);
     }
 
-    const layout = computeLayout(ROOT_ID, childrenMap);
+    const layout = computeLayout(layoutRootId, childrenMap, spacing);
 
     // 発散→収束（spec C）: 配下の RESULT/検証結果(○×△) を各ノードへロールアップ集約。
     // RESULT ノード自身の verification を種に、子の集約を足し上げてバッジを作る。
@@ -1490,25 +1525,29 @@ function IssueTreeMindMap() {
     };
 
     const nodes: Node[] = [];
-    nodes.push({
-      id: ROOT_ID,
-      type: 'mind',
-      position: layout.get(ROOT_ID) ?? { x: 0, y: 0 },
-      data: {
-        ...baseData,
-        node: null,
-        isRoot: true,
-        selected: selectedId === null && false, // ルートは明示選択しないと反転させない
-        taskCount: 0,
-        rollup: rollupByNode.get(ROOT_ID) ?? null,
-      } as unknown as Record<string, unknown>,
-      draggable: false,
-    });
+    // 仮想ルートを使う時だけ「ルートの問い」ノードを描画する。
+    // 実ルート（parentId=null の実ノードが1つ）の時は実ノード自身がトップなので描画しない。
+    if (useVirtualRoot) {
+      nodes.push({
+        id: ROOT_ID,
+        type: 'mind',
+        position: layout.get(ROOT_ID) ?? { x: 0, y: 0 },
+        data: {
+          ...baseData,
+          node: null,
+          isRoot: true,
+          selected: selectedId === null && false, // ルートは明示選択しないと反転させない
+          taskCount: 0,
+          rollup: rollupByNode.get(ROOT_ID) ?? null,
+        } as unknown as Record<string, unknown>,
+        draggable: false,
+      });
+    }
 
     for (const n of backendNodes) {
       // 位置 = 保存済み(metadata.x/y が数値)優先、無ければ computeLayout の座標。
       // ドラッグ確定で metadata.x/y を保存するので、再フェッチ後もここで一致し戻らない。
-      const computed = layout.get(n.id) ?? { x: n.depth * X_GAP, y: 0 };
+      const computed = layout.get(n.id) ?? { x: n.depth * X_GAP * spacing, y: 0 };
       const savedX = n.metadata?.x;
       const savedY = n.metadata?.y;
       const position =
@@ -1532,7 +1571,10 @@ function IssueTreeMindMap() {
       });
     }
 
-    const edges: Edge[] = backendNodes.map((n) => {
+    const edges: Edge[] = backendNodes
+      // 実ルートはトップ（親なし・仮想ルートも描画しない）なので親エッジを引かない。
+      .filter((n) => !(realRootId !== null && n.id === realRootId))
+      .map((n) => {
       const edgeId = `e-${n.parentId ?? ROOT_ID}-${n.id}`;
       // ルート直下のノードは「仮想ルート」にぶら下がるだけで実際の親リンクは無い。
       // よってデタッチ（親外し）はできない（既に親なし）。実ノード→実ノードのみ外せる。
@@ -1557,9 +1599,11 @@ function IssueTreeMindMap() {
   }, [
     tree,
     pattern,
+    realRootId,
     selectedId,
     selectedEdgeId,
     edgeShape,
+    spacing,
     tasksByNode,
     addChild,
     openIdeate,
@@ -1594,9 +1638,11 @@ function IssueTreeMindMap() {
     [tree, patchNode],
   );
 
-  // 「整形」: 全実ノードの metadata から x/y を消して保存し、computeLayout レイアウトに戻す。
+  // 全実ノードの metadata から x/y を消して保存し、computeLayout レイアウトに戻す（整形の本体）。
   // 次の rfNodes 再計算で metadata.x/y が無いノードは computeLayout 座標を使う(初期値ロジック)。
-  const tidyLayout = useCallback(async () => {
+  // 手動配置が無い場合でも computeLayout は spacing を見て再計算されるので、
+  // 「広げる/狭める」(spacing 変更)単体でも再レイアウトされる。
+  const resetSavedPositions = useCallback(async () => {
     const nodes = tree?.nodes ?? [];
     const targets = nodes.filter(
       (n) => typeof n.metadata?.x === 'number' || typeof n.metadata?.y === 'number',
@@ -1624,6 +1670,28 @@ function IssueTreeMindMap() {
       setBusy(false);
     }
   }, [tree, treeId, getHeaders, fetchTree]);
+
+  // 「整形」: 手動配置を破棄して spacing は据え置きのまま自動レイアウトへ戻す。
+  const tidyLayout = useCallback(() => {
+    void resetSavedPositions();
+  }, [resetSavedPositions]);
+
+  // 「広げる / 狭める」: 間隔係数 spacing を増減し、手動配置を消して自動レイアウトを再適用。
+  // spacing は SPACING_MIN〜SPACING_MAX にクランプ（重ならない範囲）。
+  // computeLayout(spacing) は rfNodes useMemo で再計算され、保存位置が無いノードに反映される。
+  const changeSpacing = useCallback(
+    (delta: number) => {
+      // 更新関数は純粋に保ち、副作用(保存位置クリア)は外で実行（StrictMode 二重起動対策）。
+      const next = clampSpacing(spacing + delta);
+      if (next === spacing) return;
+      setSpacing(next);
+      // 手動でドラッグ配置したノードは spacing を無視してしまうので、整形と同様に位置を消す。
+      void resetSavedPositions();
+    },
+    [spacing, resetSavedPositions],
+  );
+  const widenLayout = useCallback(() => changeSpacing(SPACING_STEP), [changeSpacing]);
+  const narrowLayout = useCallback(() => changeSpacing(-SPACING_STEP), [changeSpacing]);
 
   const selectedNode = useMemo(
     () => (selectedId ? (tree?.nodes ?? []).find((n) => n.id === selectedId) ?? null : null),
@@ -1772,6 +1840,8 @@ function IssueTreeMindMap() {
                 '原因（なぜ）ノードからは「調査タスク」、打ち手ノードからは「実行タスク」を作成し、ノードに紐づけてタスク管理できます。紐づくタスクは右パネルに一覧表示されます。',
                 '親→子をつなぐ線（矢印）はどこをクリックしても選択できます。選択中の線の中点に出る「鎖を外す」ボタン（または Delete）で、その子ノードを親から切り離してルート直下へ移動できます（ノード自体は削除されません）。',
                 '右上の「角ばり / 曲線」で線の見た目を切り替えられます（表示のみ・保存はされません）。',
+                'ヘッダーの「整形」で手動配置をリセットして自動レイアウトに戻せます。「狭める / 広げる」でノード間の距離（間隔）を一括で詰めたり空けたりできます（手動配置はリセットされます）。',
+                '何もない所を左ドラッグすると矩形で複数ノードをまとめて選択できます。画面の移動（パン）は中ボタン / 右ボタンのドラッグで行います。',
                 '「テキストから取り込み」でインデント箇条書きを一括投入できます（作成時向け）。',
               ]}
               shortcuts={[
@@ -1798,6 +1868,32 @@ function IssueTreeMindMap() {
             <LayoutGrid className="mr-1 h-4 w-4" />
             整形
           </Button>
+          {/* 距離を空ける / 狭める: 間隔係数 spacing を増減して自動レイアウトを再適用 */}
+          <div className="flex items-center rounded-md border border-gray-200">
+            <button
+              type="button"
+              onClick={narrowLayout}
+              disabled={busy || spacing <= SPACING_MIN}
+              title="ノード間の距離を狭める"
+              className="flex items-center gap-1 rounded-l-md px-2 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:opacity-40"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              狭める
+            </button>
+            <span className="border-x border-gray-200 px-2 py-1.5 text-[11px] tabular-nums text-gray-500">
+              {Math.round(spacing * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={widenLayout}
+              disabled={busy || spacing >= SPACING_MAX}
+              title="ノード間の距離を広げる"
+              className="flex items-center gap-1 rounded-r-md px-2 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:opacity-40"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              広げる
+            </button>
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -1866,6 +1962,13 @@ function IssueTreeMindMap() {
               nodesDraggable
               nodesConnectable={false}
               elementsSelectable
+              // 矩形範囲選択: 空白(ペーン)を左ドラッグすると矩形で複数ノードを選択。
+              // パンは中ボタン/右ボタンドラッグに割り当て、左ドラッグの矩形選択と両立させる。
+              // ノードの左ドラッグ移動(nodesDraggable)・クリック選択はノード上の操作なので衝突しない。
+              // partial=矩形に一部でも重なれば選択。
+              selectionOnDrag
+              selectionMode={SelectionMode.Partial}
+              panOnDrag={[1, 2]}
               // 標準の Delete はノードまで巻き込むため無効化し、矢印の切り離しは自前で扱う。
               deleteKeyCode={null}
             >
