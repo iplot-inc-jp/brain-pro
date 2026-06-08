@@ -15,6 +15,24 @@ export type Role = {
 /** ノード単位のクロスフロー入出力リンクの向き。 */
 export type FlowLinkDirection = 'INPUT' | 'OUTPUT';
 
+/**
+ * ノードに紐づく情報種別（InformationType マスタ）の入出力リンク。
+ * GET business-flows/:id のノードに `informationLinks` として含まれる。
+ * direction で INPUT / OUTPUT を区別する。
+ */
+export type NodeInformationLink = {
+  id: string;
+  nodeId: string;
+  informationTypeId: string;
+  direction: FlowLinkDirection;
+  order: number;
+  informationType?: {
+    id: string;
+    name: string;
+    category: string;
+  } | null;
+};
+
 /** ノードに紐づくクロスフロー入出力リンク。 */
 export type FlowNodeLink = {
   id: string;
@@ -43,6 +61,8 @@ export type FlowDataNode = {
   childFlow?: { id: string; name: string };
   /** このノードを起点とするクロスフロー入出力リンク（GET フロー詳細に含まれる）。 */
   links?: FlowNodeLink[];
+  /** このノードの INPUT/OUTPUT を情報種別マスタから選んだリンク（GET フロー詳細に含まれる）。 */
+  informationLinks?: NodeInformationLink[];
   /** ノードに紐づく補足情報（処理時間・INPUT・OUTPUT・補足など）。 */
   metadata?: Record<string, unknown>;
 };
@@ -66,6 +86,14 @@ export type FlowDataEdge = {
   sourceHandle?: string | null;
   /** 接続先ハンドルの辺（'top'|'right'|'bottom'|'left'）。 */
   targetHandle?: string | null;
+  /** この矢印が運ぶ情報種別（source の OUTPUT → target の INPUT）。 */
+  informationTypeId?: string | null;
+  /** informationTypeId に対応する情報種別の埋め込み（GET フロー詳細に含まれる）。 */
+  informationType?: {
+    id: string;
+    name: string;
+    category: string;
+  } | null;
 };
 
 export type FlowData = {

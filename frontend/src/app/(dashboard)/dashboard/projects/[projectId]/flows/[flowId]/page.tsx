@@ -40,7 +40,7 @@ import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/S
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
-import { dfdApi, reportTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type ReportType } from '@/lib/dfd';
+import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType } from '@/lib/dfd';
 import type {
   FlowData,
   FlowLinkDirection,
@@ -90,7 +90,7 @@ function DfdPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'diagram' | 'table'>('diagram');
-  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
+  const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,18 +105,18 @@ function DfdPanel({
     }
   }, [flowId]);
 
-  const loadReportTypes = useCallback(async () => {
+  const loadInformationTypes = useCallback(async () => {
     try {
-      setReportTypes(await reportTypeApi.list(projectId));
+      setInformationTypes(await informationTypeApi.list(projectId));
     } catch {
-      /* 帳票種別の取得失敗は致命ではない */
+      /* 情報種別の取得失敗は致命ではない */
     }
   }, [projectId]);
 
   useEffect(() => {
     void load();
-    void loadReportTypes();
-  }, [load, loadReportTypes]);
+    void loadInformationTypes();
+  }, [load, loadInformationTypes]);
 
   const handleRegenerate = useCallback(async () => {
     setBusy(true);
@@ -319,7 +319,7 @@ function DfdPanel({
             <div className="h-[calc(100vh-320px)] overflow-hidden rounded-lg border border-gray-200">
               <DfdCanvas
                 diagram={diagram}
-                reportTypes={reportTypes}
+                informationTypes={informationTypes}
                 onAddNode={handleAddNode}
                 onUpdateNode={handleUpdateNode}
                 onDeleteNode={handleDeleteNode}
@@ -332,7 +332,7 @@ function DfdPanel({
               />
             </div>
           ) : (
-            <DataFlowTable diagram={diagram} reportTypes={reportTypes} />
+            <DataFlowTable diagram={diagram} informationTypes={informationTypes} />
           )}
         </>
       )}
@@ -622,6 +622,7 @@ export default function ProjectFlowDetailPage() {
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
+  const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -713,6 +714,15 @@ export default function ProjectFlowDetailPage() {
     }
   }, [projectId, getHeaders]);
 
+  // プロジェクトの情報種別マスタ（ノードINPUT/OUTPUTの多選択用）
+  const fetchInformationTypes = useCallback(async () => {
+    try {
+      setInformationTypes(await informationTypeApi.list(projectId));
+    } catch {
+      /* 情報種別の取得失敗は致命ではない（多選択が空になるだけ） */
+    }
+  }, [projectId]);
+
   // 初期読み込み
   useEffect(() => {
     if (flowId) {
@@ -724,6 +734,10 @@ export default function ProjectFlowDetailPage() {
   useEffect(() => {
     if (projectId) fetchOtherFlows();
   }, [projectId, fetchOtherFlows]);
+
+  useEffect(() => {
+    if (projectId) fetchInformationTypes();
+  }, [projectId, fetchInformationTypes]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -784,6 +798,78 @@ export default function ProjectFlowDetailPage() {
         fetchFlowData(flowData.id);
       } catch (err) {
         console.error('Failed to update edge label:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // エッジ更新（運ぶ情報種別 informationTypeId / ラベル）
+  // PUT /api/business-flows/:flowId/edges/:edgeId に変化したフィールドのみ送る。
+  // informationTypeId は null で「未設定」を表す（undefined のキーは送らない）。
+  // 情報種別を設定したら、source ノードの OUTPUT・target ノードの INPUT として
+  // 情報種別リンクへ非破壊マージする（既にあれば何もしない）。
+  const handleEdgeUpdate = useCallback(
+    async (
+      edgeId: string,
+      patch: { informationTypeId?: string | null; label?: string }
+    ) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges/${edgeId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(patch),
+        });
+        if (!res.ok) throw new Error('Failed to update edge');
+
+        // 情報種別を設定した場合のみ、source/target ノードの INPUT/OUTPUT へ非破壊同期。
+        // ノードの現在の informationLinks（フロー詳細に含まれる）を読み、無ければ追加して
+        // replace-all（PUT .../information-links）でマージ保存する。既にあれば送らない。
+        const infoId = patch.informationTypeId;
+        if (infoId) {
+          const edge = flowData.edges.find((e) => e.id === edgeId);
+          if (edge) {
+            const ensure = async (
+              nodeId: string,
+              direction: FlowLinkDirection
+            ) => {
+              const node = flowData.nodes.find((n) => n.id === nodeId);
+              if (!node) return;
+              const existing = node.informationLinks ?? [];
+              const has = existing.some(
+                (l) => l.informationTypeId === infoId && l.direction === direction
+              );
+              if (has) return;
+              // 既存リンクを保ったまま、無い方向に当該情報種別を末尾追加して replace-all 保存。
+              const links = [
+                ...existing.map((l) => ({
+                  informationTypeId: l.informationTypeId,
+                  direction: l.direction,
+                  order: l.order,
+                })),
+                {
+                  informationTypeId: infoId,
+                  direction,
+                  order: existing.filter((l) => l.direction === direction).length,
+                },
+              ];
+              const r = await fetch(
+                `${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}/information-links`,
+                { method: 'PUT', headers, body: JSON.stringify({ links }) }
+              );
+              if (!r.ok) throw new Error('Failed to sync node information link');
+            };
+            await Promise.all([
+              ensure(edge.sourceNodeId, 'OUTPUT'),
+              ensure(edge.targetNodeId, 'INPUT'),
+            ]);
+          }
+        }
+
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to update edge:', err);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1249,6 +1335,36 @@ export default function ProjectFlowDetailPage() {
   );
 
   // ===========================================
+  // ノードINPUT/OUTPUT（情報種別マスタからの多選択）
+  // PUT business-flows/:flowId/nodes/:nodeId/information-links で replace-all 保存 → 再取得。
+  // ===========================================
+  const handleSaveNodeInformationLinks = useCallback(
+    async (
+      nodeId: string,
+      links: Array<{ informationTypeId: string; direction: FlowLinkDirection; order?: number }>
+    ) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}/information-links`,
+          {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ links }),
+          }
+        );
+        if (!res.ok) throw new Error('Failed to save node information links');
+        // 種類数/ラベルを反映するため再取得
+        fetchFlowData(flowData.id);
+      } catch (err) {
+        console.error('Failed to save node information links:', err);
+      }
+    },
+    [flowData, fetchFlowData, getHeaders]
+  );
+
+  // ===========================================
   // 表示ロール選択（フローごと localStorage 永続化）
   // ===========================================
   const rolesStorageKey = useMemo(() => `flow-roles-${flowId}`, [flowId]);
@@ -1663,6 +1779,8 @@ export default function ProjectFlowDetailPage() {
           roles={visibleRoles}
           projectId={projectId}
           otherFlows={otherFlows}
+          informationTypes={informationTypes}
+          onSaveNodeInformationLinks={handleSaveNodeInformationLinks}
           onBack={flowHistory.length > 1 ? handleBack : undefined}
           onUpdateFlow={handleFlowUpdate}
           onCreateNode={handleNodeCreate}
@@ -1671,6 +1789,7 @@ export default function ProjectFlowDetailPage() {
           onDeleteEdge={handleEdgeDelete}
           onReconnectEdge={handleReconnectEdge}
           onUpdateEdgeLabel={handleEdgeLabelUpdate}
+          onUpdateEdge={handleEdgeUpdate}
           onInsertNodeOnEdge={handleInsertNodeOnEdge}
           onChangeNodeRole={handleNodeRoleUpdate}
           onUpdateNode={handleNodeUpdate}

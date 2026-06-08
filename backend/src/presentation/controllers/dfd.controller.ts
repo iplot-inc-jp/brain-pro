@@ -48,13 +48,13 @@ class AddFlowDto {
   @IsOptional() @IsString() sourceHandle?: string | null;
   @IsOptional() @IsString() targetHandle?: string | null;
   @IsOptional() @IsString() dataItem?: string;
-  @IsOptional() @IsString() reportTypeId?: string | null;
+  @IsOptional() @IsString() informationTypeId?: string | null;
   @IsOptional() @IsNumber() order?: number;
 }
 
 class UpdateFlowDto {
   @IsOptional() @IsString() dataItem?: string;
-  @IsOptional() @IsString() reportTypeId?: string | null;
+  @IsOptional() @IsString() informationTypeId?: string | null;
   @IsOptional() @IsString() sourceNodeId?: string;
   @IsOptional() @IsString() targetNodeId?: string;
   @IsOptional() @IsString() sourceHandle?: string | null;

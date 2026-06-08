@@ -63,6 +63,8 @@ import {
   ArrowUpRight,
   Loader2,
   LayoutGrid,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -75,12 +77,18 @@ import {
 } from './flow-layout';
 import type {
   FlowData,
+  FlowDataEdge,
   FlowDataNode,
   FlowLinkDirection,
   FlowNodeLink,
   FlowSummary,
   Role,
 } from './flow-types';
+import {
+  INFORMATION_CATEGORY_LABELS,
+  type InformationCategory,
+  type InformationType,
+} from '@/lib/dfd';
 
 const LANE_LABEL_W = 132;
 
@@ -151,6 +159,15 @@ export interface SwimlaneCanvasProps {
   ) => void;
   onUpdateEdgeLabel?: (edgeId: string, label: string) => void;
   /**
+   * エッジの編集パネルからの保存。運ぶ情報種別（informationTypeId）/ラベルを
+   * PUT /:flowId/edges/:edgeId で永続化する処理は呼び出し側（ページ）に委譲する。
+   * informationTypeId は null で「未設定」を表す。undefined のキーは送らない。
+   */
+  onUpdateEdge?: (
+    edgeId: string,
+    patch: { informationTypeId?: string | null; label?: string },
+  ) => Promise<void> | void;
+  /**
    * 接続線（エッジ）の途中にノードを挿入する。
    * エッジ上の「＋」アフォーダンスをクリックすると呼ばれる。
    * source→新ノード→target に繋ぎ替える処理は呼び出し側（ページ）に委譲する。
@@ -177,6 +194,18 @@ export interface SwimlaneCanvasProps {
   onDeleteNodeLink?: (linkId: string) => Promise<void>;
   /** 連携先フローのノード一覧を取得（連携先ノード選択用、任意）。 */
   onFetchFlowNodes?: (flowId: string) => Promise<Array<{ id: string; label: string }>>;
+  // --- ノードINPUT/OUTPUT（情報種別マスタからの多選択） ---
+  /** プロジェクトの情報種別マスタ（INPUT/OUTPUT 多選択の選択肢）。 */
+  informationTypes?: InformationType[];
+  /**
+   * ノードのINPUT/OUTPUT（情報種別リンク）を replace-all 保存する。
+   * PUT business-flows/:flowId/nodes/:nodeId/information-links に { links } を送る処理は
+   * 呼び出し側（ページ）に委譲する。
+   */
+  onSaveNodeInformationLinks?: (
+    nodeId: string,
+    links: Array<{ informationTypeId: string; direction: FlowLinkDirection; order?: number }>,
+  ) => Promise<void> | void;
   /**
    * ノードのプロパティ保存 / ドラッグでの自由配置保存・レーン移動で呼ばれる。
    * - 右サイドバー保存: { label?, type?, roleId?, metadata? }
@@ -413,6 +442,8 @@ function EditableEdge({
   data?: {
     onLabelUpdate?: (id: string, label: string) => void;
     onInsertNode?: (id: string) => void;
+    /** この矢印が運ぶ情報種別名（チップ表示用）。未設定なら表示しない。 */
+    informationTypeName?: string | null;
   };
 }) {
   const [editing, setEditing] = useState(false);
@@ -428,6 +459,7 @@ function EditableEdge({
   // 「＋」挿入アフォーダンスはエッジの中点に置く。ラベルと重ならないよう少し下げる。
   const insertX = (sourceX + targetX) / 2;
   const insertY = (sourceY + targetY) / 2;
+  const infoName = data?.informationTypeName;
   return (
     <>
       <BaseEdge
@@ -437,6 +469,27 @@ function EditableEdge({
         style={{ strokeWidth: selected ? 3 : 2, stroke: selected ? '#3b82f6' : '#64748b' }}
       />
       <EdgeLabelRenderer>
+        {/* 運ぶ情報種別のチップ: ラベルの少し上に置く（source の OUTPUT → target の INPUT） */}
+        {infoName && (
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY - 16}px)`,
+              pointerEvents: 'none',
+            }}
+            className="nodrag nopan"
+          >
+            <span
+              className={`inline-flex items-center gap-0.5 rounded-full border bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 shadow-sm ${
+                selected ? 'border-indigo-400' : 'border-indigo-200'
+              }`}
+              title={`運ぶ情報: ${infoName}`}
+            >
+              <Database className="h-2.5 w-2.5" />
+              {infoName}
+            </span>
+          </div>
+        )}
         {/* エッジ中点の「＋」: クリックでこの接続線の途中にノードを挿入 */}
         {data?.onInsertNode && (
           <button
@@ -807,7 +860,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         // 端点ドラッグで付け替え可能にする（onReconnect が発火する）。
         reconnectable: !!props.onReconnectEdge,
         markerEnd: { type: MarkerType.ArrowClosed, color: '#64748b', width: 18, height: 18 },
-        data: { onLabelUpdate: props.onUpdateEdgeLabel, onInsertNode: props.onInsertNodeOnEdge },
+        data: {
+          onLabelUpdate: props.onUpdateEdgeLabel,
+          onInsertNode: props.onInsertNodeOnEdge,
+          informationTypeName: e.informationType?.name ?? null,
+        },
       })),
     [
       flowData.edges,
@@ -1183,8 +1240,39 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onCreateNodeLink={props.onCreateNodeLink}
           onDeleteNodeLink={props.onDeleteNodeLink}
           onFetchFlowNodes={props.onFetchFlowNodes}
+          informationTypes={props.informationTypes ?? []}
+          onSaveNodeInformationLinks={props.onSaveNodeInformationLinks}
         />
       )}
+
+      {/* エッジ編集パネル（矢印が選択されている間） */}
+      {selectedEdgeId && (() => {
+        const edge = flowData.edges.find((e) => e.id === selectedEdgeId);
+        if (!edge) return null;
+        return (
+          <EdgePropertyPanel
+            key={selectedEdgeId}
+            edge={edge}
+            informationTypes={props.informationTypes ?? []}
+            sourceLabel={flowData.nodes.find((n) => n.id === edge.sourceNodeId)?.label}
+            targetLabel={flowData.nodes.find((n) => n.id === edge.targetNodeId)?.label}
+            onClose={() => setSelectedEdgeId(null)}
+            onUpdateEdge={props.onUpdateEdge}
+            onReverse={
+              props.onReconnectEdge
+                ? () =>
+                    props.onReconnectEdge?.(edge.id, {
+                      // source/target を入れ替え。接続側ハンドルも入れ替えて見た目を維持する。
+                      sourceNodeId: edge.targetNodeId,
+                      targetNodeId: edge.sourceNodeId,
+                      sourceHandle: edge.targetHandle ?? null,
+                      targetHandle: edge.sourceHandle ?? null,
+                    })
+                : undefined
+            }
+          />
+        );
+      })()}
 
       {roles.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center">
@@ -1215,10 +1303,6 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
 function readMeta(node: FlowDataNode | null): {
   duration: string;
-  input: string;
-  inputKinds: string;
-  output: string;
-  outputKinds: string;
   handledCount: string;
   notes: string;
 } {
@@ -1226,10 +1310,6 @@ function readMeta(node: FlowDataNode | null): {
   const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
   return {
     duration: s(meta.duration),
-    input: s(meta.input),
-    inputKinds: s(meta.inputKinds),
-    output: s(meta.output),
-    outputKinds: s(meta.outputKinds),
     handledCount: s(meta.handledCount),
     notes: s(meta.notes),
   };
@@ -1620,13 +1700,237 @@ function AddLinkForm({
   );
 }
 
+// ===========================================
+// 情報種別マスタからの INPUT/OUTPUT 多選択（チェックボックスリスト）
+// 選択した順に order を割り当てる（選択 = 末尾追加、解除 = 取り除き）。
+// ===========================================
+
+const CATEGORY_BADGE_STYLE: Record<InformationCategory, string> = {
+  INFORMATION: 'bg-sky-50 text-sky-700 border-sky-200',
+  OBJECT: 'bg-amber-50 text-amber-700 border-amber-200',
+  DOCUMENT: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+
+function InformationTypeMultiSelect({
+  title,
+  informationTypes,
+  selectedIds,
+  onChange,
+}: {
+  title: string;
+  informationTypes: InformationType[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const toggle = (id: string, checked: boolean) => {
+    if (checked) {
+      if (selected.has(id)) return;
+      onChange([...selectedIds, id]);
+    } else {
+      onChange(selectedIds.filter((x) => x !== id));
+    }
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label className="text-[11px] font-medium text-gray-500">{title}</label>
+        <span className="text-[11px] text-gray-400">{selectedIds.length} 種類</span>
+      </div>
+      {informationTypes.length === 0 ? (
+        <p className="text-[11px] text-gray-400 px-1 py-1.5">
+          情報種別マスタが空です。参考マスタで情報種別を登録してください。
+        </p>
+      ) : (
+        <div className="max-h-44 overflow-auto rounded border border-gray-300 divide-y divide-gray-100">
+          {informationTypes.map((it) => {
+            const checked = selected.has(it.id);
+            const badgeCls =
+              CATEGORY_BADGE_STYLE[it.category] ?? CATEGORY_BADGE_STYLE.INFORMATION;
+            return (
+              <label
+                key={it.id}
+                className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => toggle(it.id, e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                <span className="flex-1 truncate text-sm text-gray-800">{it.name}</span>
+                <span
+                  className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${badgeCls}`}
+                >
+                  {INFORMATION_CATEGORY_LABELS[it.category]}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===========================================
+// エッジ（矢印）の編集パネル（右サイドバー）
+// 矢印が運ぶ情報種別（source の OUTPUT → target の INPUT）とラベルを編集し、
+// 向きの反転（source/target スワップ）を行う。
+// ===========================================
+
+function EdgePropertyPanel({
+  edge,
+  informationTypes,
+  sourceLabel,
+  targetLabel,
+  onClose,
+  onUpdateEdge,
+  onReverse,
+}: {
+  edge: FlowDataEdge;
+  informationTypes: InformationType[];
+  sourceLabel?: string;
+  targetLabel?: string;
+  onClose: () => void;
+  onUpdateEdge?: (
+    edgeId: string,
+    patch: { informationTypeId?: string | null; label?: string },
+  ) => Promise<void> | void;
+  onReverse?: () => void;
+}) {
+  const [informationTypeId, setInformationTypeId] = useState<string>(
+    edge.informationTypeId ?? '',
+  );
+  const [label, setLabel] = useState<string>(edge.label ?? '');
+
+  const initialInfoId = edge.informationTypeId ?? '';
+  const initialLabel = edge.label ?? '';
+
+  // 情報種別 / ラベルが初期値から変わったぶんだけ送る（informationTypeId は '' → null）。
+  const save = useCallback(() => {
+    if (!onUpdateEdge) return;
+    const patch: { informationTypeId?: string | null; label?: string } = {};
+    if (informationTypeId !== initialInfoId) {
+      patch.informationTypeId = informationTypeId === '' ? null : informationTypeId;
+    }
+    if (label !== initialLabel) patch.label = label;
+    if (patch.informationTypeId === undefined && patch.label === undefined) return;
+    void onUpdateEdge(edge.id, patch);
+  }, [onUpdateEdge, edge.id, informationTypeId, label, initialInfoId, initialLabel]);
+
+  return (
+    <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <h3 className="text-sm font-semibold text-gray-900">矢印のプロパティ</h3>
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 rounded hover:bg-gray-100 text-gray-500"
+          title="閉じる"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
+        {/* 向き（source → target）の表示 */}
+        <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          <div className="flex items-center gap-1.5">
+            <span className="max-w-[100px] truncate font-medium text-gray-800" title={sourceLabel}>
+              {sourceLabel ?? '?'}
+            </span>
+            <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" />
+            <span className="max-w-[100px] truncate font-medium text-gray-800" title={targetLabel}>
+              {targetLabel ?? '?'}
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] text-gray-400">
+            運ぶ情報は、起点ノードの OUTPUT・終点ノードの INPUT になります。
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">
+            運ぶ情報（情報種別）
+          </label>
+          <select
+            value={informationTypeId}
+            onChange={(e) => setInformationTypeId(e.target.value)}
+            onBlur={save}
+            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            <option value="">（未設定）</option>
+            {informationTypes.map((it) => (
+              <option key={it.id} value={it.id}>
+                {it.name}（{INFORMATION_CATEGORY_LABELS[it.category]}）
+              </option>
+            ))}
+          </select>
+          {informationTypes.length === 0 && (
+            <p className="mt-1 text-[11px] text-gray-400">
+              情報種別マスタが空です。参考マスタで情報種別を登録してください。
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">ラベル</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={save}
+            placeholder="例: 承認後"
+            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+        </div>
+
+        {onReverse && (
+          <button
+            type="button"
+            onClick={() => {
+              onReverse();
+              onClose();
+            }}
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+            title="矢印の向き（起点と終点）を入れ替えます"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            向きを反転
+          </button>
+        )}
+      </div>
+
+      <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onClose} className="text-gray-600">
+          閉じる
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => {
+            save();
+            onClose();
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+        >
+          保存
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function NodePropertyPanel({
   node,
   roles,
   currentFlowId,
   otherFlows,
+  informationTypes,
   onClose,
   onUpdateNode,
+  onSaveNodeInformationLinks,
   onFetchNodeLinks,
   onCreateNodeLink,
   onDeleteNodeLink,
@@ -1636,8 +1940,13 @@ function NodePropertyPanel({
   roles: Role[];
   currentFlowId: string;
   otherFlows: FlowSummary[];
+  informationTypes: InformationType[];
   onClose: () => void;
   onUpdateNode?: (nodeId: string, patch: NodeUpdatePatch) => void;
+  onSaveNodeInformationLinks?: (
+    nodeId: string,
+    links: Array<{ informationTypeId: string; direction: FlowLinkDirection; order?: number }>,
+  ) => Promise<void> | void;
   onFetchNodeLinks?: (nodeId: string) => Promise<NodeLinksResult>;
   onCreateNodeLink?: (
     nodeId: string,
@@ -1651,24 +1960,79 @@ function NodePropertyPanel({
   const [roleId, setRoleId] = useState(node?.roleId ?? node?.role?.id ?? '');
   const initMeta = readMeta(node);
   const [duration, setDuration] = useState(initMeta.duration);
-  const [input, setInput] = useState(initMeta.input);
-  const [inputKinds, setInputKinds] = useState(initMeta.inputKinds);
-  const [output, setOutput] = useState(initMeta.output);
-  const [outputKinds, setOutputKinds] = useState(initMeta.outputKinds);
   const [handledCount, setHandledCount] = useState(initMeta.handledCount);
   const [notes, setNotes] = useState(initMeta.notes);
+
+  // INPUT/OUTPUT は情報種別マスタからの多選択。node.informationLinks から初期化し、
+  // 選択中の informationTypeId 集合を direction ごとに保持する（order は配列順）。
+  const initialInputIds = useMemo(
+    () =>
+      (node?.informationLinks ?? [])
+        .filter((l) => l.direction === 'INPUT')
+        .sort((a, b) => a.order - b.order)
+        .map((l) => l.informationTypeId),
+    [node],
+  );
+  const initialOutputIds = useMemo(
+    () =>
+      (node?.informationLinks ?? [])
+        .filter((l) => l.direction === 'OUTPUT')
+        .sort((a, b) => a.order - b.order)
+        .map((l) => l.informationTypeId),
+    [node],
+  );
+  const [inputIds, setInputIds] = useState<string[]>(initialInputIds);
+  const [outputIds, setOutputIds] = useState<string[]>(initialOutputIds);
+
+  // 情報種別リンクが初期値から変化したか（変化時のみ保存して再取得を抑える）
+  const sameIds = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((id, i) => id === b[i]);
 
   const save = useCallback(() => {
     if (!node) return;
     const patch: NodeUpdatePatch = {
-      metadata: { duration, input, inputKinds, output, outputKinds, handledCount, notes },
+      metadata: { duration, handledCount, notes },
     };
     if (label !== node.label) patch.label = label;
     if (type !== node.type) patch.type = type;
     const currentRole = node.roleId ?? node.role?.id ?? '';
     if (roleId && roleId !== currentRole) patch.roleId = roleId;
     onUpdateNode?.(node.id, patch);
-  }, [node, label, type, roleId, duration, input, inputKinds, output, outputKinds, handledCount, notes, onUpdateNode]);
+
+    // INPUT/OUTPUT（情報種別リンク）は専用エンドポイントで replace-all 保存
+    if (
+      onSaveNodeInformationLinks &&
+      (!sameIds(inputIds, initialInputIds) || !sameIds(outputIds, initialOutputIds))
+    ) {
+      const links = [
+        ...inputIds.map((informationTypeId, i) => ({
+          informationTypeId,
+          direction: 'INPUT' as FlowLinkDirection,
+          order: i,
+        })),
+        ...outputIds.map((informationTypeId, i) => ({
+          informationTypeId,
+          direction: 'OUTPUT' as FlowLinkDirection,
+          order: i,
+        })),
+      ];
+      void onSaveNodeInformationLinks(node.id, links);
+    }
+  }, [
+    node,
+    label,
+    type,
+    roleId,
+    duration,
+    handledCount,
+    notes,
+    inputIds,
+    outputIds,
+    initialInputIds,
+    initialOutputIds,
+    onUpdateNode,
+    onSaveNodeInformationLinks,
+  ]);
 
   if (!node) return null;
 
@@ -1737,55 +2101,19 @@ function NodePropertyPanel({
           />
         </div>
 
-        <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">INPUT</label>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onBlur={save}
-            rows={2}
-            placeholder="例: 受注票、在庫データ"
-            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"
-          />
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500 whitespace-nowrap">INPUT種類数</label>
-            <input
-              type="number"
-              min={0}
-              value={inputKinds}
-              onChange={(e) => setInputKinds(e.target.value)}
-              onBlur={save}
-              placeholder="例: 3"
-              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-            <span className="text-[11px] text-gray-400">種類</span>
-          </div>
-        </div>
+        <InformationTypeMultiSelect
+          title="INPUT（受け取る情報）"
+          informationTypes={informationTypes}
+          selectedIds={inputIds}
+          onChange={setInputIds}
+        />
 
-        <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">OUTPUT</label>
-          <textarea
-            value={output}
-            onChange={(e) => setOutput(e.target.value)}
-            onBlur={save}
-            rows={2}
-            placeholder="例: 発注書、更新済み在庫"
-            className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"
-          />
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <label className="text-[11px] font-medium text-gray-500 whitespace-nowrap">OUTPUT種類数</label>
-            <input
-              type="number"
-              min={0}
-              value={outputKinds}
-              onChange={(e) => setOutputKinds(e.target.value)}
-              onBlur={save}
-              placeholder="例: 2"
-              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-            <span className="text-[11px] text-gray-400">種類</span>
-          </div>
-        </div>
+        <InformationTypeMultiSelect
+          title="OUTPUT（渡す情報）"
+          informationTypes={informationTypes}
+          selectedIds={outputIds}
+          onChange={setOutputIds}
+        />
 
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">今回の対応数</label>

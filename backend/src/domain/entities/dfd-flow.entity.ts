@@ -8,7 +8,7 @@ export interface CreateDfdFlowProps {
   sourceHandle?: string | null;
   targetHandle?: string | null;
   dataItem: string;
-  reportTypeId?: string | null;
+  informationTypeId?: string | null;
   order?: number;
 }
 
@@ -20,13 +20,13 @@ export interface ReconstructDfdFlowProps {
   sourceHandle: string | null;
   targetHandle: string | null;
   dataItem: string;
-  reportTypeId: string | null;
+  informationTypeId: string | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** DFDのデータフロー（ノード間の矢印。dataItem=データ項目, reportTypeId=帳票種別参照） */
+/** DFDのデータフロー（ノード間の矢印。dataItem=データ項目, informationTypeId=情報種別参照） */
 export class DfdFlow extends BaseEntity {
   private readonly _diagramId: string;
   private _sourceNodeId: string;
@@ -34,7 +34,7 @@ export class DfdFlow extends BaseEntity {
   private _sourceHandle: string | null;
   private _targetHandle: string | null;
   private _dataItem: string;
-  private _reportTypeId: string | null;
+  private _informationTypeId: string | null;
   private _order: number;
 
   private constructor(
@@ -45,7 +45,7 @@ export class DfdFlow extends BaseEntity {
     sourceHandle: string | null,
     targetHandle: string | null,
     dataItem: string,
-    reportTypeId: string | null,
+    informationTypeId: string | null,
     order: number,
     createdAt: Date,
     updatedAt: Date,
@@ -57,7 +57,7 @@ export class DfdFlow extends BaseEntity {
     this._sourceHandle = sourceHandle;
     this._targetHandle = targetHandle;
     this._dataItem = dataItem;
-    this._reportTypeId = reportTypeId;
+    this._informationTypeId = informationTypeId;
     this._order = order;
   }
 
@@ -75,7 +75,7 @@ export class DfdFlow extends BaseEntity {
       props.sourceHandle ?? null,
       props.targetHandle ?? null,
       props.dataItem ?? '',
-      props.reportTypeId ?? null,
+      props.informationTypeId ?? null,
       props.order ?? 0,
       now,
       now,
@@ -91,7 +91,7 @@ export class DfdFlow extends BaseEntity {
       props.sourceHandle,
       props.targetHandle,
       props.dataItem,
-      props.reportTypeId,
+      props.informationTypeId,
       props.order,
       props.createdAt,
       props.updatedAt,
@@ -103,8 +103,8 @@ export class DfdFlow extends BaseEntity {
     this.touch();
   }
 
-  updateReportType(reportTypeId: string | null): void {
-    this._reportTypeId = reportTypeId ?? null;
+  updateInformationType(informationTypeId: string | null): void {
+    this._informationTypeId = informationTypeId ?? null;
     this.touch();
   }
 
@@ -138,6 +138,6 @@ export class DfdFlow extends BaseEntity {
   get sourceHandle(): string | null { return this._sourceHandle; }
   get targetHandle(): string | null { return this._targetHandle; }
   get dataItem(): string { return this._dataItem; }
-  get reportTypeId(): string | null { return this._reportTypeId; }
+  get informationTypeId(): string | null { return this._informationTypeId; }
   get order(): number { return this._order; }
 }

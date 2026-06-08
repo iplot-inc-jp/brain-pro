@@ -17,25 +17,37 @@ import {
   ApiParam,
   ApiProperty,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsIn } from 'class-validator';
 import {
-  CreateReportTypeUseCase,
-  GetReportTypesUseCase,
-  UpdateReportTypeUseCase,
-  DeleteReportTypeUseCase,
-  ReportTypeOutput,
+  CreateInformationTypeUseCase,
+  GetInformationTypesUseCase,
+  UpdateInformationTypeUseCase,
+  DeleteInformationTypeUseCase,
+  InformationTypeOutput,
 } from '../../application';
+import { InformationCategoryValue } from '../../domain';
 import {
   CurrentUser,
   CurrentUserPayload,
 } from '../decorators/current-user.decorator';
 
+const INFORMATION_CATEGORIES = ['INFORMATION', 'OBJECT', 'DOCUMENT'];
+
 // ========== DTOs ==========
 
-class CreateReportTypeDto {
-  @ApiProperty({ description: '帳票種別名', example: '受注書' })
+class CreateInformationTypeDto {
+  @ApiProperty({ description: '情報種別名', example: '受注書' })
   @IsString()
   name: string;
+
+  @ApiProperty({
+    description: '情報カテゴリ',
+    required: false,
+    enum: INFORMATION_CATEGORIES,
+  })
+  @IsOptional()
+  @IsIn(INFORMATION_CATEGORIES)
+  category?: InformationCategoryValue;
 
   @ApiProperty({ description: '説明', required: false, nullable: true })
   @IsOptional()
@@ -48,12 +60,21 @@ class CreateReportTypeDto {
   order?: number;
 }
 
-class UpdateReportTypeDto {
-  @ApiProperty({ description: '帳票種別名', required: false })
+class UpdateInformationTypeDto {
+  @ApiProperty({ description: '情報種別名', required: false })
   @IsOptional()
   @IsString()
   name?: string;
 
+  @ApiProperty({
+    description: '情報カテゴリ',
+    required: false,
+    enum: INFORMATION_CATEGORIES,
+  })
+  @IsOptional()
+  @IsIn(INFORMATION_CATEGORIES)
+  category?: InformationCategoryValue;
+
   @ApiProperty({ description: '説明', required: false, nullable: true })
   @IsOptional()
   @IsString()
@@ -65,25 +86,25 @@ class UpdateReportTypeDto {
   order?: number;
 }
 
-@ApiTags('帳票種別')
+@ApiTags('情報種別')
 @ApiBearerAuth()
-@Controller('projects/:projectId/report-types')
-export class ReportTypeController {
+@Controller('projects/:projectId/information-types')
+export class InformationTypeController {
   constructor(
-    private readonly createReportTypeUseCase: CreateReportTypeUseCase,
-    private readonly getReportTypesUseCase: GetReportTypesUseCase,
+    private readonly createInformationTypeUseCase: CreateInformationTypeUseCase,
+    private readonly getInformationTypesUseCase: GetInformationTypesUseCase,
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'プロジェクトの帳票種別一覧取得（添付件数付き）' })
+  @ApiOperation({ summary: 'プロジェクトの情報種別一覧取得（添付件数付き）' })
   @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
   @ApiResponse({ status: 403, description: '権限がありません' })
   @ApiResponse({ status: 404, description: 'プロジェクトが見つかりません' })
   async list(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
-  ): Promise<ReportTypeOutput[]> {
-    return this.getReportTypesUseCase.execute({
+  ): Promise<InformationTypeOutput[]> {
+    return this.getInformationTypesUseCase.execute({
       userId: user.id,
       projectId,
     });
@@ -91,7 +112,7 @@ export class ReportTypeController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: '帳票種別作成' })
+  @ApiOperation({ summary: '情報種別作成' })
   @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
   @ApiResponse({ status: 201, description: '作成成功' })
   @ApiResponse({ status: 403, description: '権限がありません' })
@@ -99,41 +120,43 @@ export class ReportTypeController {
   async create(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
-    @Body() dto: CreateReportTypeDto,
-  ): Promise<ReportTypeOutput> {
-    return this.createReportTypeUseCase.execute({
+    @Body() dto: CreateInformationTypeDto,
+  ): Promise<InformationTypeOutput> {
+    return this.createInformationTypeUseCase.execute({
       userId: user.id,
       projectId,
       name: dto.name,
+      category: dto.category,
       description: dto.description,
       order: dto.order,
     });
   }
 }
 
-@ApiTags('帳票種別')
+@ApiTags('情報種別')
 @ApiBearerAuth()
-@Controller('report-types')
-export class ReportTypeByIdController {
+@Controller('information-types')
+export class InformationTypeByIdController {
   constructor(
-    private readonly updateReportTypeUseCase: UpdateReportTypeUseCase,
-    private readonly deleteReportTypeUseCase: DeleteReportTypeUseCase,
+    private readonly updateInformationTypeUseCase: UpdateInformationTypeUseCase,
+    private readonly deleteInformationTypeUseCase: DeleteInformationTypeUseCase,
   ) {}
 
   @Patch(':id')
-  @ApiOperation({ summary: '帳票種別更新' })
-  @ApiParam({ name: 'id', description: '帳票種別ID' })
+  @ApiOperation({ summary: '情報種別更新' })
+  @ApiParam({ name: 'id', description: '情報種別ID' })
   @ApiResponse({ status: 403, description: '権限がありません' })
-  @ApiResponse({ status: 404, description: '帳票種別が見つかりません' })
+  @ApiResponse({ status: 404, description: '情報種別が見つかりません' })
   async update(
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
-    @Body() dto: UpdateReportTypeDto,
-  ): Promise<ReportTypeOutput> {
-    return this.updateReportTypeUseCase.execute({
+    @Body() dto: UpdateInformationTypeDto,
+  ): Promise<InformationTypeOutput> {
+    return this.updateInformationTypeUseCase.execute({
       userId: user.id,
-      reportTypeId: id,
+      informationTypeId: id,
       name: dto.name,
+      category: dto.category,
       description: dto.description,
       order: dto.order,
     });
@@ -141,17 +164,17 @@ export class ReportTypeByIdController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '帳票種別削除（具体帳票はカスケード削除）' })
-  @ApiParam({ name: 'id', description: '帳票種別ID' })
+  @ApiOperation({ summary: '情報種別削除（具体帳票はカスケード削除）' })
+  @ApiParam({ name: 'id', description: '情報種別ID' })
   @ApiResponse({ status: 403, description: '権限がありません' })
-  @ApiResponse({ status: 404, description: '帳票種別が見つかりません' })
+  @ApiResponse({ status: 404, description: '情報種別が見つかりません' })
   async delete(
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.deleteReportTypeUseCase.execute({
+    await this.deleteInformationTypeUseCase.execute({
       userId: user.id,
-      reportTypeId: id,
+      informationTypeId: id,
     });
     return { success: true };
   }

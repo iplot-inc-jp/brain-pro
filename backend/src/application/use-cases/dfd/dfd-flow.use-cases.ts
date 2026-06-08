@@ -17,7 +17,7 @@ export interface AddDfdFlowInput {
   sourceHandle?: string | null;
   targetHandle?: string | null;
   dataItem?: string;
-  reportTypeId?: string | null;
+  informationTypeId?: string | null;
   order?: number;
 }
 
@@ -48,7 +48,7 @@ export class AddDfdFlowUseCase {
         sourceHandle: input.sourceHandle ?? null,
         targetHandle: input.targetHandle ?? null,
         dataItem: input.dataItem ?? '',
-        reportTypeId: input.reportTypeId ?? null,
+        informationTypeId: input.informationTypeId ?? null,
         order: input.order ?? 0,
       },
       this.repo.generateId(),
@@ -62,7 +62,7 @@ export interface UpdateDfdFlowInput {
   userId: string;
   id: string;
   dataItem?: string;
-  reportTypeId?: string | null;
+  informationTypeId?: string | null;
   sourceNodeId?: string;
   targetNodeId?: string;
   sourceHandle?: string | null;
@@ -84,7 +84,8 @@ export class UpdateDfdFlowUseCase {
     await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId);
 
     if (input.dataItem !== undefined) flow.updateDataItem(input.dataItem);
-    if (input.reportTypeId !== undefined) flow.updateReportType(input.reportTypeId);
+    if (input.informationTypeId !== undefined)
+      flow.updateInformationType(input.informationTypeId);
     if (input.sourceNodeId !== undefined || input.targetNodeId !== undefined) {
       flow.updateEndpoints(
         input.sourceNodeId ?? flow.sourceNodeId,

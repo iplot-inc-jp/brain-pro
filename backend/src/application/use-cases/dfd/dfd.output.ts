@@ -20,7 +20,7 @@ export interface DfdFlowOutput {
   sourceHandle: string | null;
   targetHandle: string | null;
   dataItem: string;
-  reportTypeId: string | null;
+  informationTypeId: string | null;
   order: number;
 }
 
@@ -58,7 +58,7 @@ export function toDfdFlowOutput(f: DfdFlow): DfdFlowOutput {
     sourceHandle: f.sourceHandle,
     targetHandle: f.targetHandle,
     dataItem: f.dataItem,
-    reportTypeId: f.reportTypeId,
+    informationTypeId: f.informationTypeId,
     order: f.order,
   };
 }

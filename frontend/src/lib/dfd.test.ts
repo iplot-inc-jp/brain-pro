@@ -22,11 +22,11 @@ describe('buildDataFlowRows', () => {
       { id: 'fn', kind: 'FUNCTION', label: '受注登録', number: '1-1', positionX: 0, positionY: 0 },
     ];
     const flows: DfdFlow[] = [
-      { id: 'f1', sourceNodeId: 'ext', targetNodeId: 'fn', dataItem: '受注データ', reportTypeId: null, order: 0 },
+      { id: 'f1', sourceNodeId: 'ext', targetNodeId: 'fn', dataItem: '受注データ', informationTypeId: null, order: 0 },
     ];
     const rows = buildDataFlowRows(nodes, flows);
     expect(rows).toEqual([
-      { no: 1, source: '顧客', dataItem: '受注データ', target: '受注登録', direction: 'IN', relatedFunction: '受注登録', reportTypeId: null },
+      { no: 1, source: '顧客', dataItem: '受注データ', target: '受注登録', direction: 'IN', relatedFunction: '受注登録', informationTypeId: null },
     ]);
   });
 });

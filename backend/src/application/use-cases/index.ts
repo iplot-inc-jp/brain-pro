@@ -12,7 +12,7 @@ export * from './flow-node';
 export * from './task';
 export * from './task-comment';
 export * from './dfd';
-export * from './report-type';
+export * from './information-type';
 export * from './stakeholder';
 export * from './meeting';
 export * from './risk';

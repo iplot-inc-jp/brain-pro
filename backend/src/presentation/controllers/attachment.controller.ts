@@ -179,23 +179,23 @@ export class AttachmentController {
     });
   }
 
-  @Post('report-types/:reportTypeId/attachments')
-  @ApiOperation({ summary: '帳票種別に具体帳票ファイルをアップロード' })
+  @Post('information-types/:informationTypeId/attachments')
+  @ApiOperation({ summary: '情報種別に具体帳票ファイルをアップロード' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadToReportType(
-    @Param('reportTypeId') reportTypeId: string,
+  async uploadToInformationType(
+    @Param('informationTypeId') informationTypeId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) {
       throw new NotFoundException('No file uploaded');
     }
 
-    const reportType = await this.prisma.reportType.findUnique({
-      where: { id: reportTypeId },
+    const informationType = await this.prisma.informationType.findUnique({
+      where: { id: informationTypeId },
     });
-    if (!reportType) {
-      throw new NotFoundException('ReportType not found');
+    if (!informationType) {
+      throw new NotFoundException('InformationType not found');
     }
 
     const id = uuid();
@@ -214,14 +214,14 @@ export class AttachmentController {
 
     // 既存添付数を order の初期値に
     const order = await this.prisma.attachment.count({
-      where: { reportTypeId },
+      where: { informationTypeId },
     });
 
     const row = await this.prisma.attachment.create({
       data: {
         id,
-        projectId: reportType.projectId,
-        reportTypeId,
+        projectId: informationType.projectId,
+        informationTypeId,
         kind: kind as 'IMAGE' | 'PDF' | 'FILE',
         filename: file.originalname,
         mimeType: file.mimetype,
@@ -234,11 +234,13 @@ export class AttachmentController {
     return row;
   }
 
-  @Get('report-types/:reportTypeId/attachments')
-  @ApiOperation({ summary: '帳票種別の具体帳票ファイル一覧を取得' })
-  async listForReportType(@Param('reportTypeId') reportTypeId: string) {
+  @Get('information-types/:informationTypeId/attachments')
+  @ApiOperation({ summary: '情報種別の具体帳票ファイル一覧を取得' })
+  async listForInformationType(
+    @Param('informationTypeId') informationTypeId: string,
+  ) {
     return this.prisma.attachment.findMany({
-      where: { reportTypeId },
+      where: { informationTypeId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     });
   }

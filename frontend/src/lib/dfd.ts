@@ -8,7 +8,7 @@ export interface DfdNode {
 }
 export interface DfdFlow {
   id: string; sourceNodeId: string; targetNodeId: string;
-  dataItem: string; reportTypeId: string | null; order: number;
+  dataItem: string; informationTypeId: string | null; order: number;
   /** 接続側（辺）。'top'|'right'|'bottom'|'left'。未保存なら null。 */
   sourceHandle?: string | null; targetHandle?: string | null;
 }
@@ -30,7 +30,7 @@ export function assignFunctionNumbers(nodes: DfdNode[], levelPrefix: number): Df
 
 export interface DataFlowRow {
   no: number; source: string; dataItem: string; target: string;
-  direction: 'IN' | 'OUT'; relatedFunction: string; reportTypeId: string | null;
+  direction: 'IN' | 'OUT'; relatedFunction: string; informationTypeId: string | null;
 }
 /** データフロー一覧表の行を作る。方向: 宛先がFUNCTIONならIN、源泉がFUNCTIONならOUT。関連処理=FUNCTION側ラベル */
 export function buildDataFlowRows(nodes: DfdNode[], flows: DfdFlow[]): DataFlowRow[] {
@@ -50,7 +50,7 @@ export function buildDataFlowRows(nodes: DfdNode[], flows: DfdFlow[]): DataFlowR
         target: t?.label ?? '?',
         direction: (targetIsFn ? 'IN' : 'OUT') as 'IN' | 'OUT',
         relatedFunction: fn?.label ?? '',
-        reportTypeId: f.reportTypeId,
+        informationTypeId: f.informationTypeId,
       };
     });
 }
@@ -115,7 +115,7 @@ export const dfdApi = {
     return res.json();
   },
   /**
-   * データフロー更新。dataItem/reportTypeId のラベル系編集に加えて、
+   * データフロー更新。dataItem/informationTypeId のラベル系編集に加えて、
    * 端点ドラッグの付け替え（sourceNodeId/targetNodeId/sourceHandle/targetHandle）も送れる。
    * PATCH /api/dfd-flows/:id。
    */
@@ -138,12 +138,30 @@ export const dfdApi = {
   },
 };
 
-// ========== 帳票種別（ReportType）+ 具体帳票（Attachment 流用） ==========
+// ========== 情報種別（InformationType）+ 具体帳票（Attachment 流用） ==========
 
-export interface ReportType {
+/** 情報種別の分類: 情報 / 物体 / 帳票。 */
+export type InformationCategory = 'INFORMATION' | 'OBJECT' | 'DOCUMENT';
+
+/** 分類コード → 日本語ラベル（UI 表示用）。 */
+export const INFORMATION_CATEGORY_LABELS: Record<InformationCategory, string> = {
+  INFORMATION: '情報',
+  OBJECT: '物体',
+  DOCUMENT: '帳票',
+};
+
+/** UIセレクタ用の選択肢（情報/物体/帳票）。 */
+export const INFORMATION_CATEGORY_OPTIONS: ReadonlyArray<{ value: InformationCategory; label: string }> = [
+  { value: 'INFORMATION', label: '情報' },
+  { value: 'OBJECT', label: '物体' },
+  { value: 'DOCUMENT', label: '帳票' },
+];
+
+export interface InformationType {
   id: string;
   projectId: string;
   name: string;
+  category: InformationCategory;
   description: string | null;
   order: number;
   attachmentCount: number;
@@ -151,9 +169,9 @@ export interface ReportType {
   updatedAt: string;
 }
 
-export interface ReportTypeAttachment {
+export interface InformationTypeAttachment {
   id: string;
-  reportTypeId: string | null;
+  informationTypeId: string | null;
   kind: 'IMAGE' | 'PDF' | 'FILE';
   filename: string;
   mimeType: string;
@@ -163,35 +181,35 @@ export interface ReportTypeAttachment {
   createdAt: string;
 }
 
-export const reportTypeApi = {
-  async list(projectId: string): Promise<ReportType[]> {
-    const res = await fetch(`${API_URL}/api/projects/${projectId}/report-types`, { headers: headers() });
-    if (!res.ok) throw new Error('帳票種別の取得に失敗しました');
+export const informationTypeApi = {
+  async list(projectId: string): Promise<InformationType[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/information-types`, { headers: headers() });
+    if (!res.ok) throw new Error('情報種別の取得に失敗しました');
     return res.json();
   },
-  async create(projectId: string, body: { name: string; description?: string | null; order?: number }): Promise<ReportType> {
-    const res = await fetch(`${API_URL}/api/projects/${projectId}/report-types`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
-    if (!res.ok) throw new Error('帳票種別の作成に失敗しました');
+  async create(projectId: string, body: { name: string; category?: InformationCategory; description?: string | null; order?: number }): Promise<InformationType> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/information-types`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!res.ok) throw new Error('情報種別の作成に失敗しました');
     return res.json();
   },
-  async update(id: string, patch: { name?: string; description?: string | null; order?: number }): Promise<ReportType> {
-    const res = await fetch(`${API_URL}/api/report-types/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
-    if (!res.ok) throw new Error('帳票種別の更新に失敗しました');
+  async update(id: string, patch: { name?: string; category?: InformationCategory; description?: string | null; order?: number }): Promise<InformationType> {
+    const res = await fetch(`${API_URL}/api/information-types/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
+    if (!res.ok) throw new Error('情報種別の更新に失敗しました');
     return res.json();
   },
   async delete(id: string): Promise<void> {
-    const res = await fetch(`${API_URL}/api/report-types/${id}`, { method: 'DELETE', headers: headers() });
-    if (!res.ok) throw new Error('帳票種別の削除に失敗しました');
+    const res = await fetch(`${API_URL}/api/information-types/${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) throw new Error('情報種別の削除に失敗しました');
   },
-  async listAttachments(reportTypeId: string): Promise<ReportTypeAttachment[]> {
-    const res = await fetch(`${API_URL}/api/report-types/${reportTypeId}/attachments`, { headers: headers() });
+  async listAttachments(informationTypeId: string): Promise<InformationTypeAttachment[]> {
+    const res = await fetch(`${API_URL}/api/information-types/${informationTypeId}/attachments`, { headers: headers() });
     if (!res.ok) throw new Error('具体帳票の取得に失敗しました');
     return res.json();
   },
-  async upload(reportTypeId: string, file: File): Promise<ReportTypeAttachment> {
+  async upload(informationTypeId: string, file: File): Promise<InformationTypeAttachment> {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API_URL}/api/report-types/${reportTypeId}/attachments`, { method: 'POST', headers: authHeader(), body: form });
+    const res = await fetch(`${API_URL}/api/information-types/${informationTypeId}/attachments`, { method: 'POST', headers: authHeader(), body: form });
     if (!res.ok) throw new Error('具体帳票のアップロードに失敗しました');
     return res.json();
   },

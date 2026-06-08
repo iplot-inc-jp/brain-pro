@@ -4,25 +4,30 @@
  * DataFlowTable — DFD のデータフロー一覧表。
  *
  * buildDataFlowRows(diagram.nodes, diagram.flows) で行を組み、
- * No./源泉/データ項目/宛先/方向/関連処理/帳票種別 を白テーマで描画する。
- * 帳票種別は reportTypes（プロジェクトの帳票種別一覧）から名前を解決して表示する。
+ * No./源泉/データ項目/宛先/方向/関連処理/情報種別 を白テーマで描画する。
+ * 情報種別は informationTypes（プロジェクトの情報種別一覧）から名前・分類を解決して表示する。
  */
 
 import { useMemo } from 'react';
-import { buildDataFlowRows, type DfdDiagram, type ReportType } from '@/lib/dfd';
+import {
+  buildDataFlowRows,
+  INFORMATION_CATEGORY_LABELS,
+  type DfdDiagram,
+  type InformationType,
+} from '@/lib/dfd';
 import { ArrowDownLeft, ArrowUpRight, FileText } from 'lucide-react';
 
 export function DataFlowTable({
   diagram,
-  reportTypes = [],
+  informationTypes = [],
 }: {
   diagram: DfdDiagram;
-  reportTypes?: ReportType[];
+  informationTypes?: InformationType[];
 }) {
   const rows = buildDataFlowRows(diagram.nodes, diagram.flows);
-  const rtById = useMemo(
-    () => new Map(reportTypes.map((rt) => [rt.id, rt] as const)),
-    [reportTypes],
+  const itById = useMemo(
+    () => new Map(informationTypes.map((it) => [it.id, it] as const)),
+    [informationTypes],
   );
 
   if (rows.length === 0) {
@@ -44,7 +49,7 @@ export function DataFlowTable({
             <th className="px-3 py-2">宛先</th>
             <th className="px-3 py-2 w-20">方向</th>
             <th className="px-3 py-2">関連処理</th>
-            <th className="px-3 py-2 w-28">帳票種別</th>
+            <th className="px-3 py-2 w-28">情報種別</th>
           </tr>
         </thead>
         <tbody>
@@ -68,14 +73,17 @@ export function DataFlowTable({
               <td className="px-3 py-2 text-gray-700">{r.relatedFunction || '—'}</td>
               <td className="px-3 py-2">
                 {(() => {
-                  const rt = r.reportTypeId ? rtById.get(r.reportTypeId) : undefined;
-                  if (!r.reportTypeId) return <span className="text-gray-300">—</span>;
+                  const it = r.informationTypeId ? itById.get(r.informationTypeId) : undefined;
+                  if (!r.informationTypeId) return <span className="text-gray-300">—</span>;
                   return (
                     <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
                       <FileText className="h-3 w-3" />
-                      {rt?.name ?? '帳票'}
-                      {rt && rt.attachmentCount > 0 && (
-                        <span className="text-emerald-600">📎{rt.attachmentCount}</span>
+                      {it && (
+                        <span className="text-emerald-600/80">[{INFORMATION_CATEGORY_LABELS[it.category]}]</span>
+                      )}
+                      {it?.name ?? '情報'}
+                      {it && it.attachmentCount > 0 && (
+                        <span className="text-emerald-600">📎{it.attachmentCount}</span>
                       )}
                     </span>
                   );

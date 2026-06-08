@@ -103,7 +103,7 @@ model Project {
   flowFolders       FlowFolder[]
   tasks             Task[]
   dfdDiagrams       DfdDiagram[]
-  reportTypes       ReportType[]
+  informationTypes  InformationType[]
   stakeholders      Stakeholder[]
   meetings          Meeting[]
   risks             Risk[]
@@ -318,6 +318,8 @@ model FlowNode {
   // 他ノードのリンクがこのノードを参照しているもの
   linkTargets         FlowNodeLink[]           @relation("NodeLinkTargetNode")
   dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefNode")
+  // このノードの入出力（情報種別マスタとの紐づけ）
+  informationLinks    NodeInformationLink[]
 
   @@map("flow_nodes")
 }
@@ -341,12 +343,15 @@ model FlowEdge {
   targetHandle String?  @map("target_handle")
   label        String?
   condition    String?
+  // この矢印上を流れるデータ（情報種別マスタとの紐づけ）
+  informationTypeId String? @map("information_type_id")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   flow                 BusinessFlow          @relation(fields: [flowId], references: [id], onDelete: Cascade)
   sourceNode           FlowNode              @relation("SourceNode", fields: [sourceNodeId], references: [id], onDelete: Cascade)
   targetNode           FlowNode              @relation("TargetNode", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  informationType      InformationType?      @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
   interfaceDefinitions InterfaceDefinition[]
 
   @@map("flow_edges")
@@ -399,6 +404,25 @@ model FlowNodeLink {
   targetNode FlowNode?    @relation("NodeLinkTargetNode", fields: [targetNodeId], references: [id], onDelete: SetNull)
 
   @@map("flow_node_links")
+}
+
+// ===========================================
+// ノード入出力 ⇔ 情報種別マスタ
+// （ノードのINPUT/OUTPUTを情報種別マスタから選ぶ）
+// ===========================================
+
+model NodeInformationLink {
+  id                String   @id @default(uuid())
+  nodeId            String   @map("node_id")
+  informationTypeId String   @map("information_type_id")
+  direction         FlowLinkDirection
+  order             Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  node            FlowNode        @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  informationType InformationType @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+
+  @@map("node_information_links")
 }
 
 // ===========================================
@@ -931,12 +955,12 @@ model Attachment {
   order     Int            @default(0)
   createdAt DateTime       @default(now()) @map("created_at")
 
-  reportTypeId String?  @map("report_type_id")
+  informationTypeId String?  @map("information_type_id")
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   phase   ProjectPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
   task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  reportType ReportType? @relation(fields: [reportTypeId], references: [id], onDelete: Cascade)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
 
   @@map("attachments")
 }
@@ -1134,7 +1158,7 @@ model DfdFlow {
   sourceHandle String?  @map("source_handle")
   targetHandle String?  @map("target_handle")
   dataItem     String   @map("data_item")
-  reportTypeId String?  @map("report_type_id")
+  informationTypeId String?  @map("information_type_id")
   order        Int      @default(0)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -1142,15 +1166,22 @@ model DfdFlow {
   diagram    DfdDiagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
   sourceNode DfdNode     @relation("DfdFlowSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
   targetNode DfdNode     @relation("DfdFlowTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
-  reportType ReportType? @relation(fields: [reportTypeId], references: [id], onDelete: SetNull)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
 
   @@map("dfd_flows")
 }
 
-model ReportType {
+enum InformationCategory {
+  INFORMATION
+  OBJECT
+  DOCUMENT
+}
+
+model InformationType {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
   name        String
+  category    InformationCategory @default(INFORMATION)
   description String?  @db.Text
   order       Int      @default(0)
   createdAt   DateTime @default(now()) @map("created_at")
@@ -1159,8 +1190,12 @@ model ReportType {
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   dfdFlows    DfdFlow[]
   attachments Attachment[]
+  // この情報種別を入出力として参照しているノードリンク
+  nodeLinks   NodeInformationLink[]
+  // この情報種別を矢印上のデータとして参照しているフローエッジ
+  edges       FlowEdge[]
 
-  @@map("report_types")
+  @@map("information_types")
 }
 
 // ===========================================

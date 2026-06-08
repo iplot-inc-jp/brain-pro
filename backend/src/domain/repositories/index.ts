@@ -17,7 +17,7 @@ export * from './issue-node.repository';
 export * from './task.repository';
 export * from './task-comment.repository';
 export * from './dfd.repository';
-export * from './report-type.repository';
+export * from './information-type.repository';
 export * from './stakeholder.repository';
 export * from './meeting.repository';
 export * from './risk.repository';

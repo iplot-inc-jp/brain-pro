@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * ReportTypeRegistry — 帳票種別レジストリ。
+ * InformationTypeRegistry — 情報種別レジストリ。
  *
- * プロジェクトの帳票種別を CRUD し、各種別に具体帳票ファイルを
+ * プロジェクトの情報種別（情報/物体/帳票）を CRUD し、各種別に具体帳票ファイルを
  * アップロード / ダウンロード / 削除する。DFD のデータフローは
- * reportTypeId でこの種別を参照する（DfdCanvas / DataFlowTable）。
+ * informationTypeId でこの種別を参照する（DfdCanvas / DataFlowTable）。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,33 +25,51 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
-  reportTypeApi,
-  type ReportType,
-  type ReportTypeAttachment,
+  informationTypeApi,
+  INFORMATION_CATEGORY_LABELS,
+  INFORMATION_CATEGORY_OPTIONS,
+  type InformationType,
+  type InformationCategory,
+  type InformationTypeAttachment,
 } from '@/lib/dfd';
 
-export interface ReportTypeRegistryProps {
+export interface InformationTypeRegistryProps {
   projectId: string;
   /** 親に最新の一覧を通知（DfdCanvas / DataFlowTable で名前参照するため） */
-  onReportTypesChange?: (reportTypes: ReportType[]) => void;
+  onInformationTypesChange?: (informationTypes: InformationType[]) => void;
 }
 
-export function ReportTypeRegistry({ projectId, onReportTypesChange }: ReportTypeRegistryProps) {
-  const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
+/** 分類バッジ（情報/物体/帳票）。 */
+function CategoryBadge({ category }: { category: InformationCategory }) {
+  const styles: Record<InformationCategory, string> = {
+    INFORMATION: 'border-blue-200 bg-blue-50 text-blue-700',
+    OBJECT: 'border-amber-200 bg-amber-50 text-amber-700',
+    DOCUMENT: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  };
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${styles[category]}`}>
+      {INFORMATION_CATEGORY_LABELS[category]}
+    </span>
+  );
+}
+
+export function InformationTypeRegistry({ projectId, onInformationTypesChange }: InformationTypeRegistryProps) {
+  const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  const [newCategory, setNewCategory] = useState<InformationCategory>('INFORMATION');
   const [creating, setCreating] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const notify = onReportTypesChange;
+  const notify = onInformationTypesChange;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await reportTypeApi.list(projectId);
-      setReportTypes(list);
+      const list = await informationTypeApi.list(projectId);
+      setInformationTypes(list);
       notify?.(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -69,36 +87,49 @@ export function ReportTypeRegistry({ projectId, onReportTypesChange }: ReportTyp
     if (!name) return;
     setCreating(true);
     try {
-      await reportTypeApi.create(projectId, { name });
+      await informationTypeApi.create(projectId, { name, category: newCategory });
       setNewName('');
+      setNewCategory('INFORMATION');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setCreating(false);
     }
-  }, [newName, projectId, load]);
+  }, [newName, newCategory, projectId, load]);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white">
       <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2.5">
         <FileText className="h-4 w-4 text-emerald-600" />
-        <h3 className="text-sm font-semibold text-gray-800">帳票種別</h3>
+        <h3 className="text-sm font-semibold text-gray-800">情報種別</h3>
         <span className="text-xs text-gray-400">
-          データフローが参照する帳票の種別と具体帳票ファイル
+          データフローが参照する情報・物体・帳票の種別と具体帳票ファイル
         </span>
       </div>
 
       <div className="p-4 space-y-3">
         {/* 追加フォーム */}
         <div className="flex items-center gap-2">
+          <select
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value as InformationCategory)}
+            className="rounded border border-gray-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+            title="分類"
+          >
+            {INFORMATION_CATEGORY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleCreate();
             }}
-            placeholder="帳票種別名（例：受注書）"
+            placeholder="情報種別名（例：受注書）"
             className="flex-1 rounded border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
           <Button size="sm" onClick={() => void handleCreate()} disabled={creating || !newName.trim()}>
@@ -117,18 +148,18 @@ export function ReportTypeRegistry({ projectId, onReportTypesChange }: ReportTyp
           <div className="flex items-center justify-center py-6">
             <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
           </div>
-        ) : reportTypes.length === 0 ? (
+        ) : informationTypes.length === 0 ? (
           <p className="py-4 text-center text-sm text-gray-400">
-            帳票種別がありません。上のフォームから追加してください。
+            情報種別がありません。上のフォームから追加してください。
           </p>
         ) : (
           <ul className="divide-y divide-gray-100 rounded border border-gray-100">
-            {reportTypes.map((rt) => (
-              <ReportTypeRow
-                key={rt.id}
-                reportType={rt}
-                expanded={expanded === rt.id}
-                onToggle={() => setExpanded((cur) => (cur === rt.id ? null : rt.id))}
+            {informationTypes.map((it) => (
+              <InformationTypeRow
+                key={it.id}
+                informationType={it}
+                expanded={expanded === it.id}
+                onToggle={() => setExpanded((cur) => (cur === it.id ? null : it.id))}
                 onChanged={load}
               />
             ))}
@@ -139,20 +170,21 @@ export function ReportTypeRegistry({ projectId, onReportTypesChange }: ReportTyp
   );
 }
 
-function ReportTypeRow({
-  reportType,
+function InformationTypeRow({
+  informationType,
   expanded,
   onToggle,
   onChanged,
 }: {
-  reportType: ReportType;
+  informationType: InformationType;
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => Promise<void> | void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(reportType.name);
-  const [attachments, setAttachments] = useState<ReportTypeAttachment[]>([]);
+  const [name, setName] = useState(informationType.name);
+  const [category, setCategory] = useState<InformationCategory>(informationType.category);
+  const [attachments, setAttachments] = useState<InformationTypeAttachment[]>([]);
   const [attLoading, setAttLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -161,44 +193,53 @@ function ReportTypeRow({
   const loadAttachments = useCallback(async () => {
     setAttLoading(true);
     try {
-      setAttachments(await reportTypeApi.listAttachments(reportType.id));
+      setAttachments(await informationTypeApi.listAttachments(informationType.id));
     } catch {
       /* 一覧失敗は無視 */
     } finally {
       setAttLoading(false);
     }
-  }, [reportType.id]);
+  }, [informationType.id]);
 
   useEffect(() => {
     if (expanded) void loadAttachments();
   }, [expanded, loadAttachments]);
 
-  const handleRename = useCallback(async () => {
+  const startEditing = useCallback(() => {
+    setName(informationType.name);
+    setCategory(informationType.category);
+    setEditing(true);
+  }, [informationType.name, informationType.category]);
+
+  const handleSave = useCallback(async () => {
     const v = name.trim();
     setEditing(false);
-    if (!v || v === reportType.name) {
-      setName(reportType.name);
+    const nameChanged = v && v !== informationType.name;
+    const categoryChanged = category !== informationType.category;
+    if (!v || (!nameChanged && !categoryChanged)) {
+      setName(informationType.name);
+      setCategory(informationType.category);
       return;
     }
     setBusy(true);
     try {
-      await reportTypeApi.update(reportType.id, { name: v });
+      await informationTypeApi.update(informationType.id, { name: v, category });
       await onChanged();
     } finally {
       setBusy(false);
     }
-  }, [name, reportType.id, reportType.name, onChanged]);
+  }, [name, category, informationType.id, informationType.name, informationType.category, onChanged]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm(`帳票種別「${reportType.name}」を削除しますか？（具体帳票も削除されます）`)) return;
+    if (!confirm(`情報種別「${informationType.name}」を削除しますか？（具体帳票も削除されます）`)) return;
     setBusy(true);
     try {
-      await reportTypeApi.delete(reportType.id);
+      await informationTypeApi.delete(informationType.id);
       await onChanged();
     } finally {
       setBusy(false);
     }
-  }, [reportType.id, reportType.name, onChanged]);
+  }, [informationType.id, informationType.name, onChanged]);
 
   const handleUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,7 +248,7 @@ function ReportTypeRow({
         e.target.value = '';
         setUploading(true);
         try {
-          await reportTypeApi.upload(reportType.id, file);
+          await informationTypeApi.upload(informationType.id, file);
           await loadAttachments();
           await onChanged();
         } finally {
@@ -215,14 +256,14 @@ function ReportTypeRow({
         }
       }
     },
-    [reportType.id, loadAttachments, onChanged],
+    [informationType.id, loadAttachments, onChanged],
   );
 
   const handleDeleteAttachment = useCallback(
     async (attachmentId: string) => {
       setBusy(true);
       try {
-        await reportTypeApi.deleteAttachment(attachmentId);
+        await informationTypeApi.deleteAttachment(attachmentId);
         await loadAttachments();
         await onChanged();
       } finally {
@@ -246,26 +287,40 @@ function ReportTypeRow({
 
         {editing ? (
           <>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as InformationCategory)}
+              className="rounded border border-gray-300 px-1.5 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              title="分類"
+            >
+              {INFORMATION_CATEGORY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
             <input
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleRename();
+                if (e.key === 'Enter') void handleSave();
                 if (e.key === 'Escape') {
-                  setName(reportType.name);
+                  setName(informationType.name);
+                  setCategory(informationType.category);
                   setEditing(false);
                 }
               }}
               className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
-            <button type="button" onClick={() => void handleRename()} className="text-emerald-600 hover:text-emerald-700">
+            <button type="button" onClick={() => void handleSave()} className="text-emerald-600 hover:text-emerald-700">
               <Check className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={() => {
-                setName(reportType.name);
+                setName(informationType.name);
+                setCategory(informationType.category);
                 setEditing(false);
               }}
               className="text-gray-400 hover:text-gray-600"
@@ -275,16 +330,17 @@ function ReportTypeRow({
           </>
         ) : (
           <>
-            <span className="flex-1 text-sm font-medium text-gray-800">{reportType.name}</span>
+            <CategoryBadge category={informationType.category} />
+            <span className="flex-1 text-sm font-medium text-gray-800">{informationType.name}</span>
             <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
               <Paperclip className="h-3 w-3" />
-              {reportType.attachmentCount}
+              {informationType.attachmentCount}
             </span>
             <button
               type="button"
-              onClick={() => setEditing(true)}
+              onClick={startEditing}
               className="text-gray-400 hover:text-blue-600"
-              title="名称を編集"
+              title="名称・分類を編集"
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -337,7 +393,7 @@ function ReportTypeRow({
                   <FileText className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                   <span className="flex-1 truncate text-gray-700">{a.filename}</span>
                   <a
-                    href={reportTypeApi.fileUrl(a.id)}
+                    href={informationTypeApi.fileUrl(a.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-0.5 text-blue-600 hover:underline"

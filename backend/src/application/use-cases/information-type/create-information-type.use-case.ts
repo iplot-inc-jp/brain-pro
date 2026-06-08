@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  ReportType,
-  IReportTypeRepository,
-  REPORT_TYPE_REPOSITORY,
+  InformationType,
+  InformationCategoryValue,
+  IInformationTypeRepository,
+  INFORMATION_TYPE_REPOSITORY,
   ProjectRepository,
   PROJECT_REPOSITORY,
   OrganizationRepository,
@@ -10,31 +11,35 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ReportTypeOutput, toReportTypeOutput } from './report-type.output';
+import {
+  InformationTypeOutput,
+  toInformationTypeOutput,
+} from './information-type.output';
 
-export interface CreateReportTypeInput {
+export interface CreateInformationTypeInput {
   userId: string;
   projectId: string;
   name: string;
+  category?: InformationCategoryValue;
   description?: string | null;
   order?: number;
 }
 
 /**
- * 帳票種別作成ユースケース
+ * 情報種別作成ユースケース
  */
 @Injectable()
-export class CreateReportTypeUseCase {
+export class CreateInformationTypeUseCase {
   constructor(
-    @Inject(REPORT_TYPE_REPOSITORY)
-    private readonly reportTypeRepository: IReportTypeRepository,
+    @Inject(INFORMATION_TYPE_REPOSITORY)
+    private readonly informationTypeRepository: IInformationTypeRepository,
     @Inject(PROJECT_REPOSITORY)
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
   ) {}
 
-  async execute(input: CreateReportTypeInput): Promise<ReportTypeOutput> {
+  async execute(input: CreateInformationTypeInput): Promise<InformationTypeOutput> {
     const project = await this.projectRepository.findById(input.projectId);
     if (!project) {
       throw new EntityNotFoundError('Project', input.projectId);
@@ -48,19 +53,20 @@ export class CreateReportTypeUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    const id = this.reportTypeRepository.generateId();
-    const reportType = ReportType.create(
+    const id = this.informationTypeRepository.generateId();
+    const informationType = InformationType.create(
       {
         projectId: input.projectId,
         name: input.name,
+        category: input.category,
         description: input.description,
         order: input.order,
       },
       id,
     );
 
-    await this.reportTypeRepository.save(reportType);
+    await this.informationTypeRepository.save(informationType);
 
-    return toReportTypeOutput(reportType, 0);
+    return toInformationTypeOutput(informationType, 0);
   }
 }

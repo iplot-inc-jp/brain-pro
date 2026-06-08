@@ -231,6 +231,15 @@ class CreateFlowEdgeDto {
   @IsOptional()
   @IsString()
   condition?: string;
+
+  @ApiProperty({
+    description: 'この矢印上を流れるデータ（情報種別マスタID）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  informationTypeId?: string | null;
 }
 
 class UpdateFlowEdgeDto {
@@ -261,6 +270,15 @@ class UpdateFlowEdgeDto {
   @IsOptional()
   @IsString()
   condition?: string;
+
+  @ApiProperty({
+    description: 'この矢印上を流れるデータ（情報種別マスタID）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  informationTypeId?: string | null;
 }
 
 class CreateChildFlowDto {
@@ -303,6 +321,29 @@ class CreateNodeChildFlowDto {
   @IsOptional()
   @IsString()
   name?: string;
+}
+
+class NodeInformationLinkItemDto {
+  @ApiProperty({ description: '情報種別マスタID' })
+  @IsString()
+  informationTypeId: string;
+
+  @ApiProperty({ description: 'リンク方向', enum: ['INPUT', 'OUTPUT'] })
+  @IsIn(['INPUT', 'OUTPUT'])
+  direction: 'INPUT' | 'OUTPUT';
+
+  @ApiProperty({ description: '並び順', required: false })
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+}
+
+class ReplaceNodeInformationLinksDto {
+  @ApiProperty({ type: [NodeInformationLinkItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => NodeInformationLinkItemDto)
+  links: NodeInformationLinkItemDto[];
 }
 
 @ApiTags('Business Flows')
@@ -380,12 +421,21 @@ export class BusinessFlowController {
           },
           orderBy: { order: 'asc' },
         },
+        informationLinks: {
+          include: {
+            informationType: { select: { id: true, name: true, category: true } },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
 
     const edges = await this.prisma.flowEdge.findMany({
       where: { flowId: id },
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
+      },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -426,6 +476,20 @@ export class BusinessFlowController {
           label: l.label,
           order: l.order,
         })),
+        informationLinks: n.informationLinks.map((il) => ({
+          id: il.id,
+          nodeId: il.nodeId,
+          informationTypeId: il.informationTypeId,
+          direction: il.direction,
+          order: il.order,
+          informationType: il.informationType
+            ? {
+                id: il.informationType.id,
+                name: il.informationType.name,
+                category: il.informationType.category,
+              }
+            : null,
+        })),
         metadata: n.metadata,
       })),
       edges: edges.map((e) => ({
@@ -437,6 +501,14 @@ export class BusinessFlowController {
         targetHandle: e.targetHandle,
         label: e.label,
         condition: e.condition,
+        informationTypeId: e.informationTypeId,
+        informationType: e.informationType
+          ? {
+              id: e.informationType.id,
+              name: e.informationType.name,
+              category: e.informationType.category,
+            }
+          : null,
       })),
       children: children.map((c) => this.toResponse(c)),
       breadcrumbs,
@@ -660,19 +732,14 @@ export class BusinessFlowController {
         targetHandle: dto.targetHandle,
         label: dto.label,
         condition: dto.condition,
+        informationTypeId: dto.informationTypeId ?? null,
+      },
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
       },
     });
 
-    return {
-      id: edge.id,
-      flowId: edge.flowId,
-      sourceNodeId: edge.sourceNodeId,
-      targetNodeId: edge.targetNodeId,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      label: edge.label,
-      condition: edge.condition,
-    };
+    return this.edgeToResponse(edge);
   }
 
   @Patch(':flowId/edges/:edgeId')
@@ -695,6 +762,7 @@ export class BusinessFlowController {
       targetHandle?: string | null;
       label?: string | null;
       condition?: string | null;
+      informationTypeId?: string | null;
     } = {};
     if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
     if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
@@ -702,22 +770,18 @@ export class BusinessFlowController {
     if (dto.targetHandle !== undefined) data.targetHandle = dto.targetHandle;
     if (dto.label !== undefined) data.label = dto.label;
     if (dto.condition !== undefined) data.condition = dto.condition;
+    if (dto.informationTypeId !== undefined)
+      data.informationTypeId = dto.informationTypeId;
 
     const edge = await this.prisma.flowEdge.update({
       where: { id: edgeId },
       data,
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
+      },
     });
 
-    return {
-      id: edge.id,
-      flowId: edge.flowId,
-      sourceNodeId: edge.sourceNodeId,
-      targetNodeId: edge.targetNodeId,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      label: edge.label,
-      condition: edge.condition,
-    };
+    return this.edgeToResponse(edge);
   }
 
   @Put(':flowId/edges/:edgeId')
@@ -733,6 +797,7 @@ export class BusinessFlowController {
       targetHandle?: string | null;
       label?: string | null;
       condition?: string | null;
+      informationTypeId?: string | null;
     } = {};
     if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
     if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
@@ -740,22 +805,18 @@ export class BusinessFlowController {
     if (dto.targetHandle !== undefined) data.targetHandle = dto.targetHandle;
     if (dto.label !== undefined) data.label = dto.label;
     if (dto.condition !== undefined) data.condition = dto.condition;
+    if (dto.informationTypeId !== undefined)
+      data.informationTypeId = dto.informationTypeId;
 
     const edge = await this.prisma.flowEdge.update({
       where: { id: edgeId },
       data,
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
+      },
     });
 
-    return {
-      id: edge.id,
-      flowId: edge.flowId,
-      sourceNodeId: edge.sourceNodeId,
-      targetNodeId: edge.targetNodeId,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-      label: edge.label,
-      condition: edge.condition,
-    };
+    return this.edgeToResponse(edge);
   }
 
   @Delete(':flowId/edges/:edgeId')
@@ -877,6 +938,107 @@ export class BusinessFlowController {
       linkId,
     });
     return { success: true };
+  }
+
+  // ========== Node Information-Type Links (INPUT/OUTPUT) ==========
+
+  @Get(':flowId/nodes/:nodeId/information-links')
+  @ApiOperation({ summary: 'ノードの入出力（情報種別マスタ紐づけ）一覧を取得' })
+  async getNodeInformationLinks(@Param('nodeId') nodeId: string) {
+    const links = await this.prisma.nodeInformationLink.findMany({
+      where: { nodeId },
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
+      },
+      orderBy: { order: 'asc' },
+    });
+    return links.map((il) => this.toInformationLinkResponse(il));
+  }
+
+  @Put(':flowId/nodes/:nodeId/information-links')
+  @ApiOperation({ summary: 'ノードの入出力（情報種別マスタ紐づけ）を一括置換' })
+  async replaceNodeInformationLinks(
+    @Param('nodeId') nodeId: string,
+    @Body() dto: ReplaceNodeInformationLinksDto,
+  ) {
+    await this.prisma.$transaction([
+      this.prisma.nodeInformationLink.deleteMany({ where: { nodeId } }),
+      ...dto.links.map((link, index) =>
+        this.prisma.nodeInformationLink.create({
+          data: {
+            nodeId,
+            informationTypeId: link.informationTypeId,
+            direction: link.direction,
+            order: link.order ?? index,
+          },
+        }),
+      ),
+    ]);
+
+    const links = await this.prisma.nodeInformationLink.findMany({
+      where: { nodeId },
+      include: {
+        informationType: { select: { id: true, name: true, category: true } },
+      },
+      orderBy: { order: 'asc' },
+    });
+    return links.map((il) => this.toInformationLinkResponse(il));
+  }
+
+  private edgeToResponse(e: {
+    id: string;
+    flowId: string;
+    sourceNodeId: string;
+    targetNodeId: string;
+    sourceHandle: string | null;
+    targetHandle: string | null;
+    label: string | null;
+    condition: string | null;
+    informationTypeId: string | null;
+    informationType?: { id: string; name: string; category: string } | null;
+  }) {
+    return {
+      id: e.id,
+      flowId: e.flowId,
+      sourceNodeId: e.sourceNodeId,
+      targetNodeId: e.targetNodeId,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
+      label: e.label,
+      condition: e.condition,
+      informationTypeId: e.informationTypeId,
+      informationType: e.informationType
+        ? {
+            id: e.informationType.id,
+            name: e.informationType.name,
+            category: e.informationType.category,
+          }
+        : null,
+    };
+  }
+
+  private toInformationLinkResponse(il: {
+    id: string;
+    nodeId: string;
+    informationTypeId: string;
+    direction: string;
+    order: number;
+    informationType: { id: string; name: string; category: string } | null;
+  }) {
+    return {
+      id: il.id,
+      nodeId: il.nodeId,
+      informationTypeId: il.informationTypeId,
+      direction: il.direction,
+      order: il.order,
+      informationType: il.informationType
+        ? {
+            id: il.informationType.id,
+            name: il.informationType.name,
+            category: il.informationType.category,
+          }
+        : null,
+    };
   }
 
   // ========== CRUD Mappings for Flow ==========

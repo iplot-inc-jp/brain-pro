@@ -41,7 +41,7 @@ interface FlowRow {
   sourceHandle: string | null;
   targetHandle: string | null;
   dataItem: string;
-  reportTypeId: string | null;
+  informationTypeId: string | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -90,7 +90,7 @@ export class DfdRepositoryImpl implements IDfdRepository {
       sourceHandle: r.sourceHandle,
       targetHandle: r.targetHandle,
       dataItem: r.dataItem,
-      reportTypeId: r.reportTypeId,
+      informationTypeId: r.informationTypeId,
       order: r.order,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
@@ -231,7 +231,7 @@ export class DfdRepositoryImpl implements IDfdRepository {
       sourceHandle: f.sourceHandle,
       targetHandle: f.targetHandle,
       dataItem: f.dataItem,
-      reportTypeId: f.reportTypeId,
+      informationTypeId: f.informationTypeId,
       order: f.order,
     };
     await this.prisma.dfdFlow.upsert({

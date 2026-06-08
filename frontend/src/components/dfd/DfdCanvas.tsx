@@ -5,7 +5,7 @@
  *
  * SwimlaneCanvas.tsx をミラー（nodeTypes / useNodesState+onNodesChange / toPng / ドラッグ保存）。
  *   - nodeTypes: function=楕円(navy枠/番号+label), external=四角(slate), datastore=開いた四角「=」(emerald)。
- *   - edgeTypes: ラベル付き矢印（dataItem ＋ 帳票チップ）。
+ *   - edgeTypes: ラベル付き矢印（dataItem ＋ 情報種別チップ）。
  *   - 破線楕円のシステム境界（背景レイヤ）＋凡例パネル＋帳票ヘッダ/フッタ。
  *   - ノードドラッグ → onSavePositions（左上座標を positionX/Y で保存）。
  *   - onConnect → onAddFlow（dataItem は仮入力 → 後で編集）。
@@ -49,13 +49,14 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   assignFunctionNumbers,
-  reportTypeApi,
+  informationTypeApi,
+  INFORMATION_CATEGORY_LABELS,
   type DfdDiagram,
   type DfdNode as DfdNodeModel,
   type DfdFlow as DfdFlowModel,
   type DfdNodeKind,
-  type ReportType,
-  type ReportTypeAttachment,
+  type InformationType,
+  type InformationTypeAttachment,
 } from '@/lib/dfd';
 
 // 色（navy / blue / emerald / slate）
@@ -109,8 +110,8 @@ export interface DfdCanvasProps {
   onRegenerate?: () => void | Promise<void>;
   /** FUNCTIONノードのドリルダウン（第1→第2）。refFlowId が無いノードでは出さない。 */
   onFunctionOpen?: (refFlowId: string) => void;
-  /** プロジェクトの帳票種別一覧（エッジの帳票チップ名・セレクタに使用）。 */
-  reportTypes?: ReportType[];
+  /** プロジェクトの情報種別一覧（エッジの情報チップ名・セレクタに使用）。 */
+  informationTypes?: InformationType[];
 }
 
 // ===========================================
@@ -262,8 +263,9 @@ function DataFlowEdge({
   id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, label, markerEnd, selected, data,
 }: EdgeProps & {
   data?: {
-    reportName?: string | null;
-    reportAttachmentCount?: number;
+    informationName?: string | null;
+    informationCategoryLabel?: string | null;
+    informationAttachmentCount?: number;
     onLabelUpdate?: (id: string, label: string) => void;
   };
 }) {
@@ -310,14 +312,17 @@ function DataFlowEdge({
               title="ダブルクリックでデータ項目を編集"
             >
               <span className="max-w-[140px] truncate text-gray-800">{(label as string) || '（データ項目）'}</span>
-              {data?.reportName && (
+              {data?.informationName && (
                 <span
                   className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1"
-                  title={data.reportName}
+                  title={data.informationName}
                 >
                   <FileText className="w-2.5 h-2.5" />
-                  <span className="max-w-[80px] truncate">{data.reportName}</span>
-                  {(data.reportAttachmentCount ?? 0) > 0 && <span>📎{data.reportAttachmentCount}</span>}
+                  {data.informationCategoryLabel && (
+                    <span className="text-emerald-600/80">[{data.informationCategoryLabel}]</span>
+                  )}
+                  <span className="max-w-[80px] truncate">{data.informationName}</span>
+                  {(data.informationAttachmentCount ?? 0) > 0 && <span>📎{data.informationAttachmentCount}</span>}
                 </span>
               )}
             </div>
@@ -357,9 +362,9 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   // FUNCTION の採番を反映（既存 number は保持）
   const numberedNodes = useMemo(() => assignFunctionNumbers(diagram.nodes, 1), [diagram.nodes]);
 
-  const reportTypeById = useMemo(
-    () => new Map((props.reportTypes ?? []).map((rt) => [rt.id, rt] as const)),
-    [props.reportTypes],
+  const informationTypeById = useMemo(
+    () => new Map((props.informationTypes ?? []).map((it) => [it.id, it] as const)),
+    [props.informationTypes],
   );
 
   // システム境界（FUNCTION/DATA_STORE を囲む破線楕円, 背景）
@@ -414,7 +419,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const rfEdges: Edge[] = useMemo(
     () =>
       diagram.flows.map((f) => {
-        const rt = f.reportTypeId ? reportTypeById.get(f.reportTypeId) : undefined;
+        const it = f.informationTypeId ? informationTypeById.get(f.informationTypeId) : undefined;
         return {
           id: f.id,
           source: f.sourceNodeId,
@@ -430,13 +435,14 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           reconnectable: !!props.onReconnectFlow,
           markerEnd: { type: MarkerType.ArrowClosed, color: SLATE, width: 18, height: 18 },
           data: {
-            reportName: f.reportTypeId ? (rt?.name ?? '帳票') : null,
-            reportAttachmentCount: rt?.attachmentCount ?? 0,
+            informationName: f.informationTypeId ? (it?.name ?? '情報') : null,
+            informationCategoryLabel: it ? INFORMATION_CATEGORY_LABELS[it.category] : null,
+            informationAttachmentCount: it?.attachmentCount ?? 0,
             onLabelUpdate: (id: string, label: string) => props.onUpdateFlow?.(id, { dataItem: label }),
           },
         };
       }),
-    [diagram.flows, selectedEdgeId, reportTypeById, props],
+    [diagram.flows, selectedEdgeId, informationTypeById, props],
   );
 
   useEffect(() => {
@@ -533,17 +539,17 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     [diagram.flows, selectedEdgeId],
   );
 
-  // 選択中エッジの帳票種別に紐づく具体帳票（クリックでDL）
-  const [edgeAttachments, setEdgeAttachments] = useState<ReportTypeAttachment[]>([]);
+  // 選択中エッジの情報種別に紐づく具体帳票（クリックでDL）
+  const [edgeAttachments, setEdgeAttachments] = useState<InformationTypeAttachment[]>([]);
   useEffect(() => {
-    const rtId = selectedFlow?.reportTypeId;
-    if (!rtId) {
+    const itId = selectedFlow?.informationTypeId;
+    if (!itId) {
       setEdgeAttachments([]);
       return;
     }
     let cancelled = false;
-    void reportTypeApi
-      .listAttachments(rtId)
+    void informationTypeApi
+      .listAttachments(itId)
       .then((list) => {
         if (!cancelled) setEdgeAttachments(list);
       })
@@ -553,7 +559,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     return () => {
       cancelled = true;
     };
-  }, [selectedFlow?.reportTypeId]);
+  }, [selectedFlow?.informationTypeId]);
 
   return (
     <div ref={wrapperRef} className="relative w-full h-full bg-white">
@@ -695,7 +701,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           </div>
         )}
 
-        {/* 選択エッジの編集（帳票種別の参照 + 削除） */}
+        {/* 選択エッジの編集（情報種別の参照 + 削除） */}
         {selectedFlow && (
           <div className="absolute top-3 left-3 z-20 bg-white border border-gray-200 rounded-lg shadow-md p-3 w-64 space-y-2">
             <div className="flex items-center justify-between">
@@ -713,25 +719,25 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               {selectedFlow.dataItem || '（データ項目）'}
             </div>
             <div>
-              <label className="block text-[10px] text-gray-400 mb-0.5">帳票種別</label>
+              <label className="block text-[10px] text-gray-400 mb-0.5">情報種別</label>
               <select
-                value={selectedFlow.reportTypeId ?? ''}
+                value={selectedFlow.informationTypeId ?? ''}
                 onChange={(e) => {
                   const v = e.target.value || null;
-                  void props.onUpdateFlow?.(selectedFlow.id, { reportTypeId: v });
+                  void props.onUpdateFlow?.(selectedFlow.id, { informationTypeId: v });
                 }}
                 disabled={!props.onUpdateFlow}
                 className="w-full px-2 py-1 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
               >
                 <option value="">（なし）</option>
-                {(props.reportTypes ?? []).map((rt) => (
-                  <option key={rt.id} value={rt.id}>
-                    {rt.name}
+                {(props.informationTypes ?? []).map((it) => (
+                  <option key={it.id} value={it.id}>
+                    [{INFORMATION_CATEGORY_LABELS[it.category]}] {it.name}
                   </option>
                 ))}
               </select>
             </div>
-            {selectedFlow.reportTypeId && (
+            {selectedFlow.informationTypeId && (
               edgeAttachments.length > 0 ? (
                 <ul className="space-y-1">
                   {edgeAttachments.map((a) => (
@@ -739,7 +745,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                       <FileText className="w-3 h-3 shrink-0 text-emerald-600" />
                       <span className="flex-1 truncate text-gray-700" title={a.filename}>{a.filename}</span>
                       <a
-                        href={reportTypeApi.fileUrl(a.id)}
+                        href={informationTypeApi.fileUrl(a.id)}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center text-blue-600 hover:underline"

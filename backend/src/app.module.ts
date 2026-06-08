@@ -25,7 +25,7 @@ import {
   TASK_REPOSITORY,
   TASK_COMMENT_REPOSITORY,
   DFD_REPOSITORY,
-  REPORT_TYPE_REPOSITORY,
+  INFORMATION_TYPE_REPOSITORY,
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
   RISK_REPOSITORY,
@@ -120,11 +120,11 @@ import {
   UpdateDfdFlowUseCase,
   DeleteDfdFlowUseCase,
   SaveDfdPositionsUseCase,
-  // ReportType
-  GetReportTypesUseCase,
-  CreateReportTypeUseCase,
-  UpdateReportTypeUseCase,
-  DeleteReportTypeUseCase,
+  // InformationType
+  GetInformationTypesUseCase,
+  CreateInformationTypeUseCase,
+  UpdateInformationTypeUseCase,
+  DeleteInformationTypeUseCase,
   // Stakeholder
   CreateStakeholderUseCase,
   GetStakeholdersUseCase,
@@ -190,7 +190,7 @@ import {
   TaskRepositoryImpl,
   TaskCommentRepositoryImpl,
   DfdRepositoryImpl,
-  ReportTypeRepositoryImpl,
+  InformationTypeRepositoryImpl,
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
   RiskRepositoryImpl,
@@ -253,9 +253,9 @@ import { CodeCatalogController } from './presentation/controllers/code-catalog.c
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
 import { AttachmentController } from './presentation/controllers/attachment.controller';
 import {
-  ReportTypeController,
-  ReportTypeByIdController,
-} from './presentation/controllers/report-type.controller';
+  InformationTypeController,
+  InformationTypeByIdController,
+} from './presentation/controllers/information-type.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { RecordSheetController } from './presentation/controllers/record-sheet.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
@@ -316,8 +316,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     SubProjectController,
     RecordSheetController,
     DfdController,
-    ReportTypeController,
-    ReportTypeByIdController,
+    InformationTypeController,
+    InformationTypeByIdController,
     StakeholderController,
     StakeholderByIdController,
     MeetingController,
@@ -424,8 +424,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
       useClass: DfdRepositoryImpl,
     },
     {
-      provide: REPORT_TYPE_REPOSITORY,
-      useClass: ReportTypeRepositoryImpl,
+      provide: INFORMATION_TYPE_REPOSITORY,
+      useClass: InformationTypeRepositoryImpl,
     },
     {
       provide: STAKEHOLDER_REPOSITORY,
@@ -541,11 +541,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     UpdateDfdFlowUseCase,
     DeleteDfdFlowUseCase,
     SaveDfdPositionsUseCase,
-    // ReportType
-    GetReportTypesUseCase,
-    CreateReportTypeUseCase,
-    UpdateReportTypeUseCase,
-    DeleteReportTypeUseCase,
+    // InformationType
+    GetInformationTypesUseCase,
+    CreateInformationTypeUseCase,
+    UpdateInformationTypeUseCase,
+    DeleteInformationTypeUseCase,
     // Stakeholder
     CreateStakeholderUseCase,
     GetStakeholdersUseCase,
