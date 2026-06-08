@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -213,6 +214,16 @@ class CreateFlowEdgeDto {
   @IsString()
   targetNodeId: string;
 
+  @ApiProperty({ description: '接続元ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  sourceHandle?: string;
+
+  @ApiProperty({ description: '接続先ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  targetHandle?: string;
+
   @IsOptional()
   @IsString()
   label?: string;
@@ -223,6 +234,26 @@ class CreateFlowEdgeDto {
 }
 
 class UpdateFlowEdgeDto {
+  @ApiProperty({ description: '接続元ノードID（再接続用）', required: false })
+  @IsOptional()
+  @IsString()
+  sourceNodeId?: string;
+
+  @ApiProperty({ description: '接続先ノードID（再接続用）', required: false })
+  @IsOptional()
+  @IsString()
+  targetNodeId?: string;
+
+  @ApiProperty({ description: '接続元ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  sourceHandle?: string;
+
+  @ApiProperty({ description: '接続先ノードのハンドル（接続辺）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  targetHandle?: string;
+
   @IsOptional()
   @IsString()
   label?: string;
@@ -402,6 +433,8 @@ export class BusinessFlowController {
         flowId: e.flowId,
         sourceNodeId: e.sourceNodeId,
         targetNodeId: e.targetNodeId,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
         label: e.label,
         condition: e.condition,
       })),
@@ -623,6 +656,8 @@ export class BusinessFlowController {
         flowId,
         sourceNodeId: dto.sourceNodeId,
         targetNodeId: dto.targetNodeId,
+        sourceHandle: dto.sourceHandle,
+        targetHandle: dto.targetHandle,
         label: dto.label,
         condition: dto.condition,
       },
@@ -633,6 +668,53 @@ export class BusinessFlowController {
       flowId: edge.flowId,
       sourceNodeId: edge.sourceNodeId,
       targetNodeId: edge.targetNodeId,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      label: edge.label,
+      condition: edge.condition,
+    };
+  }
+
+  @Patch(':flowId/edges/:edgeId')
+  @ApiOperation({
+    summary: 'エッジを再接続・更新（接続元/先・ハンドル・ラベル）',
+  })
+  async reconnectEdge(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Param('edgeId') edgeId: string,
+    @Body() dto: UpdateFlowEdgeDto,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    const data: {
+      sourceNodeId?: string;
+      targetNodeId?: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+      label?: string | null;
+      condition?: string | null;
+    } = {};
+    if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
+    if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
+    if (dto.sourceHandle !== undefined) data.sourceHandle = dto.sourceHandle;
+    if (dto.targetHandle !== undefined) data.targetHandle = dto.targetHandle;
+    if (dto.label !== undefined) data.label = dto.label;
+    if (dto.condition !== undefined) data.condition = dto.condition;
+
+    const edge = await this.prisma.flowEdge.update({
+      where: { id: edgeId },
+      data,
+    });
+
+    return {
+      id: edge.id,
+      flowId: edge.flowId,
+      sourceNodeId: edge.sourceNodeId,
+      targetNodeId: edge.targetNodeId,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
       label: edge.label,
       condition: edge.condition,
     };
@@ -644,12 +726,24 @@ export class BusinessFlowController {
     @Param('edgeId') edgeId: string,
     @Body() dto: UpdateFlowEdgeDto,
   ) {
+    const data: {
+      sourceNodeId?: string;
+      targetNodeId?: string;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+      label?: string | null;
+      condition?: string | null;
+    } = {};
+    if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
+    if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
+    if (dto.sourceHandle !== undefined) data.sourceHandle = dto.sourceHandle;
+    if (dto.targetHandle !== undefined) data.targetHandle = dto.targetHandle;
+    if (dto.label !== undefined) data.label = dto.label;
+    if (dto.condition !== undefined) data.condition = dto.condition;
+
     const edge = await this.prisma.flowEdge.update({
       where: { id: edgeId },
-      data: {
-        label: dto.label,
-        condition: dto.condition,
-      },
+      data,
     });
 
     return {
@@ -657,6 +751,8 @@ export class BusinessFlowController {
       flowId: edge.flowId,
       sourceNodeId: edge.sourceNodeId,
       targetNodeId: edge.targetNodeId,
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
       label: edge.label,
       condition: edge.condition,
     };
@@ -991,6 +1087,32 @@ export class BusinessFlowController {
 
     // 更新後のフロー（ノード・エッジ含む）を返す
     return this.getById(id);
+  }
+
+  // 認可ヘルパー: flow -> project -> organization メンバーシップを検証
+  private async assertFlowMembership(
+    flowId: string,
+    userId: string,
+  ): Promise<BusinessFlow> {
+    const flow = await this.flowRepository.findById(flowId);
+    if (!flow) {
+      throw new EntityNotFoundError('BusinessFlow', flowId);
+    }
+
+    const project = await this.projectRepository.findById(flow.projectId);
+    if (!project) {
+      throw new EntityNotFoundError('Project', flow.projectId);
+    }
+
+    const isMember = await this.organizationRepository.isMember(
+      project.organizationId,
+      userId,
+    );
+    if (!isMember) {
+      throw new ForbiddenError('You are not a member of this organization');
+    }
+
+    return flow;
   }
 
   private async getBreadcrumbs(flow: BusinessFlow): Promise<{ id: string; name: string }[]> {

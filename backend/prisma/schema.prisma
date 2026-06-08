@@ -326,6 +326,8 @@ model FlowEdge {
   flowId       String   @map("flow_id")
   sourceNodeId String   @map("source_node_id")
   targetNodeId String   @map("target_node_id")
+  sourceHandle String?  @map("source_handle")
+  targetHandle String?  @map("target_handle")
   label        String?
   condition    String?
   createdAt    DateTime @default(now()) @map("created_at")
