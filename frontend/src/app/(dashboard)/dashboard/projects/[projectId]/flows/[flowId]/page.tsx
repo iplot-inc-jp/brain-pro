@@ -811,7 +811,13 @@ export default function ProjectFlowDetailPage() {
   const handleEdgeUpdate = useCallback(
     async (
       edgeId: string,
-      patch: { informationTypeId?: string | null; label?: string }
+      patch: {
+        informationTypeId?: string | null;
+        label?: string;
+        pathStyle?: string | null;
+        labelT?: number | null;
+        infoT?: number | null;
+      }
     ) => {
       if (!flowData) return;
       try {

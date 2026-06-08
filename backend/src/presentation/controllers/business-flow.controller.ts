@@ -270,6 +270,21 @@ class CreateFlowEdgeDto {
   @IsOptional()
   @IsString()
   informationTypeId?: string | null;
+
+  @ApiProperty({ description: '線の形状 smoothstep|bezier|straight', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  pathStyle?: string | null;
+
+  @ApiProperty({ description: 'ラベルのパス上位置(0-1)', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  labelT?: number | null;
+
+  @ApiProperty({ description: '運ぶ情報チップのパス上位置(0-1)', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  infoT?: number | null;
 }
 
 class UpdateFlowEdgeDto {
@@ -309,6 +324,21 @@ class UpdateFlowEdgeDto {
   @IsOptional()
   @IsString()
   informationTypeId?: string | null;
+
+  @ApiProperty({ description: '線の形状 smoothstep|bezier|straight', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  pathStyle?: string | null;
+
+  @ApiProperty({ description: 'ラベルのパス上位置(0-1)', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  labelT?: number | null;
+
+  @ApiProperty({ description: '運ぶ情報チップのパス上位置(0-1)', required: false, nullable: true })
+  @IsOptional()
+  @IsNumber()
+  infoT?: number | null;
 }
 
 class CreateChildFlowDto {
@@ -535,6 +565,9 @@ export class BusinessFlowController {
         label: e.label,
         condition: e.condition,
         informationTypeId: e.informationTypeId,
+        pathStyle: e.pathStyle,
+        labelT: e.labelT,
+        infoT: e.infoT,
         informationType: e.informationType
           ? {
               id: e.informationType.id,
@@ -774,6 +807,9 @@ export class BusinessFlowController {
         label: dto.label,
         condition: dto.condition,
         informationTypeId: dto.informationTypeId ?? null,
+        pathStyle: dto.pathStyle ?? null,
+        labelT: dto.labelT ?? null,
+        infoT: dto.infoT ?? null,
       },
       include: {
         informationType: { select: { id: true, name: true, category: true } },
@@ -804,6 +840,9 @@ export class BusinessFlowController {
       label?: string | null;
       condition?: string | null;
       informationTypeId?: string | null;
+      pathStyle?: string | null;
+      labelT?: number | null;
+      infoT?: number | null;
     } = {};
     if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
     if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
@@ -813,6 +852,9 @@ export class BusinessFlowController {
     if (dto.condition !== undefined) data.condition = dto.condition;
     if (dto.informationTypeId !== undefined)
       data.informationTypeId = dto.informationTypeId;
+    if (dto.pathStyle !== undefined) data.pathStyle = dto.pathStyle;
+    if (dto.labelT !== undefined) data.labelT = dto.labelT;
+    if (dto.infoT !== undefined) data.infoT = dto.infoT;
 
     const edge = await this.prisma.flowEdge.update({
       where: { id: edgeId },
@@ -839,6 +881,9 @@ export class BusinessFlowController {
       label?: string | null;
       condition?: string | null;
       informationTypeId?: string | null;
+      pathStyle?: string | null;
+      labelT?: number | null;
+      infoT?: number | null;
     } = {};
     if (dto.sourceNodeId !== undefined) data.sourceNodeId = dto.sourceNodeId;
     if (dto.targetNodeId !== undefined) data.targetNodeId = dto.targetNodeId;
@@ -848,6 +893,9 @@ export class BusinessFlowController {
     if (dto.condition !== undefined) data.condition = dto.condition;
     if (dto.informationTypeId !== undefined)
       data.informationTypeId = dto.informationTypeId;
+    if (dto.pathStyle !== undefined) data.pathStyle = dto.pathStyle;
+    if (dto.labelT !== undefined) data.labelT = dto.labelT;
+    if (dto.infoT !== undefined) data.infoT = dto.infoT;
 
     const edge = await this.prisma.flowEdge.update({
       where: { id: edgeId },
@@ -1036,6 +1084,9 @@ export class BusinessFlowController {
     label: string | null;
     condition: string | null;
     informationTypeId: string | null;
+    pathStyle?: string | null;
+    labelT?: number | null;
+    infoT?: number | null;
     informationType?: { id: string; name: string; category: string } | null;
   }) {
     return {
@@ -1048,6 +1099,9 @@ export class BusinessFlowController {
       label: e.label,
       condition: e.condition,
       informationTypeId: e.informationTypeId,
+      pathStyle: e.pathStyle ?? null,
+      labelT: e.labelT ?? null,
+      infoT: e.infoT ?? null,
       informationType: e.informationType
         ? {
             id: e.informationType.id,

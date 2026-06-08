@@ -100,6 +100,12 @@ export type FlowDataEdge = {
     name: string;
     category: string;
   } | null;
+  /** 線の形状: 'smoothstep'(角ばり,既定) | 'bezier'(曲線) | 'straight'(直線)。 */
+  pathStyle?: string | null;
+  /** ラベル文字のパス上位置（0〜1 の割合。未設定=0.5 中央）。 */
+  labelT?: number | null;
+  /** 運ぶ情報チップのパス上位置（0〜1 の割合。未設定=0.5 中央）。 */
+  infoT?: number | null;
 };
 
 export type FlowData = {

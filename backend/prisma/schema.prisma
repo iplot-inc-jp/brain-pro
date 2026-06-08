@@ -358,6 +358,11 @@ model FlowEdge {
   condition    String?
   // この矢印上を流れるデータ（情報種別マスタとの紐づけ）
   informationTypeId String? @map("information_type_id")
+  // 線の形状: 'smoothstep'(角ばり,既定) | 'bezier'(曲線) | 'straight'(直線)
+  pathStyle    String?  @map("path_style")
+  // ラベル文字・運ぶ情報チップの「パス上の位置」を 0〜1 の割合で保持（未設定=0.5中央）
+  labelT       Float?   @map("label_t")
+  infoT        Float?   @map("info_t")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

@@ -22,6 +22,7 @@ import {
   useState,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import {
   ReactFlow,
@@ -36,6 +37,8 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getSmoothStepPath,
+  getBezierPath,
+  getStraightPath,
   useReactFlow,
   useNodesState,
   ConnectionMode,
@@ -173,7 +176,13 @@ export interface SwimlaneCanvasProps {
    */
   onUpdateEdge?: (
     edgeId: string,
-    patch: { informationTypeId?: string | null; label?: string },
+    patch: {
+      informationTypeId?: string | null;
+      label?: string;
+      pathStyle?: string | null;
+      labelT?: number | null;
+      infoT?: number | null;
+    },
   ) => Promise<void> | void;
   /**
    * 接続線（エッジ）の途中にノードを挿入する。
@@ -453,6 +462,8 @@ function LaneNode({ data }: { data: LaneNodeData }) {
   );
 }
 
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+
 function EditableEdge({
   id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, label, markerEnd, selected, data,
 }: EdgeProps & {
@@ -463,53 +474,170 @@ function EditableEdge({
     informationTypeName?: string | null;
     /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
     onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
+    /** 先端をノードから離れた場所にドロップした時、矢印自体を削除する。 */
+    onDeleteSelf?: (edgeId: string) => void;
     /** ラベル/チップなど線以外の部分をクリックしても矢印を選択できるようにする。 */
     onSelect?: (edgeId: string) => void;
+    /** 線の形状（smoothstep|bezier|straight）。 */
+    pathStyle?: string | null;
+    /** ラベル・チップのパス上位置（0〜1）。 */
+    labelT?: number | null;
+    infoT?: number | null;
+    /** ラベル/チップをパスに沿って移動した時に割合 t を保存する。 */
+    onMoveLabel?: (edgeId: string, t: number) => void;
+    onMoveInfo?: (edgeId: string, t: number) => void;
   };
 }) {
+  const rf = useReactFlow();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState((label as string) || '');
   const inputRef = useRef<HTMLInputElement>(null);
-  // 先端ドラッグ（付け替え）用: 開始点(screen)とカーソル位置を保持してゴースト線を描く。
+  // 先端ドラッグ（付け替え/削除）用: 開始点(screen)とカーソル位置を保持してゴースト線を描く。
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  // ラベル/チップをパスに沿って移動中の live な割合（ドラッグ確定後も保持して props 反映まで保つ）。
+  const [liveLabelT, setLiveLabelT] = useState<number | null>(null);
+  const [liveInfoT, setLiveInfoT] = useState<number | null>(null);
+  // クリックとドラッグを区別（移動したら直後の click 選択を抑止）。
+  const movedRef = useRef(false);
+
   const onReconnectTarget = data?.onReconnectTarget;
+  const onDeleteSelf = data?.onDeleteSelf;
+  const onMoveLabel = data?.onMoveLabel;
+  const onMoveInfo = data?.onMoveInfo;
+
+  // 形状に応じてパスを生成（既定は角ばった smoothstep）。
+  const pathParams = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
+  let edgePath: string;
+  let labelX: number;
+  let labelY: number;
+  if (data?.pathStyle === 'bezier') {
+    [edgePath, labelX, labelY] = getBezierPath(pathParams);
+  } else if (data?.pathStyle === 'straight') {
+    [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });
+  } else {
+    [edgePath, labelX, labelY] = getSmoothStepPath(pathParams);
+  }
+
+  // パス上の任意割合 t の座標を出す（detached path の getPointAtLength）。
+  const measure = useMemo(() => {
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', edgePath);
+    let len = 0;
+    try { len = p.getTotalLength(); } catch { len = 0; }
+    return { p, len };
+  }, [edgePath]);
+  const pointAt = useCallback(
+    (t: number) => {
+      try {
+        const pt = measure.p.getPointAtLength(clamp01(t) * measure.len);
+        return { x: pt.x, y: pt.y };
+      } catch {
+        return { x: labelX, y: labelY };
+      }
+    },
+    [measure, labelX, labelY],
+  );
+  const nearestT = useCallback(
+    (fx: number, fy: number) => {
+      if (!measure.len) return 0.5;
+      let best = 0.5;
+      let bd = Infinity;
+      for (let i = 0; i <= 48; i++) {
+        const t = i / 48;
+        let pt: DOMPoint;
+        try { pt = measure.p.getPointAtLength(t * measure.len); } catch { continue; }
+        const d = (pt.x - fx) ** 2 + (pt.y - fy) ** 2;
+        if (d < bd) { bd = d; best = t; }
+      }
+      return best;
+    },
+    [measure],
+  );
+
+  // ラベル/チップをパスに沿ってドラッグ。移動したら割合 t を計算して保存。
+  const startAlongDrag = useCallback(
+    (
+      e: ReactPointerEvent,
+      setLive: (t: number) => void,
+      persist?: (edgeId: string, t: number) => void,
+    ) => {
+      if (!persist) return;
+      e.stopPropagation();
+      const sx = e.clientX;
+      const sy = e.clientY;
+      movedRef.current = false;
+      const move = (ev: PointerEvent) => {
+        if (!movedRef.current && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+        movedRef.current = true;
+        const flow = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        setLive(clamp01(nearestT(flow.x, flow.y)));
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        if (movedRef.current) {
+          const flow = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+          const t = clamp01(nearestT(flow.x, flow.y));
+          setLive(t);
+          persist(id, t);
+        }
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    },
+    [rf, nearestT, id],
+  );
+
+  // 先端アンカーのドラッグ: ノードにドロップ=付け替え / 何もない所=削除。
   const onTargetAnchorDown = useCallback(
     (e: ReactPointerEvent) => {
-      if (!onReconnectTarget) return;
+      if (!onReconnectTarget && !onDeleteSelf) return;
       e.stopPropagation();
       e.preventDefault();
-      dragStartRef.current = { x: e.clientX, y: e.clientY };
-      setDragPos({ x: e.clientX, y: e.clientY });
-      const move = (ev: PointerEvent) => setDragPos({ x: ev.clientX, y: ev.clientY });
+      const sx = e.clientX;
+      const sy = e.clientY;
+      let moved = false;
+      dragStartRef.current = { x: sx, y: sy };
+      setDragPos({ x: sx, y: sy });
+      const move = (ev: PointerEvent) => {
+        if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 6) moved = true;
+        setDragPos({ x: ev.clientX, y: ev.clientY });
+      };
       const up = (ev: PointerEvent) => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         setDragPos(null);
         dragStartRef.current = null;
-        // ドロップ地点の真下にあるノードを探して付け替える。
+        if (!moved) return; // ただのクリックは無視（誤削除/誤付け替え防止）
         const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
         const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
         const newId = nodeEl?.getAttribute('data-id');
-        if (newId) onReconnectTarget(id, newId);
+        if (newId && onReconnectTarget) onReconnectTarget(id, newId);
+        else if (onDeleteSelf) onDeleteSelf(id);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     },
-    [onReconnectTarget, id],
+    [onReconnectTarget, onDeleteSelf, id],
   );
+
   const dragging = dragPos !== null;
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
-  });
   const commit = () => {
     setEditing(false);
     if (data?.onLabelUpdate && value !== label) data.onLabelUpdate(id, value);
   };
-  // 「＋」挿入アフォーダンスはエッジの中点に置く。ラベルと重ならないよう少し下げる。
-  const insertX = (sourceX + targetX) / 2;
-  const insertY = (sourceY + targetY) / 2;
+  const handleSelectClick = (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    if (movedRef.current) { movedRef.current = false; return; } // 直前がドラッグなら選択しない
+    data?.onSelect?.(id);
+  };
+
   const infoName = data?.informationTypeName;
+  const labelPt = pointAt(liveLabelT ?? data?.labelT ?? 0.5);
+  const infoPt = pointAt(liveInfoT ?? data?.infoT ?? 0.5);
+  const insertPt = pointAt(0.5);
+
   return (
     <>
       <BaseEdge
@@ -521,33 +649,30 @@ function EditableEdge({
         style={{ strokeWidth: selected ? 3 : 2, stroke: selected ? '#3b82f6' : '#64748b' }}
       />
       <EdgeLabelRenderer>
-        {/* 運ぶ情報種別のチップ: ラベルの少し上に置く（source の OUTPUT → target の INPUT）。
-            クリックで矢印を選択できる（線以外の部分でも選択可能にするため）。 */}
+        {/* 運ぶ情報種別のチップ: パス上 infoT の位置。ドラッグでパスに沿って移動、クリックで選択。 */}
         {infoName && (
           <div
             style={{
               position: 'absolute',
-              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY - 16}px)`,
+              transform: `translate(-50%,-50%) translate(${infoPt.x}px,${infoPt.y - 30}px)`,
               pointerEvents: 'all',
             }}
-            className="nodrag nopan cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              data?.onSelect?.(id);
-            }}
+            className={`nodrag nopan ${onMoveInfo ? 'cursor-move' : 'cursor-pointer'}`}
+            onPointerDown={(e) => startAlongDrag(e, (t) => setLiveInfoT(t), onMoveInfo)}
+            onClick={handleSelectClick}
+            title="ドラッグで矢印に沿って移動 / クリックで選択"
           >
             <span
               className={`inline-flex items-center gap-0.5 rounded-full border bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 shadow-sm ${
                 selected ? 'border-indigo-400' : 'border-indigo-200'
               }`}
-              title={`運ぶ情報: ${infoName}`}
             >
               <Database className="h-2.5 w-2.5" />
               {infoName}
             </span>
           </div>
         )}
-        {/* エッジ中点の「＋」: クリックでこの接続線の途中にノードを挿入 */}
+        {/* エッジ中点の「＋」: クリックでこの接続線の途中にノードを挿入。実際のパス中心に置く。 */}
         {data?.onInsertNode && (
           <button
             type="button"
@@ -558,7 +683,7 @@ function EditableEdge({
             }}
             style={{
               position: 'absolute',
-              transform: `translate(-50%,-50%) translate(${insertX}px,${insertY}px)`,
+              transform: `translate(-50%,-50%) translate(${insertPt.x}px,${insertPt.y}px)`,
               pointerEvents: 'all',
             }}
             className={`nodrag nopan flex h-5 w-5 items-center justify-center rounded-full border bg-white text-sky-600 shadow-sm transition-all hover:bg-sky-50 hover:scale-110 hover:opacity-100 ${
@@ -568,9 +693,11 @@ function EditableEdge({
             <Plus className="h-3 w-3" />
           </button>
         )}
+        {/* ラベル文字: パス上 labelT の位置。ドラッグでパスに沿って移動。 */}
         <div
-          style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }}
-          className="nodrag nopan"
+          style={{ position: 'absolute', transform: `translate(-50%,-50%) translate(${labelPt.x}px,${labelPt.y - 10}px)`, pointerEvents: 'all' }}
+          className={`nodrag nopan ${onMoveLabel && (label || selected) ? 'cursor-move' : ''}`}
+          onPointerDown={(e) => { if (label || selected) startAlongDrag(e, (t) => setLiveLabelT(t), onMoveLabel); }}
         >
           {editing ? (
             <input
@@ -587,10 +714,10 @@ function EditableEdge({
             />
           ) : label ? (
             <div
-              onClick={(e) => { e.stopPropagation(); data?.onSelect?.(id); }}
+              onClick={handleSelectClick}
               onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-              className={`px-2 py-0.5 text-xs bg-white border rounded shadow-sm cursor-pointer hover:bg-blue-50 ${selected ? 'border-blue-500' : 'border-gray-300'}`}
-              title="クリックで選択 / ダブルクリックで編集"
+              className={`px-2 py-0.5 text-xs bg-white border rounded shadow-sm hover:bg-blue-50 ${selected ? 'border-blue-500' : 'border-gray-300'}`}
+              title="ドラッグで移動 / クリックで選択 / ダブルクリックで編集"
             >
               {label}
             </div>
@@ -607,15 +734,14 @@ function EditableEdge({
             )
           )}
         </div>
-        {/* 矢印の先端（終点）をドラッグして接続先ノードを付け替えるアンカー。
-            選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。
-            掴んで別ノードへドロップすると再接続される。 */}
-        {onReconnectTarget && (selected || dragging) && (
+        {/* 矢印の先端（終点）をドラッグ: ノードへドロップ=付け替え / 何もない所=削除。
+            選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。 */}
+        {(onReconnectTarget || onDeleteSelf) && (selected || dragging) && (
           <div
             className={`nodrag nopan flex items-center justify-center ${
               dragging ? 'cursor-grabbing' : 'cursor-grab'
             }`}
-            title="ドラッグして矢印の接続先（先端）を変更"
+            title="ドラッグ: ノードへ=付け替え / 何もない所へ=削除"
             onPointerDown={onTargetAnchorDown}
             style={{
               position: 'absolute',
@@ -982,8 +1108,19 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onLabelUpdate: props.onUpdateEdgeLabel,
           onInsertNode: props.onInsertNodeOnEdge,
           informationTypeName: e.informationType?.name ?? null,
+          // 線の形状・ラベル/チップのパス上位置。
+          pathStyle: e.pathStyle ?? null,
+          labelT: e.labelT ?? null,
+          infoT: e.infoT ?? null,
           // ラベル/チップなど線以外をクリックしても選択できるように。
           onSelect: (eid: string) => setSelectedEdgeId(eid),
+          // ラベル/チップをパスに沿って移動 → 割合 t を保存。
+          onMoveLabel: props.onUpdateEdge
+            ? (edgeId: string, t: number) => props.onUpdateEdge?.(edgeId, { labelT: t })
+            : undefined,
+          onMoveInfo: props.onUpdateEdge
+            ? (edgeId: string, t: number) => props.onUpdateEdge?.(edgeId, { infoT: t })
+            : undefined,
           // 先端ドラッグでの付け替え（ドロップ先ノードへ target を変更）。
           onReconnectTarget: props.onReconnectEdge
             ? (edgeId: string, newTargetNodeId: string) => {
@@ -997,6 +1134,13 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
                 });
               }
             : undefined,
+          // 先端を何もない所へドロップ → 矢印を削除。
+          onDeleteSelf: props.onDeleteEdge
+            ? (edgeId: string) => {
+                props.onDeleteEdge?.(edgeId);
+                if (selectedEdgeId === edgeId) setSelectedEdgeId(null);
+              }
+            : undefined,
         },
       })),
     [
@@ -1005,6 +1149,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       props.onUpdateEdgeLabel,
       props.onInsertNodeOnEdge,
       props.onReconnectEdge,
+      props.onUpdateEdge,
+      props.onDeleteEdge,
     ],
   );
 
@@ -2050,7 +2196,13 @@ function EdgePropertyPanel({
   onDelete?: () => void;
   onUpdateEdge?: (
     edgeId: string,
-    patch: { informationTypeId?: string | null; label?: string },
+    patch: {
+      informationTypeId?: string | null;
+      label?: string;
+      pathStyle?: string | null;
+      labelT?: number | null;
+      infoT?: number | null;
+    },
   ) => Promise<void> | void;
   /** 矢印の接続元/接続先ノードを付け替える（ドラッグに頼らず select で確実に編集）。 */
   onRepoint?: (next: {
@@ -2201,6 +2353,35 @@ function EdgePropertyPanel({
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>
+
+        {onUpdateEdge && (
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 mb-1">線の形</label>
+            <div className="grid grid-cols-3 gap-1">
+              {([
+                { v: 'smoothstep', label: '角ばり' },
+                { v: 'bezier', label: '曲線' },
+                { v: 'straight', label: '直線' },
+              ] as const).map((opt) => {
+                const active = (edge.pathStyle ?? 'smoothstep') === opt.v;
+                return (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => onUpdateEdge(edge.id, { pathStyle: opt.v })}
+                    className={`px-2 py-1.5 text-xs rounded border transition-colors ${
+                      active
+                        ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {onReverse && (
           <button
