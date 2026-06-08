@@ -103,6 +103,12 @@ export interface NodeUpdatePatch {
   /** 自由配置の保存座標（ノード左上ではなく中心ではなく、サーバ保存値=左上基準）。 */
   positionX?: number;
   positionY?: number;
+  /** 処理時間（実カラム。旧 metadata.duration）。 */
+  processingTime?: string | null;
+  /** 今回の対応数（実カラム。旧 metadata.handledCount）。 */
+  handledCount?: string | null;
+  /** 補足（実カラム。旧 metadata.notes）。 */
+  supplement?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -1301,17 +1307,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 // ノードプロパティ右サイドバー
 // ===========================================
 
-function readMeta(node: FlowDataNode | null): {
-  duration: string;
+function readNodeFields(node: FlowDataNode | null): {
+  processingTime: string;
   handledCount: string;
-  notes: string;
+  supplement: string;
 } {
-  const meta = (node?.metadata ?? {}) as Record<string, unknown>;
   const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
   return {
-    duration: s(meta.duration),
-    handledCount: s(meta.handledCount),
-    notes: s(meta.notes),
+    processingTime: s(node?.processingTime),
+    handledCount: s(node?.handledCount),
+    supplement: s(node?.supplement),
   };
 }
 
@@ -1958,10 +1963,10 @@ function NodePropertyPanel({
   const [label, setLabel] = useState(node?.label ?? '');
   const [type, setType] = useState(node?.type ?? 'PROCESS');
   const [roleId, setRoleId] = useState(node?.roleId ?? node?.role?.id ?? '');
-  const initMeta = readMeta(node);
-  const [duration, setDuration] = useState(initMeta.duration);
-  const [handledCount, setHandledCount] = useState(initMeta.handledCount);
-  const [notes, setNotes] = useState(initMeta.notes);
+  const initFields = readNodeFields(node);
+  const [processingTime, setProcessingTime] = useState(initFields.processingTime);
+  const [handledCount, setHandledCount] = useState(initFields.handledCount);
+  const [supplement, setSupplement] = useState(initFields.supplement);
 
   // INPUT/OUTPUT は情報種別マスタからの多選択。node.informationLinks から初期化し、
   // 選択中の informationTypeId 集合を direction ごとに保持する（order は配列順）。
@@ -1991,7 +1996,9 @@ function NodePropertyPanel({
   const save = useCallback(() => {
     if (!node) return;
     const patch: NodeUpdatePatch = {
-      metadata: { duration, handledCount, notes },
+      processingTime,
+      handledCount,
+      supplement,
     };
     if (label !== node.label) patch.label = label;
     if (type !== node.type) patch.type = type;
@@ -2023,9 +2030,9 @@ function NodePropertyPanel({
     label,
     type,
     roleId,
-    duration,
+    processingTime,
     handledCount,
-    notes,
+    supplement,
     inputIds,
     outputIds,
     initialInputIds,
@@ -2093,8 +2100,8 @@ function NodePropertyPanel({
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">処理時間</label>
           <input
-            value={duration}
-            onChange={(e) => setDuration(e.target.value)}
+            value={processingTime}
+            onChange={(e) => setProcessingTime(e.target.value)}
             onBlur={save}
             placeholder="例: 約10分"
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
@@ -2134,8 +2141,8 @@ function NodePropertyPanel({
         <div>
           <label className="block text-[11px] font-medium text-gray-500 mb-1">補足</label>
           <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            value={supplement}
+            onChange={(e) => setSupplement(e.target.value)}
             onBlur={save}
             rows={3}
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded resize-y focus:outline-none focus:ring-1 focus:ring-blue-400"

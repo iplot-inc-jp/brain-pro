@@ -285,6 +285,7 @@ import {
 } from './presentation/controllers/information-type.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { RecordSheetController } from './presentation/controllers/record-sheet.controller';
+import { AnalysisController } from './presentation/controllers/analysis.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -342,6 +343,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     AttachmentController,
     SubProjectController,
     RecordSheetController,
+    AnalysisController,
     DfdController,
     InformationTypeController,
     InformationTypeByIdController,

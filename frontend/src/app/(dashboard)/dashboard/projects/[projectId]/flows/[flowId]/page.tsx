@@ -908,6 +908,9 @@ export default function ProjectFlowDetailPage() {
         order?: number;
         positionX?: number;
         positionY?: number;
+        processingTime?: string | null;
+        handledCount?: string | null;
+        supplement?: string | null;
         metadata?: Record<string, unknown>;
       }
     ) => {

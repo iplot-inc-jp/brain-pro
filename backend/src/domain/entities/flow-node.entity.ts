@@ -19,6 +19,9 @@ export class FlowNode extends BaseEntity {
   private _positionY: number;
   private _roleId: string | null;
   private _childFlowId: string | null;
+  private _processingTime: string | null;
+  private _handledCount: string | null;
+  private _supplement: string | null;
   private _metadata: Record<string, unknown>;
 
   constructor(props: {
@@ -31,6 +34,9 @@ export class FlowNode extends BaseEntity {
     positionY: number;
     roleId?: string | null;
     childFlowId?: string | null;
+    processingTime?: string | null;
+    handledCount?: string | null;
+    supplement?: string | null;
     metadata?: Record<string, unknown>;
     createdAt?: Date;
     updatedAt?: Date;
@@ -45,6 +51,9 @@ export class FlowNode extends BaseEntity {
     this._positionY = props.positionY;
     this._roleId = props.roleId ?? null;
     this._childFlowId = props.childFlowId ?? null;
+    this._processingTime = props.processingTime ?? null;
+    this._handledCount = props.handledCount ?? null;
+    this._supplement = props.supplement ?? null;
     this._metadata = props.metadata ?? {};
   }
 
@@ -78,6 +87,18 @@ export class FlowNode extends BaseEntity {
 
   get childFlowId(): string | null {
     return this._childFlowId;
+  }
+
+  get processingTime(): string | null {
+    return this._processingTime;
+  }
+
+  get handledCount(): string | null {
+    return this._handledCount;
+  }
+
+  get supplement(): string | null {
+    return this._supplement;
   }
 
   get metadata(): Record<string, unknown> {
@@ -131,6 +152,18 @@ export class FlowNode extends BaseEntity {
     this._metadata = metadata;
   }
 
+  updateProcessingTime(processingTime: string | null): void {
+    this._processingTime = processingTime;
+  }
+
+  updateHandledCount(handledCount: string | null): void {
+    this._handledCount = handledCount;
+  }
+
+  updateSupplement(supplement: string | null): void {
+    this._supplement = supplement;
+  }
+
   static create(props: {
     id: string;
     flowId: string;
@@ -140,6 +173,9 @@ export class FlowNode extends BaseEntity {
     positionX: number;
     positionY: number;
     roleId?: string | null;
+    processingTime?: string | null;
+    handledCount?: string | null;
+    supplement?: string | null;
   }): FlowNode {
     if (!props.label || props.label.length === 0) {
       throw new ValidationError('Node label is required');

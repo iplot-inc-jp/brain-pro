@@ -21,7 +21,8 @@ import {
   GitCompareArrows,
   Filter as FunnelIcon,
 } from 'lucide-react';
-import { useRecordSheet, createGapItem } from '../_lib/use-record-sheet';
+import { createGapItem } from '../_lib/use-record-sheet';
+import { useAnalysisSheet } from '../_lib/use-analysis-sheet';
 import { SheetToolbar } from './sheet-toolbar';
 
 const yen = (n: number) =>
@@ -85,7 +86,7 @@ type ParetoRow = { code: string; count: string; amount: string };
 
 function ParetoTool({ projectId }: { projectId: string }) {
   const { rows, setRows, saving, savedAt, save, loading } =
-    useRecordSheet<ParetoRow>(projectId, 'analysis-pareto', [
+    useAnalysisSheet<ParetoRow>(projectId, 'analysis-pareto', [
       { code: '', count: '', amount: '' },
     ]);
 
@@ -348,7 +349,7 @@ const DIFF_LABEL: Record<SensRow['difficulty'], string> = {
 
 function SensitivityTool({ projectId }: { projectId: string }) {
   const { rows, setRows, saving, savedAt, save, loading } =
-    useRecordSheet<SensRow>(projectId, 'analysis-sensitivity', [
+    useAnalysisSheet<SensRow>(projectId, 'analysis-sensitivity', [
       { measure: '', stars: '3', difficulty: 'MID' },
     ]);
 
@@ -587,7 +588,7 @@ type GapRow = {
 
 function GapAnalysisTool({ projectId }: { projectId: string }) {
   const { rows, setRows, saving, savedAt, save, loading } =
-    useRecordSheet<GapRow>(projectId, 'analysis-gap', [
+    useAnalysisSheet<GapRow>(projectId, 'analysis-gap', [
       {
         metric: '',
         self: '',
@@ -849,7 +850,7 @@ type LeakRow = { stage: string; passCount: string; hypothesis: string };
 
 function LeakFunnelTool({ projectId }: { projectId: string }) {
   const { rows, setRows, saving, savedAt, save, loading } =
-    useRecordSheet<LeakRow>(projectId, 'analysis-leak', [
+    useAnalysisSheet<LeakRow>(projectId, 'analysis-leak', [
       { stage: '', passCount: '', hypothesis: '' },
     ]);
 
@@ -1086,7 +1087,7 @@ export function AnalysisTab({ projectId }: { projectId: string }) {
       </div>
 
       <p className="text-xs text-gray-500">
-        計算はすべてブラウザ側で即時実行され、入力行は保存ボタンで記録（RecordSheet）に保存されます。各結果行の「打ち手として追加」でGAP一覧に課題を起票できます。
+        計算はすべてブラウザ側で即時実行され、入力行は保存ボタンで保存されます。各結果行の「打ち手として追加」でGAP一覧に課題を起票できます。
       </p>
 
       {tool === 'pareto' && <ParetoTool projectId={projectId} />}

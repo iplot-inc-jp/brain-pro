@@ -143,6 +143,21 @@ class CreateFlowNodeDto {
   @IsOptional()
   @IsString()
   roleId?: string;
+
+  @ApiProperty({ description: '処理時間', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  processingTime?: string | null;
+
+  @ApiProperty({ description: '対応数', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  handledCount?: string | null;
+
+  @ApiProperty({ description: '補足', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  supplement?: string | null;
 }
 
 class UpdateFlowNodeDto {
@@ -177,6 +192,21 @@ class UpdateFlowNodeDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
+
+  @ApiProperty({ description: '処理時間', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  processingTime?: string | null;
+
+  @ApiProperty({ description: '対応数', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  handledCount?: string | null;
+
+  @ApiProperty({ description: '補足', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  supplement?: string | null;
 }
 
 class NodePositionItemDto {
@@ -490,6 +520,9 @@ export class BusinessFlowController {
               }
             : null,
         })),
+        processingTime: n.processingTime,
+        handledCount: n.handledCount,
+        supplement: n.supplement,
         metadata: n.metadata,
       })),
       edges: edges.map((e) => ({
@@ -588,6 +621,9 @@ export class BusinessFlowController {
       positionX: dto.positionX,
       positionY: dto.positionY,
       roleId: dto.roleId,
+      processingTime: dto.processingTime ?? null,
+      handledCount: dto.handledCount ?? null,
+      supplement: dto.supplement ?? null,
     });
 
     const saved = await this.nodeRepository.save(node);
@@ -689,6 +725,11 @@ export class BusinessFlowController {
     if (dto.type) node.updateType(dto.type as any);
     if (dto.roleId !== undefined) node.assignRole(dto.roleId);
     if (dto.metadata !== undefined) node.updateMetadata(dto.metadata);
+    if (dto.processingTime !== undefined)
+      node.updateProcessingTime(dto.processingTime);
+    if (dto.handledCount !== undefined)
+      node.updateHandledCount(dto.handledCount);
+    if (dto.supplement !== undefined) node.updateSupplement(dto.supplement);
 
     const saved = await this.nodeRepository.save(node);
 
@@ -1328,6 +1369,9 @@ export class BusinessFlowController {
       childFlowId: node.childFlowId,
       hasChildFlow: node.hasChildFlow,
       isBusinessBlock: node.isBusinessBlock,
+      processingTime: node.processingTime,
+      handledCount: node.handledCount,
+      supplement: node.supplement,
       metadata: node.metadata,
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,

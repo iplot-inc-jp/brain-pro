@@ -47,6 +47,9 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
       positionY: node.positionY,
       roleId: node.roleId,
       childFlowId: node.childFlowId,
+      processingTime: node.processingTime,
+      handledCount: node.handledCount,
+      supplement: node.supplement,
       metadata: node.metadata as Prisma.InputJsonValue,
     };
 
@@ -73,6 +76,9 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
     positionY: number;
     roleId: string | null;
     childFlowId: string | null;
+    processingTime: string | null;
+    handledCount: string | null;
+    supplement: string | null;
     metadata: Prisma.JsonValue;
     createdAt: Date;
     updatedAt: Date;
@@ -87,6 +93,9 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
       positionY: record.positionY,
       roleId: record.roleId,
       childFlowId: record.childFlowId,
+      processingTime: record.processingTime,
+      handledCount: record.handledCount,
+      supplement: record.supplement,
       metadata: (record.metadata as Record<string, unknown>) || {},
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,

@@ -63,7 +63,13 @@ export type FlowDataNode = {
   links?: FlowNodeLink[];
   /** このノードの INPUT/OUTPUT を情報種別マスタから選んだリンク（GET フロー詳細に含まれる）。 */
   informationLinks?: NodeInformationLink[];
-  /** ノードに紐づく補足情報（処理時間・INPUT・OUTPUT・補足など）。 */
+  /** 処理時間（実カラム。旧 metadata.duration）。 */
+  processingTime?: string | null;
+  /** 今回の対応数（実カラム。旧 metadata.handledCount）。 */
+  handledCount?: string | null;
+  /** 補足（実カラム。旧 metadata.notes）。 */
+  supplement?: string | null;
+  /** ノードに紐づく補足情報（旧データの後方互換用）。 */
   metadata?: Record<string, unknown>;
 };
 

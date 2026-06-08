@@ -115,6 +115,10 @@ model Project {
   asisMemos         AsisMemo[]
   tobeVisions       TobeVision[]
   tobeRoadmaps      TobeRoadmap[]
+  analysisParetoRows      AnalysisParetoRow[]
+  analysisSensitivityRows AnalysisSensitivityRow[]
+  analysisGapRows         AnalysisGapRow[]
+  analysisLeakRows        AnalysisLeakRow[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -302,6 +306,10 @@ model FlowNode {
   roleId      String?      @map("role_id")
   // 業務ブロックが子フローを持つ場合の参照
   childFlowId String?      @unique @map("child_flow_id")
+  // 処理時間・対応数・補足（metadata から実カラム化）
+  processingTime String?   @map("processing_time")
+  handledCount   String?   @map("handled_count")
+  supplement     String?   @map("supplement")
   metadata    Json         @default("{}")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
@@ -1492,4 +1500,76 @@ model TobeRoadmap {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("tobe_roadmaps")
+}
+
+// ===========================================
+// GAP分析ツール（パレート / 感度 / ギャップ / 漏れ）
+// 自由記述の RecordSheet 相当を実テーブル化（全フリーテキスト）
+// ===========================================
+
+// パレート分析（80:20）
+model AnalysisParetoRow {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  code      String?
+  count     String?
+  amount    String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_pareto_rows")
+}
+
+// 感度分析（効きどころ）
+model AnalysisSensitivityRow {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  measure    String?
+  stars      String?
+  difficulty String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_sensitivity_rows")
+}
+
+// ギャップ分析（自社 vs ベンチマーク）
+model AnalysisGapRow {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  metric       String?
+  self         String?
+  benchmark    String?
+  factor       String?
+  contribution String?
+  hasAction    String?  @map("has_action")
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_gap_rows")
+}
+
+// 漏れ分析（ファネル通過）
+model AnalysisLeakRow {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  stage      String?
+  passCount  String?  @map("pass_count")
+  hypothesis String?
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("analysis_leak_rows")
 }
