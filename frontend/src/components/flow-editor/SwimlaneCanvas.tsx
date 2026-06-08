@@ -894,10 +894,13 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           data: laneData,
           draggable: false,
           selectable: false,
+          connectable: false,
           zIndex: 0,
           width,
           height: LANE_LABEL_W + bands.height + 80,
-          style: { width, height: LANE_LABEL_W + bands.height + 80 },
+          // レーン背景ラッパーはクリックを奪わない（下層のエッジ線を選択できるように）。
+          // 内部のリサイズハンドルだけ pointer-events:auto で操作可能。
+          style: { width, height: LANE_LABEL_W + bands.height + 80, pointerEvents: 'none' },
         } as Node;
       }
       return {
@@ -907,10 +910,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         data: laneData,
         draggable: false,
         selectable: false,
+        connectable: false,
         zIndex: 0,
         width: LANE_LABEL_W + bands.width + 80,
         height: lane.height,
-        style: { width: LANE_LABEL_W + bands.width + 80, height: lane.height },
+        // レーン背景ラッパーはクリックを奪わない（下層のエッジ線を選択できるように）。
+        style: { width: LANE_LABEL_W + bands.width + 80, height: lane.height, pointerEvents: 'none' },
       } as Node;
     });
 
