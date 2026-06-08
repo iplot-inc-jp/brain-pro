@@ -122,6 +122,7 @@ import {
   emptyRollupCounts,
   addVerificationToCounts,
   rollupStatus,
+  computeDimmedNodeIds,
   type IssueNodeKind,
   type IssueTreePattern,
   type ChildAddButton,
@@ -172,6 +173,13 @@ type MindNodeData = {
   pattern: IssueTreePattern;
   selected: boolean;
   taskCount: number;
+  /**
+   * 打ち手の「採用」連動グレーアウト。
+   * 同じ親配下の打ち手系兄弟（OPTION/COUNTERMEASURE）に ADOPT(採用) が1つでもあるとき、
+   * 自身が ADOPT でない打ち手系ノードは true（淡色＝選ばれていない／不採用扱い）。
+   * ルート・非打ち手ノードは常に false。
+   */
+  dimmed: boolean;
   /** verification 集約バッジ（POINT/ISSUE 等の収束表示用。無ければ null） */
   rollup: Rollup | null;
   onSelect: (id: string | null) => void;
@@ -613,6 +621,10 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
   const TaskIcon = flavor?.icon ?? ListChecks;
   const buttons = addButtonsFor(kind, pattern);
   const rollupMeta = d.rollup ? ROLLUP_META[d.rollup.status] : null;
+  // 打ち手の「採用」連動グレーアウト: 同親配下に採用された打ち手があり、
+  // 自身が採用でない打ち手系のとき淡色にする（opacity 低下＋彩度を落とす）。
+  // 選択中は判別しやすいよう少しだけ復帰させる（選択枠・種別色は保持）。
+  const dimmed = d.dimmed;
 
   return (
     <div
@@ -620,9 +632,10 @@ const MindNode = memo(function MindNode({ data }: NodeProps) {
         e.stopPropagation();
         d.onSelect(node.id);
       }}
+      title={dimmed ? '採用された打ち手があるため不採用扱い（淡色表示）' : undefined}
       className={`relative w-[220px] cursor-pointer rounded-lg border-2 bg-white shadow-sm transition ${
         selected ? 'border-indigo-500 ring-2 ring-indigo-200' : cfg.border
-      }`}
+      } ${dimmed ? (selected ? 'opacity-80 grayscale-[60%]' : 'opacity-50 grayscale') : ''}`}
     >
       <Handle type="target" position={Position.Left} className="!bg-gray-300" />
       <Handle type="source" position={Position.Right} className="!bg-gray-300" />
@@ -1513,6 +1526,10 @@ function IssueTreeMindMap() {
     const nodeById = new Map(backendNodes.map((n) => [n.id, n]));
     const rollupByNode = computeRollups(backendNodes, childrenMap, nodeById);
 
+    // 打ち手の「採用」連動グレーアウト: 同じ親配下の打ち手系兄弟に ADOPT があれば、
+    // ADOPT でない兄弟を淡色にする（淡色対象ノードID集合）。
+    const dimmedIds = computeDimmedNodeIds(backendNodes);
+
     const baseData = {
       pattern,
       rootQuestion,
@@ -1538,6 +1555,7 @@ function IssueTreeMindMap() {
           isRoot: true,
           selected: selectedId === null && false, // ルートは明示選択しないと反転させない
           taskCount: 0,
+          dimmed: false, // ルート（仮想）は採用連動の対象外
           rollup: rollupByNode.get(ROOT_ID) ?? null,
         } as unknown as Record<string, unknown>,
         draggable: false,
@@ -1564,6 +1582,7 @@ function IssueTreeMindMap() {
           isRoot: false,
           selected: selectedId === n.id,
           taskCount: tasksByNode[n.id]?.length ?? 0,
+          dimmed: dimmedIds.has(n.id),
           rollup: rollupByNode.get(n.id) ?? null,
         } as unknown as Record<string, unknown>,
         // 実ノードはマウスでドラッグ移動可（仮想ルートは draggable:false のまま）。
@@ -2186,10 +2205,12 @@ function NodeEditPanel({
             <HelpTooltip text="ノードの種別です。パターンに合わせた既定が入りますが、混在可・後から変更できます（配置は強制されません）。" />
           </div>
           <div
-            className={`mb-1.5 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${cfg.chip} border-transparent`}
+            className={`mb-1 inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium ${cfg.chip} border-transparent`}
           >
             {cfg.flowLabel}
           </div>
+          {/* 現在種別の説明（各選択肢はホバーで title 表示。ここは現在の種別の説明を常時表示）。 */}
+          <p className="mb-1.5 text-[11px] leading-snug text-gray-500">{cfg.description}</p>
           <div className="grid grid-cols-3 gap-1">
             {KIND_OPTIONS.map((k) => {
               const active = k === kind;
@@ -2203,7 +2224,7 @@ function NodeEditPanel({
                   onClick={() => {
                     if (k !== kind) onPatch(node.id, { kind: k });
                   }}
-                  title={kc.flowLabel}
+                  title={`${kc.label}: ${kc.description}`}
                   className={`flex items-center justify-center gap-1 rounded border px-1 py-1.5 text-[10px] font-medium transition ${
                     active
                       ? `${kc.chip} border-transparent ring-1 ring-inset ring-gray-300`

@@ -216,6 +216,8 @@ export type KindConfig = {
   label: string;
   /** 種別の流れ説明（編集パネル用） */
   flowLabel: string;
+  /** 種別の役割説明（編集パネルの種別選択にホバーで出すツールチップ用） */
+  description: string;
   border: string; // カードボーダー
   bar: string; // ヘッダーバー
   chip: string; // チップ（bg + text）
@@ -229,6 +231,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   ISSUE: {
     label: '課題',
     flowLabel: '課題 / ゴール / 対象（出発点）',
+    description: 'このツリーで取り組む問い・出発点（根ノード）',
     border: 'border-slate-300',
     bar: 'bg-slate-700',
     chip: 'bg-slate-100 text-slate-700',
@@ -245,6 +248,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   POINT: {
     label: '論点',
     flowLabel: '論点（疑問形・再帰）',
+    description: '課題を疑問形に分けた個別の問い。サブ論点へさらに分解できる',
     border: 'border-slate-300',
     bar: 'bg-slate-600',
     chip: 'bg-slate-100 text-slate-700',
@@ -257,6 +261,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   HYPOTHESIS: {
     label: '仮説',
     flowLabel: '仮説',
+    description: '論点に対する仮の答え。検証で確かめる対象',
     border: 'border-purple-300',
     bar: 'bg-purple-600',
     chip: 'bg-purple-50 text-purple-700',
@@ -268,6 +273,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   VERIFICATION: {
     label: '検証',
     flowLabel: '検証アクション',
+    description: '仮説を確かめるための調査・確認アクション',
     border: 'border-cyan-300',
     bar: 'bg-cyan-600',
     chip: 'bg-cyan-50 text-cyan-700',
@@ -279,6 +285,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   RESULT: {
     label: '検証結果',
     flowLabel: '検証結果（○×△）',
+    description: '検証の結果（○確定/×否定/△不明・要ヒアリング）と結果メモ',
     border: 'border-cyan-400',
     bar: 'bg-cyan-700',
     chip: 'bg-cyan-50 text-cyan-800',
@@ -288,6 +295,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   CAUSE: {
     label: '原因',
     flowLabel: 'なぜ（原因の深掘り・再帰）',
+    description: '『なぜ?』で掘り下げた原因。○確定なら根本原因',
     border: 'border-amber-300',
     bar: 'bg-amber-500',
     chip: 'bg-amber-50 text-amber-700',
@@ -299,6 +307,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   COUNTERMEASURE: {
     label: '打ち手',
     flowLabel: '打ち手（対策・OPTION相当）',
+    description: '課題・原因への対策。採用/保留/不採用を選ぶ',
     border: 'border-emerald-300',
     bar: 'bg-emerald-600',
     chip: 'bg-emerald-50 text-emerald-700',
@@ -310,6 +319,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   ELEMENT: {
     label: '構成要素',
     flowLabel: '構成要素（対象分割・再帰）',
+    description: '対象を分解した構成要素（対象分割・Whatツリー）',
     border: 'border-gray-300',
     bar: 'bg-gray-500',
     chip: 'bg-gray-100 text-gray-700',
@@ -321,6 +331,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   OPTION: {
     label: '打ち手候補',
     flowLabel: '解決候補（発散・再帰）',
+    description: '発散して比較・選ぶ解決策候補（Howツリー）',
     border: 'border-emerald-300',
     bar: 'bg-emerald-500',
     chip: 'bg-emerald-50 text-emerald-700',
@@ -332,6 +343,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   ACTION: {
     label: '行動',
     flowLabel: '行動（MECE・タスク化・再帰）',
+    description: 'ゴール達成のための実行行動（MECEアクション／タスク化）',
     border: 'border-emerald-400',
     bar: 'bg-emerald-700',
     chip: 'bg-emerald-50 text-emerald-800',
@@ -343,6 +355,7 @@ export const KIND_CONFIG: Record<IssueNodeKind, KindConfig> = {
   METRIC: {
     label: 'KPI',
     flowLabel: 'KPI（数値・再帰）',
+    description: '数値指標。数学的に下位KPIへ分解する（数値を持つ）',
     border: 'border-blue-300',
     bar: 'bg-blue-600',
     chip: 'bg-blue-50 text-blue-700',
@@ -452,4 +465,52 @@ export function rollupStatus(acc: RollupCounts): RollupStatus {
   if (acc.rejected > 0) return 'rejected';
   if (acc.unknown > 0) return 'partial';
   return 'confirmed';
+}
+
+// ===========================================
+// 打ち手の「採用」連動グレーアウト
+// ===========================================
+//
+// 同じ親(parentId)を持つ「打ち手」系ノード(OPTION / COUNTERMEASURE)を兄弟集合として束ね、
+// その集合に recommendation==='ADOPT'(採用) が1つでもあれば、ADOPT でない兄弟を
+// 「淡色(グレーアウト)対象」とする（＝選ばれなかった／不採用扱いの視覚表現）。
+// 採用が無い間は淡色化しない。非打ち手ノードは対象外。React 非依存の純粋ロジック。
+// parentId=null（ルート直下）も1つのグループとして束ねる。
+
+/** 打ち手系（OPTION / COUNTERMEASURE）かどうか。 */
+export function isOptionLikeKind(kind: IssueNodeKind): boolean {
+  return kind === 'OPTION' || kind === 'COUNTERMEASURE';
+}
+
+/** グレーアウト判定の最小入力（種別・親・推奨だけ見る）。 */
+export type DimmableNode = {
+  id: string;
+  parentId: string | null;
+  kind: IssueNodeKind;
+  recommendation: 'ADOPT' | 'HOLD' | 'REJECT' | 'NA';
+};
+
+/**
+ * 「採用された打ち手があるため淡色にすべきノードID」の集合を返す。
+ * 親ごとに打ち手系兄弟を束ね、ADOPT があれば ADOPT でない兄弟を淡色対象に入れる。
+ */
+export function computeDimmedNodeIds(nodes: DimmableNode[]): Set<string> {
+  // 親キーごとに打ち手系ノードを集める（parentId=null は '__noparent__' キーで束ねる）。
+  const groups: Record<string, DimmableNode[]> = {};
+  for (const n of nodes) {
+    if (!isOptionLikeKind(n.kind)) continue;
+    const key = n.parentId ?? '__noparent__';
+    (groups[key] ??= []).push(n);
+  }
+
+  const dimmed = new Set<string>();
+  for (const key of Object.keys(groups)) {
+    const siblings = groups[key];
+    const hasAdopt = siblings.some((s) => s.recommendation === 'ADOPT');
+    if (!hasAdopt) continue; // 採用が無ければ通常表示のまま
+    for (const s of siblings) {
+      if (s.recommendation !== 'ADOPT') dimmed.add(s.id);
+    }
+  }
+  return dimmed;
 }

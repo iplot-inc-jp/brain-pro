@@ -12,6 +12,8 @@ import {
   emptyRollupCounts,
   addVerificationToCounts,
   rollupStatus,
+  computeDimmedNodeIds,
+  type DimmableNode,
   type IssueTreePattern,
 } from './issue-tree-patterns';
 
@@ -66,6 +68,8 @@ describe('issue-tree-patterns config', () => {
       const cfg = KIND_CONFIG[k];
       expect(cfg).toBeTruthy();
       expect(valid.has(cfg.affordance)).toBe(true);
+      // 種別ごとの説明（編集パネルのホバーツールチップ用）が全種別にある。
+      expect(cfg.description.length).toBeGreaterThan(0);
     }
   });
 
@@ -165,5 +169,72 @@ describe('rollup (発散→収束)', () => {
     c = addVerificationToCounts(c, 'UNKNOWN');
     c = addVerificationToCounts(c, 'REJECTED');
     expect(rollupStatus(c)).toBe('rejected');
+  });
+});
+
+describe('computeDimmedNodeIds (打ち手の採用連動グレーアウト)', () => {
+  const mk = (
+    id: string,
+    parentId: string | null,
+    kind: DimmableNode['kind'],
+    recommendation: DimmableNode['recommendation'],
+  ): DimmableNode => ({ id, parentId, kind, recommendation });
+
+  it('採用が無いグループは誰も淡色にしない', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', 'p', 'OPTION', 'NA'),
+      mk('b', 'p', 'OPTION', 'HOLD'),
+      mk('c', 'p', 'COUNTERMEASURE', 'REJECT'),
+    ]);
+    expect(dim.size).toBe(0);
+  });
+
+  it('採用があると同親の打ち手系で採用以外を淡色にする', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', 'p', 'OPTION', 'ADOPT'),
+      mk('b', 'p', 'OPTION', 'HOLD'),
+      mk('c', 'p', 'COUNTERMEASURE', 'NA'),
+    ]);
+    expect(dim.has('a')).toBe(false); // 採用は通常表示
+    expect(dim.has('b')).toBe(true);
+    expect(dim.has('c')).toBe(true);
+  });
+
+  it('OPTION と COUNTERMEASURE は同じ打ち手グループとして混在判定する', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', 'p', 'COUNTERMEASURE', 'ADOPT'),
+      mk('b', 'p', 'OPTION', 'NA'),
+    ]);
+    expect(dim.has('b')).toBe(true);
+  });
+
+  it('親が違えばグループは独立（別親の採用は影響しない）', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', 'p1', 'OPTION', 'ADOPT'),
+      mk('b', 'p1', 'OPTION', 'NA'),
+      mk('c', 'p2', 'OPTION', 'NA'),
+      mk('d', 'p2', 'OPTION', 'HOLD'),
+    ]);
+    expect(dim.has('b')).toBe(true); // p1: 採用あり
+    expect(dim.has('c')).toBe(false); // p2: 採用なし
+    expect(dim.has('d')).toBe(false);
+  });
+
+  it('打ち手でない種別は親に採用があっても淡色対象にしない', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', 'p', 'OPTION', 'ADOPT'),
+      mk('cause', 'p', 'CAUSE', 'NA'),
+      mk('point', 'p', 'POINT', 'NA'),
+    ]);
+    expect(dim.has('cause')).toBe(false);
+    expect(dim.has('point')).toBe(false);
+  });
+
+  it('parentId=null（ルート直下）の打ち手兄弟も束ねて判定する', () => {
+    const dim = computeDimmedNodeIds([
+      mk('a', null, 'OPTION', 'ADOPT'),
+      mk('b', null, 'OPTION', 'REJECT'),
+    ]);
+    expect(dim.has('b')).toBe(true);
   });
 });
