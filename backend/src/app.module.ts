@@ -32,6 +32,8 @@ import {
   SUPPLIER_REPOSITORY,
   PRODUCT_REPOSITORY,
   DEMAND_DATA_REPOSITORY,
+  REPORT_CALENDAR_REPOSITORY,
+  INTEREST_MATRIX_ROW_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -154,6 +156,16 @@ import {
   GetDemandDataUseCase,
   UpdateDemandDataUseCase,
   DeleteDemandDataUseCase,
+  // ReportCalendar
+  CreateReportCalendarUseCase,
+  GetReportCalendarsUseCase,
+  UpdateReportCalendarUseCase,
+  DeleteReportCalendarUseCase,
+  // InterestMatrixRow
+  CreateInterestMatrixRowUseCase,
+  GetInterestMatrixRowsUseCase,
+  UpdateInterestMatrixRowUseCase,
+  DeleteInterestMatrixRowUseCase,
 } from './application';
 
 // Infrastructure
@@ -185,6 +197,8 @@ import {
   SupplierRepositoryImpl,
   ProductRepositoryImpl,
   DemandDataRepositoryImpl,
+  ReportCalendarRepositoryImpl,
+  InterestMatrixRowRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -223,6 +237,10 @@ import {
   ProductByIdController,
   DemandDataController,
   DemandDataByIdController,
+  ReportCalendarController,
+  ReportCalendarByIdController,
+  InterestMatrixRowController,
+  InterestMatrixRowByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -312,6 +330,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     ProductByIdController,
     DemandDataController,
     DemandDataByIdController,
+    ReportCalendarController,
+    ReportCalendarByIdController,
+    InterestMatrixRowController,
+    InterestMatrixRowByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -428,6 +450,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: DEMAND_DATA_REPOSITORY,
       useClass: DemandDataRepositoryImpl,
+    },
+    {
+      provide: REPORT_CALENDAR_REPOSITORY,
+      useClass: ReportCalendarRepositoryImpl,
+    },
+    {
+      provide: INTEREST_MATRIX_ROW_REPOSITORY,
+      useClass: InterestMatrixRowRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -547,6 +577,16 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetDemandDataUseCase,
     UpdateDemandDataUseCase,
     DeleteDemandDataUseCase,
+    // ReportCalendar
+    CreateReportCalendarUseCase,
+    GetReportCalendarsUseCase,
+    UpdateReportCalendarUseCase,
+    DeleteReportCalendarUseCase,
+    // InterestMatrixRow
+    CreateInterestMatrixRowUseCase,
+    GetInterestMatrixRowsUseCase,
+    UpdateInterestMatrixRowUseCase,
+    DeleteInterestMatrixRowUseCase,
 
     // ========== Services ==========
     ClaudeService,

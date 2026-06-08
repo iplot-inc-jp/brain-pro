@@ -18,3 +18,5 @@ export * from './risk.controller';
 export * from './supplier.controller';
 export * from './product.controller';
 export * from './demand-data.controller';
+export * from './report-calendar.controller';
+export * from './interest-matrix-row.controller';

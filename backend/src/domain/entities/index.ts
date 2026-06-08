@@ -28,3 +28,5 @@ export * from './risk.entity';
 export * from './supplier.entity';
 export * from './product.entity';
 export * from './demand-data.entity';
+export * from './report-calendar.entity';
+export * from './interest-matrix-row.entity';

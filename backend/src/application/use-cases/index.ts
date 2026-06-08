@@ -19,4 +19,6 @@ export * from './risk';
 export * from './supplier';
 export * from './product';
 export * from './demand-data';
+export * from './report-calendar';
+export * from './interest-matrix-row';
 

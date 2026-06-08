@@ -24,3 +24,5 @@ export * from './risk.repository.impl';
 export * from './supplier.repository.impl';
 export * from './product.repository.impl';
 export * from './demand-data.repository.impl';
+export * from './report-calendar.repository.impl';
+export * from './interest-matrix-row.repository.impl';

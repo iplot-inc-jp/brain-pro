@@ -110,6 +110,8 @@ model Project {
   suppliers         Supplier[]
   products          Product[]
   demandData        DemandData[]
+  reportCalendars   ReportCalendar[]
+  interestMatrixRows InterestMatrixRow[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1187,8 +1189,9 @@ model Stakeholder {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  project  Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  meetings MeetingStakeholder[]
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meetings        MeetingStakeholder[]
+  reportCalendars ReportCalendar[]
 
   @@map("stakeholders")
 }
@@ -1215,8 +1218,9 @@ model Meeting {
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
-  project      Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  stakeholders MeetingStakeholder[]
+  project         Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholders    MeetingStakeholder[]
+  reportCalendars ReportCalendar[]
 
   @@map("meetings")
 }
@@ -1334,4 +1338,57 @@ model DemandData {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("demand_data")
+}
+
+// ===========================================
+// 報告・連絡カレンダー
+// ===========================================
+
+model ReportCalendar {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  stakeholderId String?  @map("stakeholder_id") // 報告対象（誰に）FK
+  reportTo      String?  @map("report_to") // 報告対象（フリーテキストfallback）
+  meetingId     String?  @map("meeting_id") // 関連会議FK
+  reportContent String?  @map("report_content") @db.Text // 報告内容（何を）
+  frequency     String? // 頻度
+  dayTime       String?  @map("day_time") // 曜日・時刻
+  format        String? // 形式
+  medium        String? // 媒体
+  drafter       String? // 起票担当
+  approver      String? // 承認者
+  templateRef   String?  @map("template_ref") // テンプレ・参考
+  note          String?  @db.Text // 備考
+  order         Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder? @relation(fields: [stakeholderId], references: [id], onDelete: SetNull)
+  meeting     Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  @@map("report_calendars")
+}
+
+// ===========================================
+// 関心ごとマトリクス（フェーズ×ロール）
+// 1フェーズ1行のフラットな実テーブル（視点は固定カラム）
+// ===========================================
+
+model InterestMatrixRow {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  phase        String? // フェーズ
+  duration     String? // 期間目安
+  mainMeetings String?  @map("main_meetings") // 主要ミーティング体
+  fieldStaff   String?  @map("field_staff") @db.Text // 現場（実務担当）
+  clientPm     String?  @map("client_pm") @db.Text // 先方プロマネ
+  executive    String?  @db.Text // 役員（経営層）
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("interest_matrix_rows")
 }
