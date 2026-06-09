@@ -52,6 +52,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Input } from '@/components/ui/input';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
 import {
   flowDefinitionApi,
   EMPTY_DEFINITION,
@@ -657,8 +658,10 @@ export default function ProjectFlowDetailPage() {
   }, []);
 
   // フローデータを取得
-  const fetchFlowData = useCallback(async (id: string) => {
-    setLoading(true);
+  // silent=true（Undo/Redo の restore 直後の再取得）では全画面ローディングを出さず、
+  // 図がちらつかないようにする（キャンバスは前回状態を保ったまま差し替わる）。
+  const fetchFlowData = useCallback(async (id: string, silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
 
     try {
@@ -680,7 +683,7 @@ export default function ProjectFlowDetailPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [projectId, getHeaders]);
 
@@ -1647,6 +1650,61 @@ export default function ProjectFlowDetailPage() {
     }
   }, [flowData, mermaidImportText, getHeaders, fetchFlowData]);
 
+  // ===========================================
+  // Undo/Redo（スナップショット型）
+  //  - flowData の変化を捕捉してスタックへ push（debounce, restore 由来は除外）
+  //  - localStorage `flow-undo-<flowId>` で状態を、DB /snapshots で履歴を保持
+  //  - undo/redo は PUT /restore → fetchFlowData(silent) で適用
+  // ===========================================
+  const refetchSilent = useCallback(
+    (id: string) => fetchFlowData(id, true),
+    [fetchFlowData],
+  );
+  // Undo/Redo は「今表示しているフロー」を対象にする。子フローへドリルダウン中は
+  // flowData.id がルートの params.flowId と異なる（router は変えず flowData だけ差し替える）ため、
+  // ルート固定だと ⌘Z で親フローに飛んでしまう。表示中フロー id を渡してフローごとに履歴を持つ。
+  const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
+    flowId: flowData?.id ?? flowId,
+    flowData,
+    getHeaders,
+    refetch: refetchSilent,
+  });
+
+  // ⌘Z=Undo / ⌘⇧Z（＋⌘Y）=Redo の専用キーバインド。
+  // 共有の useKeyboardShortcuts は mod 系を「入力中でも常に発火」させる仕様（mod+s/i 用）のため、
+  // 「INPUT/TEXTAREA/select/contentEditable フォーカス中は無視」を満たすべく window keydown を直接張る。
+  // フロー図タブがアクティブな時のみ有効。最新の undo/redo/activeTab を ref 経由で参照する。
+  const undoRef = useRef(undo);
+  const redoRef = useRef(redo);
+  const activeTabRef = useRef(activeTab);
+  undoRef.current = undo;
+  redoRef.current = redo;
+  activeTabRef.current = activeTab;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      if (activeTabRef.current !== 'flow') return;
+      // 入力フォーカス中は無視（テキスト編集の Undo を奪わない）
+      const t = e.target;
+      if (t instanceof HTMLElement) {
+        const tag = t.tagName.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) {
+          return;
+        }
+      }
+      // ⌘⇧Z または ⌘Y = Redo、⌘Z = Undo
+      const isRedo = (key === 'z' && e.shiftKey) || key === 'y';
+      e.preventDefault();
+      if (isRedo) redoRef.current();
+      else if (key === 'z') undoRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // キーボードショートカット
   // ⌘/Ctrl+S … ブラウザ保存を抑止しつつ Mermaid出力（フローはノード編集時に自動保存される）
   // ⌘/Ctrl+I … mermaidから生成、Shift+/（?） … 操作方法
@@ -1935,6 +1993,10 @@ export default function ProjectFlowDetailPage() {
           onUpdateNode={handleNodeUpdate}
           onUpdateLaneHeight={handleUpdateLaneHeight}
           onTidyNodes={handleTidyNodes}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
           onCreateChildFlow={handleChildFlowCreate}
           onOpenChildFlow={handleNodeDoubleClick}
           onNodeDoubleClick={handleNodeDrillDown}

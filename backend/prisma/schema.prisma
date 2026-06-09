@@ -266,8 +266,29 @@ model BusinessFlow {
   dfdNodeRefs         DfdNode[]                @relation("DfdNodeRefFlow")
   cruoaCols           CruoaCol[]
   cruoaRows           CruoaRow[]
+  // Undo/Redo 用スナップショット履歴
+  snapshots           FlowSnapshot[]
 
   @@map("business_flows")
+}
+
+// ===========================================
+// 業務フロー Undo/Redo スナップショット履歴
+// 1スナップショット = フローの編集状態 JSON（nodes/edges）
+// ===========================================
+
+model FlowSnapshot {
+  id        String   @id @default(uuid())
+  flowId    String   @map("flow_id")
+  seq       Int
+  label     String?
+  data      Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId, seq])
+  @@map("flow_snapshots")
 }
 
 model FlowDefinition {

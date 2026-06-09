@@ -433,6 +433,143 @@ class ReplaceNodeInformationLinksDto {
   links: NodeInformationLinkItemDto[];
 }
 
+// ===== Undo/Redo restore / snapshots DTOs =====
+
+class RestoreNodeInformationLinkDto {
+  @IsString()
+  informationTypeId: string;
+
+  @IsIn(['INPUT', 'OUTPUT'])
+  direction: 'INPUT' | 'OUTPUT';
+
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+}
+
+class RestoreNodeDto {
+  @IsString()
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @IsString()
+  label: string;
+
+  @IsOptional()
+  @IsNumber()
+  positionX?: number;
+
+  @IsOptional()
+  @IsNumber()
+  positionY?: number;
+
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+
+  @IsOptional()
+  @IsString()
+  roleId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  processingTime?: string | null;
+
+  @IsOptional()
+  @IsString()
+  handledCount?: string | null;
+
+  @IsOptional()
+  @IsString()
+  supplement?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  childFlowId?: string | null;
+
+  @ApiProperty({ type: [RestoreNodeInformationLinkDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RestoreNodeInformationLinkDto)
+  informationLinks?: RestoreNodeInformationLinkDto[];
+}
+
+class RestoreEdgeDto {
+  @IsString()
+  id: string;
+
+  @IsString()
+  sourceNodeId: string;
+
+  @IsString()
+  targetNodeId: string;
+
+  @IsOptional()
+  @IsString()
+  sourceHandle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  targetHandle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  label?: string | null;
+
+  @IsOptional()
+  @IsString()
+  condition?: string | null;
+
+  @IsOptional()
+  @IsString()
+  informationTypeId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  pathStyle?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  labelT?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  infoT?: number | null;
+}
+
+class RestoreFlowDto {
+  @ApiProperty({ type: [RestoreNodeDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RestoreNodeDto)
+  nodes: RestoreNodeDto[];
+
+  @ApiProperty({ type: [RestoreEdgeDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RestoreEdgeDto)
+  edges: RestoreEdgeDto[];
+}
+
+class CreateFlowSnapshotDto {
+  @ApiProperty({ description: 'スナップショットの表示ラベル（任意）', required: false })
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @ApiProperty({ description: 'フロー編集状態の JSON（nodes/edges 等）' })
+  @IsObject()
+  data: Record<string, unknown>;
+}
+
 @ApiTags('Business Flows')
 @ApiBearerAuth()
 @Controller('business-flows')
@@ -1119,6 +1256,192 @@ export class BusinessFlowController {
       orderBy: { order: 'asc' },
     });
     return links.map((il) => this.toInformationLinkResponse(il));
+  }
+
+  // ========== Undo/Redo: Restore + Snapshots ==========
+
+  @Put(':flowId/restore')
+  @ApiOperation({
+    summary:
+      'フローのノード/エッジをスナップショットに一致するよう ID 保持で差分置換（Undo/Redo の核）',
+  })
+  async restore(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Body() dto: RestoreFlowDto,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    const nodes = dto.nodes ?? [];
+    const edges = dto.edges ?? [];
+    const keepNodeIds = nodes.map((n) => n.id);
+    const keepEdgeIds = edges.map((e) => e.id);
+
+    await this.prisma.$transaction(async (tx) => {
+      // ① スナップショットに無い既存 edge を削除（FK 単純化のため先に消す）
+      await tx.flowEdge.deleteMany({
+        where: {
+          flowId,
+          ...(keepEdgeIds.length > 0 ? { id: { notIn: keepEdgeIds } } : {}),
+        },
+      });
+
+      // ② スナップショットに無い既存 node を削除（そのノードの edge/links は Cascade）
+      await tx.flowNode.deleteMany({
+        where: {
+          flowId,
+          ...(keepNodeIds.length > 0 ? { id: { notIn: keepNodeIds } } : {}),
+        },
+      });
+
+      // ③ node を upsert（全フィールド、childFlowId/metadata 含む）
+      for (const n of nodes) {
+        const nodeData = {
+          type: ((n.type as string) || 'PROCESS') as any,
+          label: n.label,
+          positionX: n.positionX ?? 0,
+          positionY: n.positionY ?? 0,
+          order: n.order ?? 0,
+          roleId: n.roleId ?? null,
+          processingTime: n.processingTime ?? null,
+          handledCount: n.handledCount ?? null,
+          supplement: n.supplement ?? null,
+          metadata: (n.metadata ?? {}) as any,
+          childFlowId: n.childFlowId ?? null,
+        };
+        await tx.flowNode.upsert({
+          where: { id: n.id },
+          update: nodeData,
+          create: { id: n.id, flowId, ...nodeData },
+        });
+
+        // ④ NodeInformationLink を replace-all（informationLinks 指定時のみ）
+        if (n.informationLinks !== undefined) {
+          await tx.nodeInformationLink.deleteMany({ where: { nodeId: n.id } });
+          if (n.informationLinks.length > 0) {
+            await tx.nodeInformationLink.createMany({
+              data: n.informationLinks.map((il, idx) => ({
+                nodeId: n.id,
+                informationTypeId: il.informationTypeId,
+                direction: il.direction,
+                order: il.order ?? idx,
+              })),
+            });
+          }
+        }
+      }
+
+      // ⑤ edge を upsert（全フィールド）。node 確定後に処理して FK 整合
+      for (const e of edges) {
+        const edgeData = {
+          sourceNodeId: e.sourceNodeId,
+          targetNodeId: e.targetNodeId,
+          sourceHandle: e.sourceHandle ?? null,
+          targetHandle: e.targetHandle ?? null,
+          label: e.label ?? null,
+          condition: e.condition ?? null,
+          informationTypeId: e.informationTypeId ?? null,
+          pathStyle: e.pathStyle ?? null,
+          labelT: e.labelT ?? null,
+          infoT: e.infoT ?? null,
+        };
+        await tx.flowEdge.upsert({
+          where: { id: e.id },
+          update: edgeData,
+          create: { id: e.id, flowId, ...edgeData },
+        });
+      }
+    });
+
+    // restore 後の GET 相当（フル状態）を返す
+    return this.getById(flowId);
+  }
+
+  @Get(':flowId/snapshots')
+  @ApiOperation({
+    summary: 'フローのスナップショット履歴（直近 N を seq 昇順、data 同梱）を取得',
+  })
+  async getSnapshots(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Query('limit') limit?: string,
+  ) {
+    await this.assertFlowMembership(flowId, user.id);
+
+    const take = Math.min(Math.max(parseInt(limit ?? '50', 10) || 50, 1), 200);
+
+    // 直近 N 件を seq 降順で取得 → seq 昇順で返す
+    const rows = await this.prisma.flowSnapshot.findMany({
+      where: { flowId },
+      orderBy: { seq: 'desc' },
+      take,
+    });
+
+    return rows
+      .sort((a, b) => a.seq - b.seq)
+      .map((s) => ({
+        id: s.id,
+        seq: s.seq,
+        label: s.label,
+        data: s.data,
+        createdAt: s.createdAt,
+      }));
+  }
+
+  @Post(':flowId/snapshots')
+  @ApiOperation({
+    summary: 'スナップショットを1件作成（保持上限 50 超過分は古い seq を間引き）',
+  })
+  async createSnapshot(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Body() dto: CreateFlowSnapshotDto,
+  ) {
+    await this.assertFlowMembership(flowId, user.id);
+
+    const MAX_SNAPSHOTS = 50;
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const latest = await tx.flowSnapshot.findFirst({
+        where: { flowId },
+        orderBy: { seq: 'desc' },
+        select: { seq: true },
+      });
+      const seq = (latest?.seq ?? 0) + 1;
+
+      const row = await tx.flowSnapshot.create({
+        data: {
+          flowId,
+          seq,
+          label: dto.label ?? null,
+          data: (dto.data ?? {}) as any,
+        },
+      });
+
+      // 保持上限超過分（古い seq）を間引き
+      const stale = await tx.flowSnapshot.findMany({
+        where: { flowId },
+        orderBy: { seq: 'desc' },
+        skip: MAX_SNAPSHOTS,
+        select: { id: true },
+      });
+      if (stale.length > 0) {
+        await tx.flowSnapshot.deleteMany({
+          where: { id: { in: stale.map((r) => r.id) } },
+        });
+      }
+
+      return row;
+    });
+
+    return {
+      id: created.id,
+      seq: created.seq,
+      label: created.label,
+      data: created.data,
+      createdAt: created.createdAt,
+    };
   }
 
   private edgeToResponse(e: {

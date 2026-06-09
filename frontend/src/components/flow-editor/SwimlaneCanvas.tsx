@@ -73,6 +73,8 @@ import {
   RefreshCw,
   Maximize2,
   Minimize2,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -284,6 +286,15 @@ export interface SwimlaneCanvasProps {
    * ページ側は PUT /api/business-flows/:flowId { laneHeights } で保存する。
    */
   onUpdateLaneHeight?: (roleId: string, height: number) => void;
+  // --- Undo/Redo（スナップショット型。補助ツールバーボタン） ---
+  /** Undo（⌘Z 相当）。端では canUndo=false。 */
+  onUndo?: () => void;
+  /** Redo（⌘⇧Z / ⌘Y 相当）。端では canRedo=false。 */
+  onRedo?: () => void;
+  /** これ以上戻れる履歴があるか（ボタン disabled 制御）。 */
+  canUndo?: boolean;
+  /** これ以上進める履歴があるか（ボタン disabled 制御）。 */
+  canRedo?: boolean;
 }
 
 // ===========================================
@@ -1865,9 +1876,34 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           </div>
         </Panel>
 
-        {/* ツールバー（右上）: 整形 + 縦横トグル + PNG出力 */}
+        {/* ツールバー（右上）: Undo/Redo + 整形 + 縦横トグル + PNG出力 */}
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
+            {(props.onUndo || props.onRedo) && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => props.onUndo?.()}
+                  disabled={!props.onUndo || !props.canUndo}
+                  className="text-gray-700"
+                  title="元に戻す（⌘Z / Ctrl+Z）"
+                >
+                  <Undo2 className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => props.onRedo?.()}
+                  disabled={!props.onRedo || !props.canRedo}
+                  className="text-gray-700"
+                  title="やり直し（⌘⇧Z / Ctrl+Shift+Z）"
+                >
+                  <Redo2 className="w-4 h-4" />
+                </Button>
+                <span className="mx-0.5 h-5 w-px bg-gray-200" />
+              </>
+            )}
             <Button
               variant="outline"
               size="sm"
