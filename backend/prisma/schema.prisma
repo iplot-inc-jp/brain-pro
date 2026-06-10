@@ -278,6 +278,8 @@ model BusinessFlow {
   cruoaRows           CruoaRow[]
   // Undo/Redo 用スナップショット履歴
   snapshots           FlowSnapshot[]
+  // 業務フロー上の注釈（付箋・コメント）
+  annotations         FlowAnnotation[]
 
   @@map("business_flows")
 }
@@ -299,6 +301,34 @@ model FlowSnapshot {
 
   @@index([flowId, seq])
   @@map("flow_snapshots")
+}
+
+// ===========================================
+// 業務フロー上の注釈（付箋・コメント）
+// キャンバス上の自由配置メモ。ノード/エッジには紐づかない
+// ===========================================
+
+enum FlowAnnotationKind {
+  STICKY   // 付箋
+  COMMENT  // コメント
+}
+
+model FlowAnnotation {
+  id        String             @id @default(uuid())
+  flowId    String             @map("flow_id")
+  kind      FlowAnnotationKind @default(STICKY)
+  text      String             @default("") @db.Text
+  positionX Float              @default(0) @map("position_x")
+  positionY Float              @default(0) @map("position_y")
+  color     String?
+  order     Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  flow BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@map("flow_annotations")
 }
 
 model FlowDefinition {

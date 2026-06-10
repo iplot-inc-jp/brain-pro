@@ -43,6 +43,7 @@ import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType, type InformationCategory } from '@/lib/dfd';
 import { type RoleType } from '@/lib/api';
 import type {
+  FlowAnnotation,
   FlowData,
   FlowLinkDirection,
   FlowSummary,
@@ -625,6 +626,8 @@ export default function ProjectFlowDetailPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
+  // 注釈（付箋・コメント）。flowData.nodes/edges とは別系統で扱う（整形/転置/Undo-Redo 対象外）。
+  const [annotations, setAnnotations] = useState<FlowAnnotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -668,6 +671,21 @@ export default function ProjectFlowDetailPage() {
     }
   }, [projectId, getHeaders]);
 
+  // 注釈（付箋・コメント）一覧を取得（GET /business-flows/:flowId/annotations）。
+  // flowData.nodes/edges とは別系統。フローデータ取得・フロー切替時に併せて読む。
+  const fetchAnnotations = useCallback(async (id: string) => {
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/${id}/annotations`, { headers });
+      if (!res.ok) return;
+      const data = (await res.json()) as FlowAnnotation[];
+      setAnnotations(Array.isArray(data) ? data : []);
+    } catch (err) {
+      // 注釈の取得失敗はフロー描画の致命ではない（付箋が出ないだけ）
+      console.error('Failed to fetch annotations:', err);
+    }
+  }, [getHeaders]);
+
   // フローデータを取得
   // silent=true（Undo/Redo の restore 直後の再取得）では全画面ローディングを出さず、
   // 図がちらつかないようにする（キャンバスは前回状態を保ったまま差し替わる）。
@@ -685,6 +703,8 @@ export default function ProjectFlowDetailPage() {
 
       // ロール取得（関数化した fetchRoles を再利用）
       await fetchRoles();
+      // 注釈（付箋・コメント）も併せて取得（別系統）
+      await fetchAnnotations(id);
 
       setFlowData(flow);
     } catch (err) {
@@ -692,7 +712,7 @@ export default function ProjectFlowDetailPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [getHeaders, fetchRoles]);
+  }, [getHeaders, fetchRoles, fetchAnnotations]);
 
   // Mermaid出力取得
   const fetchMermaid = useCallback(async () => {
@@ -1513,6 +1533,92 @@ export default function ProjectFlowDetailPage() {
   );
 
   // ===========================================
+  // 注釈（付箋・コメント）の追加・更新・削除
+  // flowData.nodes/edges とは別系統。POST/PATCH/DELETE /business-flows/:flowId/annotations[/:id]。
+  // 成功後は annotations 状態を楽観更新（位置/本文の小刻みな更新で再取得を避けちらつきを防ぐ）。
+  // ===========================================
+  const handleAddAnnotation = useCallback(
+    async (
+      kind: FlowAnnotation['kind'],
+      init?: { positionX: number; positionY: number }
+    ) => {
+      if (!flowData) return;
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/annotations`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            kind,
+            text: '',
+            positionX: init?.positionX ?? 0,
+            positionY: init?.positionY ?? 0,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to create annotation');
+        const created = (await res.json()) as FlowAnnotation;
+        setAnnotations((prev) => [...prev, created]);
+      } catch (err) {
+        console.error('Failed to create annotation:', err);
+      }
+    },
+    [flowData, getHeaders]
+  );
+
+  const handleUpdateAnnotation = useCallback(
+    async (
+      id: string,
+      patch: { text?: string; positionX?: number; positionY?: number; color?: string | null }
+    ) => {
+      if (!flowData) return;
+      // 楽観更新（ドラッグ移動・本文編集が即座に反映され、再取得のちらつきを避ける）
+      setAnnotations((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, ...patch } : a))
+      );
+      try {
+        const headers = getHeaders();
+        const res = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/annotations/${id}`,
+          {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify(patch),
+          }
+        );
+        if (!res.ok) throw new Error('Failed to update annotation');
+      } catch (err) {
+        console.error('Failed to update annotation:', err);
+        // 失敗時はサーバ状態へ戻す
+        fetchAnnotations(flowData.id);
+      }
+    },
+    [flowData, getHeaders, fetchAnnotations]
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (id: string) => {
+      if (!flowData) return;
+      // 楽観更新（削除を即座に反映）
+      setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      try {
+        const headers = getHeaders();
+        const res = await fetch(
+          `${API_URL}/api/business-flows/${flowData.id}/annotations/${id}`,
+          {
+            method: 'DELETE',
+            headers,
+          }
+        );
+        if (!res.ok) throw new Error('Failed to delete annotation');
+      } catch (err) {
+        console.error('Failed to delete annotation:', err);
+        fetchAnnotations(flowData.id);
+      }
+    },
+    [flowData, getHeaders, fetchAnnotations]
+  );
+
+  // ===========================================
   // 表示ロール選択（フローごと localStorage 永続化）
   // ===========================================
   const rolesStorageKey = useMemo(() => `flow-roles-${flowId}`, [flowId]);
@@ -2037,6 +2143,10 @@ export default function ProjectFlowDetailPage() {
           onDeleteNodeLink={handleDeleteNodeLink}
           onFetchFlowNodes={handleFetchFlowNodes}
           onAddRole={handleAddRole}
+          annotations={annotations}
+          onAddAnnotation={handleAddAnnotation}
+          onUpdateAnnotation={handleUpdateAnnotation}
+          onDeleteAnnotation={handleDeleteAnnotation}
         />
       </div>
 

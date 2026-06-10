@@ -570,6 +570,56 @@ class CreateFlowSnapshotDto {
   data: Record<string, unknown>;
 }
 
+// ===== 注釈（付箋・コメント）DTOs =====
+
+class CreateFlowAnnotationDto {
+  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT'], required: false })
+  @IsOptional()
+  @IsIn(['STICKY', 'COMMENT'])
+  kind?: 'STICKY' | 'COMMENT';
+
+  @IsOptional()
+  @IsString()
+  text?: string;
+
+  @IsOptional()
+  @IsNumber()
+  positionX?: number;
+
+  @IsOptional()
+  @IsNumber()
+  positionY?: number;
+
+  @ApiProperty({ description: '色（任意）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  color?: string | null;
+}
+
+class UpdateFlowAnnotationDto {
+  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT'], required: false })
+  @IsOptional()
+  @IsIn(['STICKY', 'COMMENT'])
+  kind?: 'STICKY' | 'COMMENT';
+
+  @IsOptional()
+  @IsString()
+  text?: string;
+
+  @IsOptional()
+  @IsNumber()
+  positionX?: number;
+
+  @IsOptional()
+  @IsNumber()
+  positionY?: number;
+
+  @ApiProperty({ description: '色（任意）', required: false, nullable: true })
+  @IsOptional()
+  @IsString()
+  color?: string | null;
+}
+
 @ApiTags('Business Flows')
 @ApiBearerAuth()
 @Controller('business-flows')
@@ -1441,6 +1491,119 @@ export class BusinessFlowController {
       label: created.label,
       data: created.data,
       createdAt: created.createdAt,
+    };
+  }
+
+  // ========== Annotations (付箋・コメント) ==========
+
+  @Get(':flowId/annotations')
+  @ApiOperation({ summary: 'フローの注釈（付箋・コメント）一覧を取得' })
+  async getAnnotations(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    const rows = await this.prisma.flowAnnotation.findMany({
+      where: { flowId },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    return rows.map((a) => this.annotationToResponse(a));
+  }
+
+  @Post(':flowId/annotations')
+  @ApiOperation({ summary: '注釈（付箋・コメント）を作成' })
+  async createAnnotation(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Body() dto: CreateFlowAnnotationDto,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    const created = await this.prisma.flowAnnotation.create({
+      data: {
+        flowId,
+        kind: dto.kind ?? 'STICKY',
+        text: dto.text ?? '',
+        positionX: dto.positionX ?? 0,
+        positionY: dto.positionY ?? 0,
+        color: dto.color ?? null,
+      },
+    });
+
+    return this.annotationToResponse(created);
+  }
+
+  @Patch(':flowId/annotations/:id')
+  @ApiOperation({ summary: '注釈（付箋・コメント）を部分更新' })
+  async updateAnnotation(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateFlowAnnotationDto,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    const data: {
+      kind?: 'STICKY' | 'COMMENT';
+      text?: string;
+      positionX?: number;
+      positionY?: number;
+      color?: string | null;
+    } = {};
+    if (dto.kind !== undefined) data.kind = dto.kind;
+    if (dto.text !== undefined) data.text = dto.text;
+    if (dto.positionX !== undefined) data.positionX = dto.positionX;
+    if (dto.positionY !== undefined) data.positionY = dto.positionY;
+    if (dto.color !== undefined) data.color = dto.color;
+
+    const updated = await this.prisma.flowAnnotation.update({
+      where: { id },
+      data,
+    });
+
+    return this.annotationToResponse(updated);
+  }
+
+  @Delete(':flowId/annotations/:id')
+  @ApiOperation({ summary: '注釈（付箋・コメント）を削除' })
+  async deleteAnnotation(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Param('id') id: string,
+  ) {
+    // 認可: flow -> project -> organization メンバーシップ
+    await this.assertFlowMembership(flowId, user.id);
+
+    await this.prisma.flowAnnotation.delete({ where: { id } });
+    return { success: true };
+  }
+
+  private annotationToResponse(a: {
+    id: string;
+    kind: string;
+    text: string;
+    positionX: number;
+    positionY: number;
+    color: string | null;
+    order: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      id: a.id,
+      kind: a.kind,
+      text: a.text,
+      positionX: a.positionX,
+      positionY: a.positionY,
+      color: a.color,
+      order: a.order,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
     };
   }
 

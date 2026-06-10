@@ -78,6 +78,8 @@ import {
   Minimize2,
   Undo2,
   Redo2,
+  StickyNote,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -89,6 +91,7 @@ import {
   type LayoutRole,
 } from './flow-layout';
 import type {
+  FlowAnnotation,
   FlowData,
   FlowDataEdge,
   FlowDataNode,
@@ -314,6 +317,24 @@ export interface SwimlaneCanvasProps {
   canUndo?: boolean;
   /** これ以上進める履歴があるか（ボタン disabled 制御）。 */
   canRedo?: boolean;
+  // --- 注釈（付箋・コメント）。flowData.nodes/edges とは別系統。 ---
+  /**
+   * フロー図に貼る注釈一覧（付箋・コメント）。整形/縦横転置/Undo-Redo の対象外。
+   * flow ノードとは別の専用ノード（type:'annotation'）として描画する。
+   */
+  annotations?: FlowAnnotation[];
+  /** 注釈を新規追加する（付箋 or コメント）。位置はビュー中央付近を渡す。 */
+  onAddAnnotation?: (
+    kind: FlowAnnotation['kind'],
+    init?: { positionX: number; positionY: number },
+  ) => void;
+  /** 注釈の本文・位置を部分更新する（本文編集の onBlur / ドラッグ停止）。 */
+  onUpdateAnnotation?: (
+    id: string,
+    patch: { text?: string; positionX?: number; positionY?: number; color?: string | null },
+  ) => void;
+  /** 注釈を削除する（ホバー時の ✕）。 */
+  onDeleteAnnotation?: (id: string) => void;
 }
 
 // ===========================================
@@ -951,7 +972,91 @@ function GhostConnectionLine({
   );
 }
 
-const nodeTypes = { content: ContentNode, lane: LaneNode };
+// ===========================================
+// 注釈ノード（付箋・コメント）
+// flowData.nodes とは別系統。type:'annotation' の専用ノードとして描画する。
+// 本文は常時 textarea で編集 → onBlur で onUpdateAnnotation(id,{text})。
+// ホバーで ✕ 削除ボタン → onDeleteAnnotation(id)。ドラッグ移動可（drag stop で位置保存）。
+// ===========================================
+
+type AnnotationNodeData = {
+  kind: FlowAnnotation['kind'];
+  text: string;
+  color?: string | null;
+  onUpdateText?: (id: string, text: string) => void;
+  onDelete?: (id: string) => void;
+};
+
+const ANNOTATION_W = 200;
+const ANNOTATION_MIN_H = 96;
+
+function AnnotationNode({ id, data }: { id: string; data: AnnotationNodeData }) {
+  const isSticky = data.kind === 'STICKY';
+  const [value, setValue] = useState(data.text ?? '');
+  // 外部（再取得・楽観更新）で本文が変わったら同期。編集中の onBlur 確定後の再取得でも破綻しない。
+  useEffect(() => {
+    setValue(data.text ?? '');
+  }, [data.text]);
+
+  const handleBlur = useCallback(() => {
+    if (value !== (data.text ?? '')) {
+      data.onUpdateText?.(id, value);
+    }
+  }, [value, data, id]);
+
+  // 付箋=黄色付箋風、コメント=白＋吹き出し風。
+  const stickyColor = data.color || '#fef9c3';
+  const wrapperClass = isSticky
+    ? 'rounded-sm border border-amber-300/70 shadow-md'
+    : 'relative rounded-lg border-2 border-gray-300 bg-white shadow-md';
+
+  return (
+    <div
+      className={`group/annotation w-full h-full ${wrapperClass}`}
+      style={isSticky ? { backgroundColor: stickyColor } : undefined}
+    >
+      {/* コメントは左下に小さな吹き出しのしっぽを付ける */}
+      {!isSticky && (
+        <>
+          <div className="absolute -bottom-2 left-5 h-3 w-3 rotate-45 border-b-2 border-r-2 border-gray-300 bg-white" />
+        </>
+      )}
+      {/* 種別ラベル（小） */}
+      <div
+        className={`flex items-center justify-between px-2 pt-1 text-[10px] font-medium ${
+          isSticky ? 'text-amber-700/80' : 'text-gray-400'
+        }`}
+      >
+        <span>{isSticky ? '付箋' : 'コメント'}</span>
+      </div>
+      <textarea
+        // ノード本体のドラッグや pan を奪わないよう nodrag/nopan を付与（テキスト編集を優先）。
+        className={`nodrag nopan w-full resize-none border-0 bg-transparent px-2 pb-2 text-xs leading-snug outline-none ${
+          isSticky ? 'text-amber-900 placeholder:text-amber-700/40' : 'text-gray-800 placeholder:text-gray-400'
+        }`}
+        style={{ height: ANNOTATION_MIN_H - 22 }}
+        value={value}
+        placeholder={isSticky ? 'メモを入力…' : 'コメントを入力…'}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={handleBlur}
+      />
+      {/* ホバーで出る削除ボタン */}
+      <button
+        type="button"
+        title="この注釈を削除"
+        onClick={(e) => {
+          e.stopPropagation();
+          data.onDelete?.(id);
+        }}
+        className="nodrag nopan absolute -right-2 -top-2 hidden h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 shadow-sm hover:bg-red-50 hover:text-red-600 group-hover/annotation:flex"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+const nodeTypes = { content: ContentNode, lane: LaneNode, annotation: AnnotationNode };
 const edgeTypes = { editable: EditableEdge };
 
 // カテゴリ → バッジ配色（情報/物体/帳票）。
@@ -1531,7 +1636,32 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       } as Node;
     });
 
-    return [...laneNodes, ...contentNodes];
+    // 注釈ノード（付箋・コメント）。flowData.nodes とは別系統で append する。
+    // id は注釈の uuid をそのまま使う（flow ノード id とは UUID 空間が別なので衝突しない）。
+    // zIndex を高めにしてノード/エッジの上に重ねる。
+    const annotationNodes: Node[] = (props.annotations ?? []).map((a) => {
+      const data: AnnotationNodeData = {
+        kind: a.kind,
+        text: a.text,
+        color: a.color,
+        onUpdateText: (id, text) => props.onUpdateAnnotation?.(id, { text }),
+        onDelete: (id) => props.onDeleteAnnotation?.(id),
+      };
+      return {
+        id: a.id,
+        type: 'annotation',
+        position: { x: a.positionX, y: a.positionY },
+        data,
+        width: ANNOTATION_W,
+        style: { width: ANNOTATION_W, minHeight: ANNOTATION_MIN_H },
+        draggable: true,
+        selectable: true,
+        connectable: false,
+        zIndex: 5,
+      } as Node;
+    });
+
+    return [...laneNodes, ...contentNodes, ...annotationNodes];
   }, [
     bands,
     flowData.nodes,
@@ -1541,6 +1671,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     roles,
     handleLaneResizeStart,
     props.onUpdateLaneHeight,
+    props.annotations,
+    props.onUpdateAnnotation,
+    props.onDeleteAnnotation,
   ]);
 
   // React Flow は制御モードでは onNodesChange が無いとドラッグで位置が動かない。
@@ -1809,11 +1942,51 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       });
   }, [flowData.name]);
 
+  // --- 注釈（付箋・コメント）を新規追加 ---
+  // 初期位置は現在表示中のビュー中央付近（screenToFlowPosition でラッパー中心を flow 座標へ）。
+  // 取得できなければ固定オフセットにフォールバック。複数追加で重ならないよう少しずつずらす。
+  const handleAddAnnotation = useCallback(
+    (kind: FlowAnnotation['kind']) => {
+      let cx = 80;
+      let cy = 80;
+      const root = wrapperRef.current;
+      if (root) {
+        const rect = root.getBoundingClientRect();
+        try {
+          const p = screenToFlowPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          });
+          // ノード中心ではなく左上基準に置く（描画幅ぶん左へ寄せる）。
+          cx = p.x - ANNOTATION_W / 2;
+          cy = p.y - ANNOTATION_MIN_H / 2;
+        } catch {
+          /* viewport 未確定時は固定オフセット */
+        }
+      }
+      // 既存注釈数に応じて少しずらし、新規が重ならないようにする。
+      const jitter = (props.annotations?.length ?? 0) % 6;
+      props.onAddAnnotation?.(kind, {
+        positionX: cx + jitter * 16,
+        positionY: cy + jitter * 16,
+      });
+    },
+    [screenToFlowPosition, props],
+  );
+
   // --- ドラッグ停止: 自由配置座標を保存 + ドロップ先レーンへロール再割当 ---
   // 旧実装は order/roleId だけ保存していたため位置がスナップバックしていた。
   // 新実装はドロップした左上座標を positionX/positionY としてそのまま保存する。
   const handleNodeDragStop = useCallback(
     (_evt: unknown, node: Node) => {
+      // 注釈ノード（付箋・コメント）は別系統。位置だけ保存して以降の flow ノード処理には進めない。
+      if (node.type === 'annotation') {
+        props.onUpdateAnnotation?.(node.id, {
+          positionX: node.position.x,
+          positionY: node.position.y,
+        });
+        return;
+      }
       if (node.type !== 'content') return;
 
       const w = node.width ?? NODE_W;
@@ -2000,7 +2173,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           if (src?.childFlowId) props.onOpenChildFlow?.(node.id, src.childFlowId);
         }}
         onNodeContextMenu={(e, node) => {
-          if (node.type === 'lane') return;
+          // レーン・付箋（annotation）は対象外。付箋の削除/編集は AnnotationNode 側で完結する
+          if (node.type !== 'content') return;
           e.preventDefault();
           const src = flowData.nodes.find((n) => n.id === node.id);
           setMenu({ kind: 'node', x: e.clientX, y: e.clientY, nodeId: node.id, hasChildFlow: !!src?.hasChildFlow });
@@ -2114,6 +2288,33 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               <RotateCw className="w-4 h-4 mr-1" />
               {isVertical ? '縦' : '横'}
             </Button>
+            {/* 注釈（付箋・コメント）追加。flowData.nodes とは別系統で永続化される。 */}
+            {props.onAddAnnotation && (
+              <>
+                <span className="mx-0.5 h-5 w-px bg-gray-200" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddAnnotation('STICKY')}
+                  className="text-gray-700"
+                  title="付箋（メモ）を追加"
+                >
+                  <StickyNote className="w-4 h-4 mr-1" />
+                  付箋
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddAnnotation('COMMENT')}
+                  className="text-gray-700"
+                  title="コメントを追加"
+                >
+                  <MessageSquarePlus className="w-4 h-4 mr-1" />
+                  コメント
+                </Button>
+                <span className="mx-0.5 h-5 w-px bg-gray-200" />
+              </>
+            )}
             <Button
               variant="outline"
               size="sm"

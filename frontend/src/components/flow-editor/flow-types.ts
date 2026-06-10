@@ -136,3 +136,19 @@ export type FlowNodeData = {
   childFlowId?: string;
   childFlowName?: string;
 };
+
+/**
+ * フロー図に貼る注釈（付箋・コメント）。
+ * flowData.nodes/edges とは別系統で扱い、整形/縦横転置/Undo-Redo の対象には含めない。
+ * GET/POST/PATCH/DELETE /business-flows/:flowId/annotations[/:id] のレスポンスに対応。
+ */
+export type FlowAnnotation = {
+  id: string;
+  /** STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）。 */
+  kind: 'STICKY' | 'COMMENT';
+  text: string;
+  positionX: number;
+  positionY: number;
+  color?: string | null;
+  order: number;
+};
