@@ -1748,28 +1748,52 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     persistLayout(tidyLayout);
   }, [tidyLayout, persistLayout]);
 
-  // --- 向きトグル: 反転後、新しい向きで再レイアウトして一括保存する ---
-  // 向きを切り替えるだけでは旧向きの自由配置座標が残り、レーン/前後関係が崩れる。
-  // 反転後の向きで computeFlowLayout を回し、ノード位置 + 最近接サイド接続ハンドルを
-  // onTidyNodes で永続化することで、新しい向きにレーン × 前後関係で再配置する。
+  // --- 向きトグル: 「整形」ではなく座標変換（転置）で手動配置を保持する ---
+  // 縦↔横の切替で再整形すると、手で並べた配置が毎回潰れてしまう。
+  // そこで各ノード中心の x↔y を入れ替えて図を転置し、相対配置をそのまま新しい向きへ移す。
+  // （横ではロール帯が上下／縦では左右に並ぶため、中心の入替でロール順・前後関係が保たれる）
+  // エッジの接続ハンドルだけは転置後の中心から最近接サイドへ取り直す。
   // localStorage 永続化は applyOrientation が担う。
   const toggleOrientation = useCallback(() => {
     const next: FlowOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
     applyOrientation(next);
-    const relaid = computeFlowLayout(layoutInputNodes, layoutInputEdges, laneRoles, {
-      orientation: next,
-      laneHeightOverrides,
-    } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
-    persistLayout(relaid);
-  }, [
-    orientation,
-    applyOrientation,
-    layoutInputNodes,
-    layoutInputEdges,
-    laneRoles,
-    laneHeightOverrides,
-    persistLayout,
-  ]);
+
+    const opposite: Record<string, string> = {
+      top: 'bottom',
+      bottom: 'top',
+      left: 'right',
+      right: 'left',
+    };
+    // 転置後の各ノード中心（最近接サイド計算に使う）。
+    const newCenter = new Map<string, { x: number; y: number }>();
+    const positions: NodePositionPatch[] = flowData.nodes.map((n) => {
+      const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+      // 旧中心の x↔y を入れ替えて転置（左上 → 中心 → 入替 → 左上）。
+      const cx = pos.y + NODE_H / 2;
+      const cy = pos.x + NODE_W / 2;
+      newCenter.set(n.id, { x: cx, y: cy });
+      return {
+        id: n.id,
+        positionX: cx - NODE_W / 2,
+        positionY: cy - NODE_H / 2,
+        roleId: n.roleId ?? n.role?.id ?? null,
+        order: typeof n.order === 'number' ? n.order : undefined,
+      };
+    });
+    const edges: EdgeHandlePatch[] = flowData.edges.map((e) => {
+      const a = newCenter.get(e.sourceNodeId);
+      const b = newCenter.get(e.targetNodeId);
+      if (!a || !b) {
+        return { id: e.id, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null };
+      }
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const sourceHandle =
+        Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'bottom' : 'top';
+      return { id: e.id, sourceHandle, targetHandle: opposite[sourceHandle] };
+    });
+    void props.onTidyNodes?.(positions, edges);
+  }, [orientation, applyOrientation, flowData.nodes, flowData.edges, effectivePositions, props]);
 
   return (
     <div
