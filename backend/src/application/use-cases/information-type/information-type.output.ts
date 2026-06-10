@@ -7,6 +7,8 @@ export interface InformationTypeOutput {
   category: InformationCategoryValue;
   description: string | null;
   order: number;
+  // 紐づくサブ領域（共通マスタ基盤。任意）
+  subProjectId: string | null;
   attachmentCount: number;
   createdAt: Date;
   updatedAt: Date;
@@ -23,6 +25,7 @@ export function toInformationTypeOutput(
     category: informationType.category,
     description: informationType.description,
     order: informationType.order,
+    subProjectId: informationType.subProjectId,
     attachmentCount,
     createdAt: informationType.createdAt,
     updatedAt: informationType.updatedAt,

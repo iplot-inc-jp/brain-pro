@@ -24,6 +24,11 @@ class CreateSubProjectDto {
   @IsOptional()
   @IsNumber()
   order?: number;
+
+  // 親サブ領域（領域→サブ領域の入れ子。任意）
+  @IsOptional()
+  @IsString()
+  parentId?: string | null;
 }
 
 class UpdateSubProjectDto {
@@ -38,6 +43,11 @@ class UpdateSubProjectDto {
   @IsOptional()
   @IsNumber()
   order?: number;
+
+  // 親サブ領域（領域→サブ領域の入れ子。任意。null で解除）
+  @IsOptional()
+  @IsString()
+  parentId?: string | null;
 }
 
 @ApiTags('サブプロジェクト')
@@ -72,6 +82,7 @@ export class SubProjectController {
         name: dto.name,
         description: dto.description,
         order: dto.order ?? 0,
+        parentId: dto.parentId ?? null,
       },
     });
 
@@ -82,10 +93,16 @@ export class SubProjectController {
   @ApiOperation({ summary: 'サブプロジェクト更新' })
   @ApiParam({ name: 'id', description: 'サブプロジェクトID' })
   async update(@Param('id') id: string, @Body() dto: UpdateSubProjectDto) {
-    const data: { name?: string; description?: string; order?: number } = {};
+    const data: {
+      name?: string;
+      description?: string;
+      order?: number;
+      parentId?: string | null;
+    } = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.order !== undefined) data.order = dto.order;
+    if (dto.parentId !== undefined) data.parentId = dto.parentId;
 
     const updated = await this.prisma.subProject.update({
       where: { id },
@@ -110,6 +127,7 @@ export class SubProjectController {
     name: string;
     description: string | null;
     order: number;
+    parentId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -119,6 +137,7 @@ export class SubProjectController {
       name: s.name,
       description: s.description,
       order: s.order,
+      parentId: s.parentId,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     };

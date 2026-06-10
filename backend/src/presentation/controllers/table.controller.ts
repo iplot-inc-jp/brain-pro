@@ -42,6 +42,11 @@ class CreateTableDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  // 紐づく情報種別マスタ（共通マスタ基盤。任意）
+  @IsOptional()
+  @IsString()
+  informationTypeId?: string | null;
 }
 
 class UpdateTableDto {
@@ -61,6 +66,11 @@ class UpdateTableDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  // 紐づく情報種別マスタ（共通マスタ基盤。任意。null で解除）
+  @IsOptional()
+  @IsString()
+  informationTypeId?: string | null;
 }
 
 class CreateColumnDto {
@@ -204,6 +214,7 @@ export class TableController {
       displayName: dto.displayName,
       description: dto.description,
       tags: dto.tags,
+      informationTypeId: dto.informationTypeId,
     });
     const saved = await this.tableRepository.save(table);
     return this.toResponse(saved);
@@ -219,6 +230,9 @@ export class TableController {
     if (dto.name) table.updateName(dto.name);
     if (dto.displayName !== undefined) table.updateDisplayName(dto.displayName);
     if (dto.description !== undefined) table.updateDescription(dto.description);
+    if (dto.informationTypeId !== undefined) {
+      table.updateInformationTypeId(dto.informationTypeId);
+    }
     if (dto.tags) {
       // Clear and reset tags
       table.tags.forEach((t) => table.removeTag(t));
@@ -527,6 +541,7 @@ orders,total_amount,合計金額,INTEGER,注文の合計金額,false,false,false
       displayName: table.displayName,
       description: table.description,
       tags: table.tags,
+      informationTypeId: table.informationTypeId,
       createdAt: table.createdAt,
       updatedAt: table.updatedAt,
     };

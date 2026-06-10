@@ -22,6 +22,8 @@ export interface UpdateInformationTypeInput {
   category?: InformationCategoryValue;
   description?: string | null;
   order?: number;
+  // 紐づくサブ領域（共通マスタ基盤。任意）
+  subProjectId?: string | null;
 }
 
 /**
@@ -66,6 +68,7 @@ export class UpdateInformationTypeUseCase {
       category: input.category,
       description: input.description,
       order: input.order,
+      subProjectId: input.subProjectId,
     });
     await this.informationTypeRepository.save(informationType);
 

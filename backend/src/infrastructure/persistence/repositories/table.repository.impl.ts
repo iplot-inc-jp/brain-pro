@@ -43,6 +43,7 @@ export class PrismaTableRepository implements ITableRepository {
       displayName: table.displayName,
       description: table.description,
       tags: table.tags,
+      informationTypeId: table.informationTypeId,
     };
 
     const saved = await this.prisma.table.upsert({
@@ -65,6 +66,7 @@ export class PrismaTableRepository implements ITableRepository {
     displayName: string | null;
     description: string | null;
     tags: string[];
+    informationTypeId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): Table {
@@ -75,6 +77,7 @@ export class PrismaTableRepository implements ITableRepository {
       displayName: record.displayName,
       description: record.description,
       tags: record.tags,
+      informationTypeId: record.informationTypeId,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });

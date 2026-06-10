@@ -18,6 +18,7 @@ export class InformationTypeRepositoryImpl implements IInformationTypeRepository
     category: string;
     description: string | null;
     order: number;
+    subProjectId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): InformationType {
@@ -28,6 +29,7 @@ export class InformationTypeRepositoryImpl implements IInformationTypeRepository
       category: record.category as InformationCategoryValue,
       description: record.description,
       order: record.order,
+      subProjectId: record.subProjectId,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });
@@ -69,6 +71,7 @@ export class InformationTypeRepositoryImpl implements IInformationTypeRepository
       category: informationType.category,
       description: informationType.description,
       order: informationType.order,
+      subProjectId: informationType.subProjectId,
     };
 
     await this.prisma.informationType.upsert({

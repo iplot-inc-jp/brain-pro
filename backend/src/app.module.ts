@@ -26,6 +26,8 @@ import {
   TASK_COMMENT_REPOSITORY,
   DFD_REPOSITORY,
   INFORMATION_TYPE_REPOSITORY,
+  SYSTEM_REPOSITORY,
+  CONSTRAINT_REPOSITORY,
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
   RISK_REPOSITORY,
@@ -128,6 +130,16 @@ import {
   CreateInformationTypeUseCase,
   UpdateInformationTypeUseCase,
   DeleteInformationTypeUseCase,
+  // System
+  GetSystemsUseCase,
+  CreateSystemUseCase,
+  UpdateSystemUseCase,
+  DeleteSystemUseCase,
+  // Constraint
+  GetConstraintsUseCase,
+  CreateConstraintUseCase,
+  UpdateConstraintUseCase,
+  DeleteConstraintUseCase,
   // Stakeholder
   CreateStakeholderUseCase,
   GetStakeholdersUseCase,
@@ -209,6 +221,8 @@ import {
   TaskCommentRepositoryImpl,
   DfdRepositoryImpl,
   InformationTypeRepositoryImpl,
+  SystemRepositoryImpl,
+  ConstraintRepositoryImpl,
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
   RiskRepositoryImpl,
@@ -283,6 +297,14 @@ import {
   InformationTypeController,
   InformationTypeByIdController,
 } from './presentation/controllers/information-type.controller';
+import {
+  SystemController,
+  SystemByIdController,
+} from './presentation/controllers/system.controller';
+import {
+  ConstraintController,
+  ConstraintByIdController,
+} from './presentation/controllers/constraint.controller';
 import { SubProjectController } from './presentation/controllers/sub-project.controller';
 import { AnalysisController } from './presentation/controllers/analysis.controller';
 import { GapLedgerController } from './presentation/controllers/gap-ledger.controller';
@@ -349,6 +371,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     DfdController,
     InformationTypeController,
     InformationTypeByIdController,
+    SystemController,
+    SystemByIdController,
+    ConstraintController,
+    ConstraintByIdController,
     StakeholderController,
     StakeholderByIdController,
     MeetingController,
@@ -463,6 +489,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: INFORMATION_TYPE_REPOSITORY,
       useClass: InformationTypeRepositoryImpl,
+    },
+    {
+      provide: SYSTEM_REPOSITORY,
+      useClass: SystemRepositoryImpl,
+    },
+    {
+      provide: CONSTRAINT_REPOSITORY,
+      useClass: ConstraintRepositoryImpl,
     },
     {
       provide: STAKEHOLDER_REPOSITORY,
@@ -595,6 +629,16 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     CreateInformationTypeUseCase,
     UpdateInformationTypeUseCase,
     DeleteInformationTypeUseCase,
+    // System
+    GetSystemsUseCase,
+    CreateSystemUseCase,
+    UpdateSystemUseCase,
+    DeleteSystemUseCase,
+    // Constraint
+    GetConstraintsUseCase,
+    CreateConstraintUseCase,
+    UpdateConstraintUseCase,
+    DeleteConstraintUseCase,
     // Stakeholder
     CreateStakeholderUseCase,
     GetStakeholdersUseCase,

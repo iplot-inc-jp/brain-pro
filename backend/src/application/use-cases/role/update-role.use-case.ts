@@ -18,6 +18,9 @@ export interface UpdateRoleInput {
   kpi?: string | null;
   order?: number;
   laneHeight?: number;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId?: string | null;
+  subProjectId?: string | null;
 }
 
 export interface RoleResponse {
@@ -32,6 +35,9 @@ export interface RoleResponse {
   responsibility: string | null;
   decisionScope: string | null;
   kpi: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId: string | null;
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +58,8 @@ export function toRoleResponse(role: Role): RoleResponse {
     responsibility: role.responsibility,
     decisionScope: role.decisionScope,
     kpi: role.kpi,
+    systemId: role.systemId,
+    subProjectId: role.subProjectId,
     createdAt: role.createdAt,
     updatedAt: role.updatedAt,
   };
@@ -95,6 +103,12 @@ export class UpdateRoleUseCase {
     }
     if (input.kpi !== undefined) {
       role.changeKpi(input.kpi);
+    }
+    if (input.systemId !== undefined) {
+      role.changeSystemId(input.systemId);
+    }
+    if (input.subProjectId !== undefined) {
+      role.changeSubProjectId(input.subProjectId);
     }
     if (input.order !== undefined) {
       role.changeOrder(input.order);

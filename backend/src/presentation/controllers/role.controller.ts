@@ -75,6 +75,8 @@ export class RoleController {
       responsibility: dto.responsibility,
       decisionScope: dto.decisionScope,
       kpi: dto.kpi,
+      systemId: dto.systemId,
+      subProjectId: dto.subProjectId,
     });
     return {
       ...result,
@@ -100,6 +102,8 @@ export class RoleController {
       responsibility: dto.responsibility,
       decisionScope: dto.decisionScope,
       kpi: dto.kpi,
+      systemId: dto.systemId,
+      subProjectId: dto.subProjectId,
     });
     return {
       ...result,
@@ -143,6 +147,8 @@ export class RoleController {
       responsibility: r.responsibility,
       decisionScope: r.decisionScope,
       kpi: r.kpi,
+      systemId: r.systemId,
+      subProjectId: r.subProjectId,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }));
@@ -173,6 +179,8 @@ export class RoleController {
       responsibility: role.responsibility,
       decisionScope: role.decisionScope,
       kpi: role.kpi,
+      systemId: role.systemId,
+      subProjectId: role.subProjectId,
       createdAt: role.createdAt,
       updatedAt: role.updatedAt,
     };

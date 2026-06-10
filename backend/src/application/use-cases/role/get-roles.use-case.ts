@@ -21,6 +21,9 @@ export interface RoleDto {
   responsibility: string | null;
   decisionScope: string | null;
   kpi: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId: string | null;
+  subProjectId: string | null;
 }
 
 /**
@@ -52,6 +55,8 @@ export class GetRolesUseCase {
         responsibility: role.responsibility,
         decisionScope: role.decisionScope,
         kpi: role.kpi,
+        systemId: role.systemId,
+        subProjectId: role.subProjectId,
       }));
   }
 }

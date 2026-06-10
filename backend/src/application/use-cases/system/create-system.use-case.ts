@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  InformationType,
-  InformationCategoryValue,
-  IInformationTypeRepository,
-  INFORMATION_TYPE_REPOSITORY,
+  System,
+  SystemKindValue,
+  ISystemRepository,
+  SYSTEM_REPOSITORY,
   ProjectRepository,
   PROJECT_REPOSITORY,
   OrganizationRepository,
@@ -11,37 +11,33 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import {
-  InformationTypeOutput,
-  toInformationTypeOutput,
-} from './information-type.output';
+import { SystemOutput, toSystemOutput } from './system.output';
 
-export interface CreateInformationTypeInput {
+export interface CreateSystemInput {
   userId: string;
   projectId: string;
   name: string;
-  category?: InformationCategoryValue;
+  kind?: SystemKindValue;
   description?: string | null;
   order?: number;
-  // 紐づくサブ領域（共通マスタ基盤。任意）
   subProjectId?: string | null;
 }
 
 /**
- * 情報種別作成ユースケース
+ * システム作成ユースケース
  */
 @Injectable()
-export class CreateInformationTypeUseCase {
+export class CreateSystemUseCase {
   constructor(
-    @Inject(INFORMATION_TYPE_REPOSITORY)
-    private readonly informationTypeRepository: IInformationTypeRepository,
+    @Inject(SYSTEM_REPOSITORY)
+    private readonly systemRepository: ISystemRepository,
     @Inject(PROJECT_REPOSITORY)
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
   ) {}
 
-  async execute(input: CreateInformationTypeInput): Promise<InformationTypeOutput> {
+  async execute(input: CreateSystemInput): Promise<SystemOutput> {
     const project = await this.projectRepository.findById(input.projectId);
     if (!project) {
       throw new EntityNotFoundError('Project', input.projectId);
@@ -55,12 +51,12 @@ export class CreateInformationTypeUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    const id = this.informationTypeRepository.generateId();
-    const informationType = InformationType.create(
+    const id = this.systemRepository.generateId();
+    const system = System.create(
       {
         projectId: input.projectId,
         name: input.name,
-        category: input.category,
+        kind: input.kind,
         description: input.description,
         order: input.order,
         subProjectId: input.subProjectId,
@@ -68,8 +64,8 @@ export class CreateInformationTypeUseCase {
       id,
     );
 
-    await this.informationTypeRepository.save(informationType);
+    await this.systemRepository.create(system);
 
-    return toInformationTypeOutput(informationType, 0);
+    return toSystemOutput(system);
   }
 }

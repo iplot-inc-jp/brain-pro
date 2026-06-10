@@ -97,6 +97,8 @@ model Project {
   githubConnections GithubConnection[]
   apiEndpoints      ApiEndpoint[]
   subProjects       SubProject[]
+  systems           System[]
+  constraints       Constraint[]
   attachments       Attachment[]
   databaseConnections DatabaseConnection[]
   flowFolders       FlowFolder[]
@@ -131,6 +133,9 @@ model Project {
 model Role {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId     String?  @map("system_id")
+  subProjectId String?  @map("sub_project_id")
   name        String
   type        RoleType @default(HUMAN)
   description String?
@@ -144,6 +149,8 @@ model Role {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  system       System?       @relation(fields: [systemId], references: [id], onDelete: SetNull)
+  subProject   SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   flowNodes    FlowNode[]
   crudMappings CrudMapping[]
   apiRolePermissions    ApiRolePermission[]
@@ -167,6 +174,8 @@ enum RoleType {
 model Table {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 紐づく情報種別マスタ（共通マスタ基盤。任意）
+  informationTypeId String? @map("information_type_id")
   name        String
   displayName String?  @map("display_name")
   description String?
@@ -175,6 +184,7 @@ model Table {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project  Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: SetNull)
   columns  Column[]
   statuses TableStatus[]
 
@@ -980,6 +990,8 @@ model StatusRolePermission {
 model SubProject {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 親サブ領域（領域→サブ領域の入れ子。任意）
+  parentId    String?  @map("parent_id")
   name        String
   description String?
   order       Int      @default(0)
@@ -987,9 +999,60 @@ model SubProject {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent        SubProject?  @relation("SubProjectTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children      SubProject[] @relation("SubProjectTree")
   businessFlows BusinessFlow[]
+  roles            Role[]
+  systems          System[]
+  constraints      Constraint[]
+  informationTypes InformationType[]
 
   @@map("sub_projects")
+}
+
+// ===========================================
+// 共通マスタ基盤：システム / 制約
+// ===========================================
+
+// システム種別（周辺システム / 今回作る対象システム）
+enum SystemKind {
+  PERIPHERAL // 周辺システム
+  TARGET     // 今回作る対象システム
+}
+
+model System {
+  id           String     @id @default(uuid())
+  projectId    String     @map("project_id")
+  subProjectId String?    @map("sub_project_id")
+  name         String
+  kind         SystemKind @default(PERIPHERAL)
+  description  String?    @db.Text
+  order        Int        @default(0)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  roles      Role[]
+
+  @@map("systems")
+}
+
+model Constraint {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  subProjectId String?  @map("sub_project_id")
+  title        String
+  description  String?  @db.Text
+  category     String?
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+
+  @@map("constraints")
 }
 
 model Attachment {
@@ -1230,6 +1293,8 @@ enum InformationCategory {
 model InformationType {
   id          String   @id @default(uuid())
   projectId   String   @map("project_id")
+  // 紐づくサブ領域（共通マスタ基盤。任意）
+  subProjectId String? @map("sub_project_id")
   name        String
   category    InformationCategory @default(INFORMATION)
   description String?  @db.Text
@@ -1238,12 +1303,15 @@ model InformationType {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject  SubProject?  @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   dfdFlows    DfdFlow[]
   attachments Attachment[]
   // この情報種別を入出力として参照しているノードリンク
   nodeLinks   NodeInformationLink[]
   // この情報種別を矢印上のデータとして参照しているフローエッジ
   edges       FlowEdge[]
+  // この情報種別に紐づくテーブル（共通マスタ基盤）
+  tables      Table[]
 
   @@map("information_types")
 }

@@ -1,46 +1,40 @@
 import { BaseEntity } from './base.entity';
 import { ValidationError } from '../errors';
 
-export type InformationCategoryValue = 'INFORMATION' | 'OBJECT' | 'DOCUMENT';
+export type SystemKindValue = 'PERIPHERAL' | 'TARGET';
 
-const INFORMATION_CATEGORIES: readonly InformationCategoryValue[] = [
-  'INFORMATION',
-  'OBJECT',
-  'DOCUMENT',
-];
+const SYSTEM_KINDS: readonly SystemKindValue[] = ['PERIPHERAL', 'TARGET'];
 
-export interface CreateInformationTypeProps {
+export interface CreateSystemProps {
   projectId: string;
   name: string;
-  category?: InformationCategoryValue;
+  kind?: SystemKindValue;
   description?: string | null;
   order?: number;
-  // 紐づくサブ領域（共通マスタ基盤。任意）
   subProjectId?: string | null;
 }
 
-export interface ReconstructInformationTypeProps {
+export interface ReconstructSystemProps {
   id: string;
   projectId: string;
   name: string;
-  category: InformationCategoryValue;
+  kind: SystemKindValue;
   description: string | null;
   order: number;
-  // 紐づくサブ領域（共通マスタ基盤。任意）
-  subProjectId?: string | null;
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 /**
- * 情報種別エンティティ
- * DFDのデータフロー等が参照する情報の種別。category で 情報/物体/帳票 を区別する。
- * 具体帳票ファイルは Attachment.informationTypeId で紐づく。
+ * システムエンティティ
+ * プロジェクトで扱うシステム（周辺システム / 今回作る対象システム）を表す。
+ * kind で PERIPHERAL（周辺）/ TARGET（対象）を区別する。
  */
-export class InformationType extends BaseEntity {
+export class System extends BaseEntity {
   private readonly _projectId: string;
   private _name: string;
-  private _category: InformationCategoryValue;
+  private _kind: SystemKindValue;
   private _description: string | null;
   private _order: number;
   private _subProjectId: string | null;
@@ -49,7 +43,7 @@ export class InformationType extends BaseEntity {
     id: string,
     projectId: string,
     name: string,
-    category: InformationCategoryValue,
+    kind: SystemKindValue,
     description: string | null,
     order: number,
     subProjectId: string | null,
@@ -59,33 +53,33 @@ export class InformationType extends BaseEntity {
     super(id, createdAt, updatedAt);
     this._projectId = projectId;
     this._name = name;
-    this._category = category;
+    this._kind = kind;
     this._description = description;
     this._order = order;
     this._subProjectId = subProjectId;
   }
 
-  static create(props: CreateInformationTypeProps, id: string): InformationType {
+  static create(props: CreateSystemProps, id: string): System {
     if (!props.projectId) {
       throw new ValidationError('Project ID is required');
     }
     const name = props.name?.trim();
     if (!name || name.length < 1) {
-      throw new ValidationError('Information type name is required');
+      throw new ValidationError('System name is required');
     }
     if (name.length > 200) {
-      throw new ValidationError('Information type name must be at most 200 characters');
+      throw new ValidationError('System name must be at most 200 characters');
     }
-    const category = props.category ?? 'INFORMATION';
-    if (!INFORMATION_CATEGORIES.includes(category)) {
-      throw new ValidationError('Invalid information category');
+    const kind = props.kind ?? 'PERIPHERAL';
+    if (!SYSTEM_KINDS.includes(kind)) {
+      throw new ValidationError('Invalid system kind');
     }
     const now = new Date();
-    return new InformationType(
+    return new System(
       id,
       props.projectId,
       name,
-      category,
+      kind,
       props.description ?? null,
       props.order ?? 0,
       props.subProjectId ?? null,
@@ -94,15 +88,15 @@ export class InformationType extends BaseEntity {
     );
   }
 
-  static reconstruct(props: ReconstructInformationTypeProps): InformationType {
-    return new InformationType(
+  static reconstruct(props: ReconstructSystemProps): System {
+    return new System(
       props.id,
       props.projectId,
       props.name,
-      props.category,
+      props.kind,
       props.description,
       props.order,
-      props.subProjectId ?? null,
+      props.subProjectId,
       props.createdAt,
       props.updatedAt,
     );
@@ -112,7 +106,7 @@ export class InformationType extends BaseEntity {
 
   update(props: {
     name?: string;
-    category?: InformationCategoryValue;
+    kind?: SystemKindValue;
     description?: string | null;
     order?: number;
     subProjectId?: string | null;
@@ -120,18 +114,18 @@ export class InformationType extends BaseEntity {
     if (props.name !== undefined) {
       const trimmed = props.name?.trim();
       if (!trimmed || trimmed.length < 1) {
-        throw new ValidationError('Information type name is required');
+        throw new ValidationError('System name is required');
       }
       if (trimmed.length > 200) {
-        throw new ValidationError('Information type name must be at most 200 characters');
+        throw new ValidationError('System name must be at most 200 characters');
       }
       this._name = trimmed;
     }
-    if (props.category !== undefined) {
-      if (!INFORMATION_CATEGORIES.includes(props.category)) {
-        throw new ValidationError('Invalid information category');
+    if (props.kind !== undefined) {
+      if (!SYSTEM_KINDS.includes(props.kind)) {
+        throw new ValidationError('Invalid system kind');
       }
-      this._category = props.category;
+      this._kind = props.kind;
     }
     if (props.description !== undefined) {
       this._description = props.description ?? null;
@@ -155,8 +149,8 @@ export class InformationType extends BaseEntity {
     return this._name;
   }
 
-  get category(): InformationCategoryValue {
-    return this._category;
+  get kind(): SystemKindValue {
+    return this._kind;
   }
 
   get description(): string | null {

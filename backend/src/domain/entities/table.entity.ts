@@ -7,6 +7,8 @@ export class Table extends BaseEntity {
   private _displayName: string | null;
   private _description: string | null;
   private _tags: string[];
+  // 紐づく情報種別マスタ（共通マスタ基盤。任意）
+  private _informationTypeId: string | null;
 
   constructor(props: {
     id: string;
@@ -15,6 +17,7 @@ export class Table extends BaseEntity {
     displayName?: string | null;
     description?: string | null;
     tags?: string[];
+    informationTypeId?: string | null;
     createdAt?: Date;
     updatedAt?: Date;
   }) {
@@ -25,6 +28,7 @@ export class Table extends BaseEntity {
     this._displayName = props.displayName ?? null;
     this._description = props.description ?? null;
     this._tags = props.tags ?? [];
+    this._informationTypeId = props.informationTypeId ?? null;
   }
 
   get projectId(): string {
@@ -47,6 +51,10 @@ export class Table extends BaseEntity {
     return [...this._tags];
   }
 
+  get informationTypeId(): string | null {
+    return this._informationTypeId;
+  }
+
   updateName(name: string): void {
     if (!name || name.length === 0) {
       throw new ValidationError('Table name is required');
@@ -63,6 +71,11 @@ export class Table extends BaseEntity {
 
   updateDescription(description: string | null): void {
     this._description = description;
+  }
+
+  // 紐づく情報種別マスタを設定/解除（共通マスタ基盤。任意）
+  updateInformationTypeId(informationTypeId: string | null): void {
+    this._informationTypeId = informationTypeId;
   }
 
   addTag(tag: string): void {
@@ -82,6 +95,7 @@ export class Table extends BaseEntity {
     displayName?: string | null;
     description?: string | null;
     tags?: string[];
+    informationTypeId?: string | null;
   }): Table {
     if (!props.name || props.name.length === 0) {
       throw new ValidationError('Table name is required');

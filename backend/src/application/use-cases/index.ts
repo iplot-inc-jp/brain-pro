@@ -13,6 +13,8 @@ export * from './task';
 export * from './task-comment';
 export * from './dfd';
 export * from './information-type';
+export * from './system';
+export * from './constraint';
 export * from './stakeholder';
 export * from './meeting';
 export * from './risk';

@@ -57,6 +57,16 @@ export class CreateRoleRequestDto {
   @IsOptional()
   @IsString()
   kpi?: string;
+
+  @ApiPropertyOptional({ description: '所属システムID（共通マスタ基盤。任意）', nullable: true })
+  @IsOptional()
+  @IsString()
+  systemId?: string | null;
+
+  @ApiPropertyOptional({ description: '所属サブ領域ID（共通マスタ基盤。任意）', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 /**
@@ -105,6 +115,16 @@ export class UpdateRoleRequestDto {
   @IsOptional()
   @IsString()
   kpi?: string | null;
+
+  @ApiPropertyOptional({ description: '所属システムID（共通マスタ基盤。任意。null で解除）', nullable: true })
+  @IsOptional()
+  @IsString()
+  systemId?: string | null;
+
+  @ApiPropertyOptional({ description: '所属サブ領域ID（共通マスタ基盤。任意。null で解除）', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 /**
@@ -143,6 +163,12 @@ export class RoleResponseDto {
 
   @ApiProperty({ description: 'KPI', nullable: true })
   kpi?: string | null;
+
+  @ApiProperty({ description: '所属システムID（共通マスタ基盤）', nullable: true })
+  systemId?: string | null;
+
+  @ApiProperty({ description: '所属サブ領域ID（共通マスタ基盤）', nullable: true })
+  subProjectId?: string | null;
 
   @ApiProperty()
   createdAt?: Date;

@@ -12,6 +12,9 @@ export interface CreateRoleProps {
   responsibility?: string | null;
   decisionScope?: string | null;
   kpi?: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId?: string | null;
+  subProjectId?: string | null;
 }
 
 export interface ReconstructRoleProps {
@@ -26,6 +29,9 @@ export interface ReconstructRoleProps {
   responsibility?: string | null;
   decisionScope?: string | null;
   kpi?: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  systemId?: string | null;
+  subProjectId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +51,9 @@ export class Role extends BaseEntity {
   private _responsibility: string | null;
   private _decisionScope: string | null;
   private _kpi: string | null;
+  // 所属システム / サブ領域（共通マスタ基盤。任意）
+  private _systemId: string | null;
+  private _subProjectId: string | null;
 
   private constructor(
     id: string,
@@ -58,6 +67,8 @@ export class Role extends BaseEntity {
     responsibility: string | null,
     decisionScope: string | null,
     kpi: string | null,
+    systemId: string | null,
+    subProjectId: string | null,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -72,6 +83,8 @@ export class Role extends BaseEntity {
     this._responsibility = responsibility;
     this._decisionScope = decisionScope;
     this._kpi = kpi;
+    this._systemId = systemId;
+    this._subProjectId = subProjectId;
   }
 
   /**
@@ -109,6 +122,8 @@ export class Role extends BaseEntity {
       props.responsibility?.trim() || null,
       props.decisionScope?.trim() || null,
       props.kpi?.trim() || null,
+      props.systemId ?? null,
+      props.subProjectId ?? null,
       now,
       now,
     );
@@ -130,6 +145,8 @@ export class Role extends BaseEntity {
       props.responsibility ?? null,
       props.decisionScope ?? null,
       props.kpi ?? null,
+      props.systemId ?? null,
+      props.subProjectId ?? null,
       props.createdAt,
       props.updatedAt,
     );
@@ -190,6 +207,18 @@ export class Role extends BaseEntity {
     this.touch();
   }
 
+  // 所属システムを設定/解除（共通マスタ基盤。任意）
+  changeSystemId(systemId: string | null): void {
+    this._systemId = systemId ?? null;
+    this.touch();
+  }
+
+  // 所属サブ領域を設定/解除（共通マスタ基盤。任意）
+  changeSubProjectId(subProjectId: string | null): void {
+    this._subProjectId = subProjectId ?? null;
+    this.touch();
+  }
+
   // ========== Getter ==========
 
   get projectId(): string {
@@ -222,6 +251,14 @@ export class Role extends BaseEntity {
 
   get kpi(): string | null {
     return this._kpi;
+  }
+
+  get systemId(): string | null {
+    return this._systemId;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
   }
 
   get order(): number {

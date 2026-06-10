@@ -22,6 +22,8 @@ export * from './dfd-diagram.entity';
 export * from './dfd-node.entity';
 export * from './dfd-flow.entity';
 export * from './information-type.entity';
+export * from './system.entity';
+export * from './constraint.entity';
 export * from './stakeholder.entity';
 export * from './meeting.entity';
 export * from './risk.entity';
