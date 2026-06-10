@@ -29,6 +29,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine } from 'lucide-react';
+import { informationTypeApi, type InformationType } from '@/lib/dfd';
+import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -39,6 +41,8 @@ type TableData = {
   description?: string;
   tags: string[];
   columnsCount?: number;
+  /** 紐づく INPUT/OUTPUT（情報種別）ID。未設定なら null。 */
+  informationTypeId?: string | null;
 };
 
 type DatabaseConnection = {
@@ -65,6 +69,10 @@ export default function ProjectCatalogPage() {
   const projectId = params.projectId as string;
 
   const [tables, setTables] = useState<TableData[]>([]);
+  // INPUT/OUTPUT（情報種別）一覧。テーブルごとの紐付け select で使う。
+  const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
+  // 紐付け保存中のテーブルID（select を一時的に無効化）
+  const [savingLinkId, setSavingLinkId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -141,10 +149,47 @@ export default function ProjectCatalogPage() {
     }
   }, [projectId, getHeaders]);
 
+  // INPUT/OUTPUT（情報種別）一覧を取得
+  const fetchInformationTypes = useCallback(async () => {
+    try {
+      const data = await informationTypeApi.list(projectId);
+      setInformationTypes(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Failed to fetch information types:', err);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchTables();
     fetchDbConnections();
-  }, [fetchTables, fetchDbConnections]);
+    fetchInformationTypes();
+  }, [fetchTables, fetchDbConnections, fetchInformationTypes]);
+
+  // テーブルの INPUT/OUTPUT 紐付けを更新（PUT /tables/:id）。保存後にローカル state を更新。
+  const handleLinkInformationType = useCallback(
+    async (tableId: string, value: string) => {
+      const informationTypeId = value === '__none__' ? null : value;
+      setSavingLinkId(tableId);
+      try {
+        const headers = getHeaders();
+        const res = await fetch(`${API_URL}/api/tables/${tableId}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ informationTypeId }),
+        });
+        if (res.ok) {
+          setTables((prev) =>
+            prev.map((t) => (t.id === tableId ? { ...t, informationTypeId } : t)),
+          );
+        }
+      } catch (err) {
+        console.error('Failed to update table information type:', err);
+      } finally {
+        setSavingLinkId(null);
+      }
+    },
+    [getHeaders],
+  );
 
   // キーボードショートカット
   useKeyboardShortcuts([
@@ -977,6 +1022,28 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
                     {table.columnsCount !== undefined && (
                       <span className="text-xs text-gray-500">{table.columnsCount} カラム</span>
                     )}
+                  </div>
+
+                  {/* INPUT/OUTPUT 紐付け（クリックは Link への遷移を抑止） */}
+                  <div
+                    className="mt-4 pt-3 border-t border-gray-100"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                  >
+                    <Label className="text-xs text-gray-500 flex items-center gap-1 mb-1">
+                      INPUT/OUTPUT 紐付け
+                      <HelpTooltip text="このテーブルが扱うINPUT/OUTPUT（情報種別）を選びます。1つのINPUT/OUTPUTに複数テーブルを紐づけられます。" />
+                    </Label>
+                    <InformationTypePicker
+                      projectId={projectId}
+                      informationTypes={informationTypes}
+                      value={table.informationTypeId ?? null}
+                      onChange={(id) => handleLinkInformationType(table.id, id ?? '__none__')}
+                      onCreated={(created) => setInformationTypes((prev) => [...prev, created])}
+                      disabled={savingLinkId === table.id}
+                    />
                   </div>
                 </CardContent>
               </Card>

@@ -23,10 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Users, Plus, User, Monitor, HelpCircle, Pencil, Trash2, Loader2, ChevronLeft } from 'lucide-react';
+import { Users, Plus, User, Server, HelpCircle, Pencil, Trash2, Loader2, ChevronLeft } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { systemApi, type SystemMaster } from '@/lib/masters';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -37,11 +38,19 @@ type RoleData = {
   description?: string;
   color: string;
   usageCount?: number;
+  /** 紐づくシステムID（type=SYSTEM のとき）。未指定なら null。 */
+  systemId?: string | null;
+};
+
+// システム種別ラベル（周辺／対象）。一覧の表示で利用。
+const systemKindLabel: Record<SystemMaster['kind'], string> = {
+  PERIPHERAL: '周辺',
+  TARGET: '対象',
 };
 
 const roleTypeConfig = {
   HUMAN: { label: '人', icon: User, color: 'text-blue-600' },
-  SYSTEM: { label: 'システム', icon: Monitor, color: 'text-green-600' },
+  SYSTEM: { label: 'システム', icon: Server, color: 'text-green-600' },
   OTHER: { label: 'その他', icon: HelpCircle, color: 'text-yellow-600' },
 };
 
@@ -50,6 +59,8 @@ export default function ProjectRolesPage() {
   const projectId = params.projectId as string;
 
   const [roles, setRoles] = useState<RoleData[]>([]);
+  // 共通マスタのシステム一覧（type=SYSTEM のロールに紐付ける）。
+  const [systems, setSystems] = useState<SystemMaster[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [newRole, setNewRole] = useState({
@@ -57,6 +68,16 @@ export default function ProjectRolesPage() {
     type: 'HUMAN',
     description: '',
     color: '#3B82F6',
+    systemId: '' as string,
+  });
+  // 編集ダイアログ用の状態（対象ロールと編集フォーム）。
+  const [editingRole, setEditingRole] = useState<RoleData | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    type: 'HUMAN',
+    description: '',
+    color: '#3B82F6',
+    systemId: '' as string,
   });
 
   const getHeaders = useCallback(() => {
@@ -82,9 +103,20 @@ export default function ProjectRolesPage() {
     }
   }, [projectId, getHeaders]);
 
+  // 共通マスタのシステム一覧を取得（システム種別ロールの紐付け候補に使う）。
+  const fetchSystems = useCallback(async () => {
+    try {
+      const data = await systemApi.list(projectId);
+      setSystems(data);
+    } catch (err) {
+      console.error('Failed to fetch systems:', err);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     fetchRoles();
-  }, [fetchRoles]);
+    fetchSystems();
+  }, [fetchRoles, fetchSystems]);
 
   const handleCreateRole = async () => {
     if (!newRole.name) return;
@@ -100,15 +132,55 @@ export default function ProjectRolesPage() {
           type: newRole.type,
           description: newRole.description || null,
           color: newRole.color,
+          // システム種別のときだけ紐付けを送る（未選択は null）。
+          systemId: newRole.type === 'SYSTEM' ? newRole.systemId || null : null,
         }),
       });
       if (res.ok) {
         await fetchRoles();
         setIsCreateDialogOpen(false);
-        setNewRole({ name: '', type: 'HUMAN', description: '', color: '#3B82F6' });
+        setNewRole({ name: '', type: 'HUMAN', description: '', color: '#3B82F6', systemId: '' });
       }
     } catch (err) {
       console.error('Failed to create role:', err);
+    }
+  };
+
+  // 編集ダイアログを開き、対象ロールの値をフォームに展開する。
+  const openEditDialog = (role: RoleData) => {
+    setEditingRole(role);
+    setEditForm({
+      name: role.name,
+      type: role.type,
+      description: role.description || '',
+      color: role.color,
+      systemId: role.systemId || '',
+    });
+  };
+
+  const handleUpdateRole = async () => {
+    if (!editingRole || !editForm.name) return;
+
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/roles/${editingRole.id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          name: editForm.name,
+          type: editForm.type,
+          description: editForm.description || null,
+          color: editForm.color,
+          // システム種別のときだけ紐付けを送る（未選択は null で解除）。
+          systemId: editForm.type === 'SYSTEM' ? editForm.systemId || null : null,
+        }),
+      });
+      if (res.ok) {
+        await fetchRoles();
+        setEditingRole(null);
+      }
+    } catch (err) {
+      console.error('Failed to update role:', err);
     }
   };
 
@@ -179,9 +251,10 @@ export default function ProjectRolesPage() {
             <HowToPanel
               steps={[
                 '「ロール追加」を押し、ロール名（例：顧客、受注システム）を入力します。',
-                '種別を 人／システム／その他 から選びます。種別ごとにアイコンと色で区別されます。',
+                '種別を 人／システム／その他 から選びます。種別ごとにアイコン（人＝User／システム＝Server）と色で区別されます。',
+                '種別が「システム」のときは、共通マスタのシステム（周辺／対象）を紐付けられます。',
                 'スイムレーンカラーを選びます。この色は業務フロー図のレーンの色として使われます。',
-                '作成したロールは各カードから編集・削除でき、いくつのフローで使用中かも確認できます。',
+                '作成したロールは各カードの編集ボタンから種別・紐付けシステム・色などを変更でき、削除や使用中フロー数の確認もできます。',
               ]}
               shortcuts={[
                 { keys: 'N', desc: 'ロール追加ダイアログを開く' },
@@ -230,6 +303,30 @@ export default function ProjectRolesPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* システム種別のときだけ、共通マスタのシステムを紐付ける選択を出す。 */}
+              {newRole.type === 'SYSTEM' && (
+                <div className="space-y-2">
+                  <Label className="text-gray-700">紐付けシステム</Label>
+                  <Select
+                    value={newRole.systemId || '__none__'}
+                    onValueChange={(value) =>
+                      setNewRole({ ...newRole, systemId: value === '__none__' ? '' : value })
+                    }
+                  >
+                    <SelectTrigger className="bg-white border-gray-300 text-gray-900">
+                      <SelectValue placeholder="システムを選択" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border-gray-200">
+                      <SelectItem value="__none__" className="text-gray-500">未設定</SelectItem>
+                      {systems.map((sys) => (
+                        <SelectItem key={sys.id} value={sys.id} className="text-gray-700">
+                          {sys.name}（{systemKindLabel[sys.kind]}）
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label className="text-gray-700">説明</Label>
                 <Input
@@ -275,6 +372,10 @@ export default function ProjectRolesPage() {
           {roles.map((role) => {
             const typeConfig = roleTypeConfig[role.type as keyof typeof roleTypeConfig] || roleTypeConfig.OTHER;
             const TypeIcon = typeConfig.icon;
+            // 紐付けシステム（type=SYSTEM のとき表示。周辺／対象も併記）。
+            const linkedSystem = role.systemId
+              ? systems.find((s) => s.id === role.systemId)
+              : undefined;
 
             return (
               <Card key={role.id} className="bg-white border-gray-200">
@@ -297,7 +398,12 @@ export default function ProjectRolesPage() {
                       </div>
                     </div>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-900">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-gray-400 hover:text-gray-900"
+                        onClick={() => openEditDialog(role)}
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
@@ -312,9 +418,23 @@ export default function ProjectRolesPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-gray-500 mb-4">
+                  <p className="text-sm text-gray-500 mb-2">
                     {role.description || '説明なし'}
                   </p>
+                  {/* システム種別ロールの紐付けシステム（周辺／対象を併記）。 */}
+                  {role.type === 'SYSTEM' && (
+                    <div className="flex items-center gap-1.5 mb-4 text-xs">
+                      <Server className="h-3.5 w-3.5 text-green-600" />
+                      {linkedSystem ? (
+                        <span className="text-gray-600">
+                          {linkedSystem.name}
+                          <span className="text-gray-400">（{systemKindLabel[linkedSystem.kind]}システム）</span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">システム未紐付け</span>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
                       <div
@@ -352,6 +472,102 @@ export default function ProjectRolesPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* 編集ダイアログ（種別・紐付けシステム含む） */}
+      <Dialog open={!!editingRole} onOpenChange={(open) => { if (!open) setEditingRole(null); }}>
+        <DialogContent className="bg-white border-gray-200">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">ロール編集</DialogTitle>
+            <DialogDescription className="text-gray-500">
+              ロールの種別やシステム紐付けを変更します
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-gray-700">ロール名</Label>
+              <Input
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="顧客"
+                className="bg-white border-gray-300 text-gray-900"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-gray-700">種別</Label>
+              <Select
+                value={editForm.type}
+                onValueChange={(value) => setEditForm({ ...editForm, type: value })}
+              >
+                <SelectTrigger className="bg-white border-gray-300 text-gray-900">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-white border-gray-200">
+                  <SelectItem value="HUMAN" className="text-gray-700">人</SelectItem>
+                  <SelectItem value="SYSTEM" className="text-gray-700">システム</SelectItem>
+                  <SelectItem value="OTHER" className="text-gray-700">その他</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {/* システム種別のときだけ、共通マスタのシステムを紐付ける選択を出す。 */}
+            {editForm.type === 'SYSTEM' && (
+              <div className="space-y-2">
+                <Label className="text-gray-700">紐付けシステム</Label>
+                <Select
+                  value={editForm.systemId || '__none__'}
+                  onValueChange={(value) =>
+                    setEditForm({ ...editForm, systemId: value === '__none__' ? '' : value })
+                  }
+                >
+                  <SelectTrigger className="bg-white border-gray-300 text-gray-900">
+                    <SelectValue placeholder="システムを選択" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-gray-200">
+                    <SelectItem value="__none__" className="text-gray-500">未設定</SelectItem>
+                    {systems.map((sys) => (
+                      <SelectItem key={sys.id} value={sys.id} className="text-gray-700">
+                        {sys.name}（{systemKindLabel[sys.kind]}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label className="text-gray-700">説明</Label>
+              <Input
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                placeholder="ロールの説明"
+                className="bg-white border-gray-300 text-gray-900"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-gray-700">カラー</Label>
+              <div className="flex gap-2">
+                {colorOptions.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`w-8 h-8 rounded-full border-2 ${
+                      editForm.color === color ? 'border-gray-900' : 'border-transparent'
+                    }`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setEditForm({ ...editForm, color })}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingRole(null)} className="border-gray-300 text-gray-700">
+              キャンセル
+            </Button>
+            <Button className="bg-blue-600 hover:bg-blue-700" onClick={handleUpdateRole}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

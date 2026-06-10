@@ -35,6 +35,9 @@ import {
   ShieldAlert,
   FileSpreadsheet,
   BookOpen,
+  ArrowLeftRight,
+  Server,
+  Lock,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -583,6 +586,16 @@ export default function DashboardLayout({
     const base = `/dashboard/projects/${projectId}`
     return [
       {
+        label: '共通マスタ',
+        items: [
+          { name: '領域', href: `${base}/domains`, icon: Layers },
+          { name: 'INPUT/OUTPUT', href: `${base}/io-types`, icon: ArrowLeftRight },
+          { name: 'システム', href: `${base}/systems`, icon: Server },
+          { name: '制約条件', href: `${base}/constraints`, icon: Lock },
+          { name: 'ロール', href: `${base}/roles`, icon: UserCog },
+        ],
+      },
+      {
         label: '現状把握',
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
@@ -592,19 +605,19 @@ export default function DashboardLayout({
         ],
       },
       {
-        label: '課題・打ち手',
-        items: [
-          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
-          { name: 'GAP', href: `${base}/gap-items`, icon: GitCompare },
-        ],
-      },
-      {
         label: '設計',
         items: [
           { name: 'TOBE管理', href: `${base}/tobe`, icon: Target },
           { name: 'ロードマップ', href: `${base}/roadmap`, icon: MapIcon },
           { name: '要求定義', href: `${base}/requirements`, icon: FileText },
           { name: 'CRUD表', href: `${base}/crud-matrix`, icon: Grid3X3 },
+        ],
+      },
+      {
+        label: '課題・打ち手',
+        items: [
+          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
+          { name: 'GAP', href: `${base}/gap-items`, icon: GitCompare },
         ],
       },
       {
@@ -621,7 +634,6 @@ export default function DashboardLayout({
         label: '設定',
         items: [
           { name: 'マニュアル', href: `${base}/manual`, icon: BookOpen },
-          { name: 'ロール', href: `${base}/roles`, icon: UserCog },
           { name: '設定', href: `${base}/settings`, icon: Settings },
         ],
       },

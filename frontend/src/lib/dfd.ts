@@ -166,6 +166,8 @@ export const INFORMATION_CATEGORY_OPTIONS: ReadonlyArray<{ value: InformationCat
 export interface InformationType {
   id: string;
   projectId: string;
+  /** 所属する領域（サブプロジェクト）ID。未指定なら null。 */
+  subProjectId: string | null;
   name: string;
   category: InformationCategory;
   description: string | null;
@@ -193,12 +195,12 @@ export const informationTypeApi = {
     if (!res.ok) throw new Error('情報種別の取得に失敗しました');
     return res.json();
   },
-  async create(projectId: string, body: { name: string; category?: InformationCategory; description?: string | null; order?: number }): Promise<InformationType> {
+  async create(projectId: string, body: { name: string; category?: InformationCategory; description?: string | null; subProjectId?: string | null; order?: number }): Promise<InformationType> {
     const res = await fetch(`${API_URL}/api/projects/${projectId}/information-types`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('情報種別の作成に失敗しました');
     return res.json();
   },
-  async update(id: string, patch: { name?: string; category?: InformationCategory; description?: string | null; order?: number }): Promise<InformationType> {
+  async update(id: string, patch: { name?: string; category?: InformationCategory; description?: string | null; subProjectId?: string | null; order?: number }): Promise<InformationType> {
     const res = await fetch(`${API_URL}/api/information-types/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
     if (!res.ok) throw new Error('情報種別の更新に失敗しました');
     return res.json();

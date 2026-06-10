@@ -95,16 +95,27 @@ export const projectsApi = {
 }
 
 // Tables
+/** カタログ表（Table）。informationTypeId で情報種別に紐づく。 */
+export interface Table {
+  id: string
+  name: string
+  displayName?: string
+  description?: string
+  /** 紐づく情報種別ID。未指定なら null。 */
+  informationTypeId: string | null
+  [key: string]: any
+}
+
 export const tablesApi = {
-  list: (projectId: string) => api<any[]>(`/tables?projectId=${projectId}`),
-  get: (id: string) => api<any>(`/tables/${id}`),
+  list: (projectId: string) => api<Table[]>(`/tables/project/${projectId}`),
+  get: (id: string) => api<Table>(`/tables/${id}`),
   create: (projectId: string, data: { name: string; displayName?: string; description?: string; tags?: string[] }) =>
-    api<any>(`/tables?projectId=${projectId}`, {
+    api<Table>(`/tables`, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ projectId, ...data }),
     }),
-  update: (id: string, data: any) =>
-    api<any>(`/tables/${id}`, {
+  update: (id: string, data: { name?: string; displayName?: string; description?: string; tags?: string[]; informationTypeId?: string | null; [key: string]: any }) =>
+    api<Table>(`/tables/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
@@ -129,16 +140,56 @@ export const columnsApi = {
 }
 
 // Roles
+/** ロール種別: 人 / システム / その他。 */
+export type RoleType = 'HUMAN' | 'SYSTEM' | 'OTHER'
+
+/** ロール（Role）。type=SYSTEM のときは systemId でシステムマスタに紐づく。 */
+export interface Role {
+  id: string
+  projectId: string
+  name: string
+  type: RoleType
+  /** 紐づくシステムID（type=SYSTEM のとき）。未指定なら null。 */
+  systemId: string | null
+  /** 所属する領域（サブプロジェクト）ID。未指定なら null。 */
+  subProjectId: string | null
+  description?: string | null
+  color?: string | null
+  order?: number
+  [key: string]: any
+}
+
 export const rolesApi = {
-  list: (projectId: string) => api<any[]>(`/roles?projectId=${projectId}`),
-  get: (id: string) => api<any>(`/roles/${id}`),
-  create: (projectId: string, data: { name: string; type: string; description?: string; color?: string }) =>
-    api<any>(`/roles?projectId=${projectId}`, {
+  list: (projectId: string) => api<Role[]>(`/roles?projectId=${projectId}`),
+  get: (id: string) => api<Role>(`/roles/${id}`),
+  create: (
+    projectId: string,
+    data: {
+      name: string
+      type?: RoleType
+      description?: string
+      color?: string
+      systemId?: string | null
+      subProjectId?: string | null
+    },
+  ) =>
+    api<Role>(`/roles?projectId=${projectId}`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  update: (id: string, data: any) =>
-    api<any>(`/roles/${id}`, {
+  update: (
+    id: string,
+    data: {
+      name?: string
+      type?: RoleType
+      description?: string
+      color?: string
+      systemId?: string | null
+      subProjectId?: string | null
+      [key: string]: any
+    },
+  ) =>
+    api<Role>(`/roles/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
