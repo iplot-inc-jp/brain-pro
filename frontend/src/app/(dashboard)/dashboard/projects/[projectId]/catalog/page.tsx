@@ -28,41 +28,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine, BookMarked, Truck, Package, BarChart3, type LucideIcon } from 'lucide-react';
-import {
-  SupplierTable,
-  ProductTable,
-  DemandDataTable,
-} from '@/components/records/catalog-master-tables';
-import type { Supplier } from '@/lib/catalog-masters';
+import { Database, Plus, Search, Table as TableIcon, Loader2, ChevronLeft, Upload, Download, FileText, Check, AlertCircle, Sparkles, Server, Trash2, ScanLine } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
-
-// 現状把握「発注計画ツール」由来の参考マスタ（destination=catalog）。
-// JSON 保存の RecordSheet を廃し、Supplier / Product / DemandData の専用テーブル
-// （de-JSON 化 No.3）を直接読み書きする 3 つの表エディタに置き換えた。
-type ReferenceMasterKey = 'suppliers' | 'products' | 'demand-data';
-
-const REFERENCE_MASTERS: { key: ReferenceMasterKey; label: string; description: string; icon: LucideIcon }[] = [
-  {
-    key: 'suppliers',
-    label: '仕入先',
-    description: '仕入先（サプライヤー）の一覧。担当営業・リードタイムなどを記録します。',
-    icon: Truck,
-  },
-  {
-    key: 'products',
-    label: '商品',
-    description: '商品ごとの最小ロット・単価・仕入先（仕入先マスタから選択 or 手入力）を記録します。',
-    icon: Package,
-  },
-  {
-    key: 'demand-data',
-    label: '過去需要',
-    description: '商品×期間の過去需要数。発注量計算のINPUTとして参照します。',
-    icon: BarChart3,
-  },
-];
 
 type TableData = {
   id: string;
@@ -95,14 +63,6 @@ type IntrospectResult = {
 export default function ProjectCatalogPage() {
   const params = useParams();
   const projectId = params.projectId as string;
-
-  // データカタログ本体 / 参考マスタ の切替
-  const [topTab, setTopTab] = useState<'catalog' | 'reference'>('catalog');
-  const [activeMaster, setActiveMaster] = useState<ReferenceMasterKey>(
-    REFERENCE_MASTERS[0]?.key ?? 'suppliers',
-  );
-  // 商品エディタの仕入先 SELECT 用に仕入先一覧を共有する
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   const [tables, setTables] = useState<TableData[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -778,36 +738,8 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
         </div>
       </div>
 
-      {/* トップレベルタブ: データカタログ本体 / 参考マスタ */}
-      <div className="flex flex-wrap gap-1 border-b border-gray-200">
-        <button
-          type="button"
-          onClick={() => setTopTab('catalog')}
-          className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-            topTab === 'catalog'
-              ? 'border-blue-600 text-blue-700 bg-blue-50'
-              : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
-          }`}
-        >
-          <Database className="h-4 w-4" />
-          データカタログ
-        </button>
-        <button
-          type="button"
-          onClick={() => setTopTab('reference')}
-          className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-            topTab === 'reference'
-              ? 'border-blue-600 text-blue-700 bg-blue-50'
-              : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
-          }`}
-        >
-          <BookMarked className="h-4 w-4" />
-          参考マスタ
-        </button>
-      </div>
-
       {/* ── データカタログ本体（DB直結 / スキーマ貼付 / 手動テーブル）── */}
-      <div className={topTab === 'catalog' ? 'space-y-6' : 'hidden'}>
+      <div className="space-y-6">
       {/* 取り込みの説明 */}
       <div className="flex items-start gap-2 p-3 bg-violet-50 border border-violet-200 rounded-lg">
         <Sparkles className="h-5 w-5 text-violet-600 mt-0.5 shrink-0" />
@@ -1073,55 +1005,6 @@ users,email,メールアドレス,STRING,メールアドレス,false,false,false
           </CardContent>
         </Card>
       )}
-      </div>
-
-      {/* ── 参考マスタ（仕入先 / 商品 / 過去需要：専用テーブルAPI）── */}
-      <div className={topTab === 'reference' ? 'space-y-6' : 'hidden'}>
-        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <BookMarked className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-          <p className="text-sm text-amber-800">
-            現状把握（発注計画ツール）で扱う参照マスタです。仕入先・商品（最小ロット/単価）・過去需要データを表として記録し、ASIS/TOBE業務フローや発注量計算のINPUTとして参照します。各行は「保存」アイコンで個別に保存されます。
-          </p>
-        </div>
-
-        {/* 参考マスタ内タブ */}
-        <div className="flex flex-wrap gap-1 border-b border-gray-200">
-          {REFERENCE_MASTERS.map((m) => {
-            const Icon = m.icon;
-            const isActive = activeMaster === m.key;
-            return (
-              <button
-                key={m.key}
-                type="button"
-                onClick={() => setActiveMaster(m.key)}
-                className={`-mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'border-amber-500 text-amber-700 bg-amber-50'
-                    : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {REFERENCE_MASTERS.map((m) => (
-          <div
-            key={m.key}
-            className={activeMaster === m.key ? 'space-y-2' : 'hidden'}
-          >
-            <p className="text-sm text-gray-500">{m.description}</p>
-            {m.key === 'suppliers' && (
-              <SupplierTable projectId={projectId} onSuppliersChange={setSuppliers} />
-            )}
-            {m.key === 'products' && (
-              <ProductTable projectId={projectId} suppliers={suppliers} />
-            )}
-            {m.key === 'demand-data' && <DemandDataTable projectId={projectId} />}
-          </div>
-        ))}
       </div>
     </div>
   );
