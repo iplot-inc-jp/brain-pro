@@ -123,24 +123,19 @@ export class UpdateTaskUseCase {
 
     await this.taskRepository.save(task);
 
-    // 親タスクの期間ロールアップ（親は子の最小開始日・最大期日に合わせる）
+    // 親タスクの期間ロールアップ（親は子の最小開始日・最大期日に合わせる）。
+    // 方針: 「子を変えた時だけ」親を自動更新する。親自身を直接動かした場合は
+    // その編集をそのまま反映し、子範囲へ揃え直さない（ユーザ要望）。
     const datesChanged =
       !isSameDate(oldStartDate, task.startDate) ||
       !isSameDate(oldDueDate, task.dueDate);
     const parentChanged = oldParentId !== task.parentId;
     if (datesChanged || parentChanged) {
-      // 自身が親（子を持つ）の場合、手編集された日付を子範囲へ揃え直す
-      const children = await this.taskRepository.findChildrenByParentId(
-        task.id,
-      );
-      if (children.length > 0) {
-        await rollupAncestorDates(this.taskRepository, task.id);
-      }
       // 親付け替え時は旧親側も再計算
       if (parentChanged) {
         await rollupAncestorDates(this.taskRepository, oldParentId);
       }
-      // 新親（変わっていなければ現在の親）を再計算
+      // このタスクを「子」として、その親（変わっていなければ現在の親）を再計算
       await rollupAncestorDates(this.taskRepository, task.parentId);
     }
 
