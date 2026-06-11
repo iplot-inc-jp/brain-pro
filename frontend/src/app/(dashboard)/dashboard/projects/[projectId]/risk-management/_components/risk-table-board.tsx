@@ -4,8 +4,13 @@
  * リスクマネジメント ボード（PMBOK準拠）。
  *
  * - 上部: 確率×影響 5×5 ヒートマップ（脅威のみ集計・セルクリックで絞り込み）。
- * - 一覧: 種別(RBS)/領域/オーナー/脅威・好機/スコア(P×I)/戦略/ライフサイクル ＋
- *   従来列（区分・原因区分・対応策・期限など）をそのまま残した拡張テーブル。
+ * - 一覧: 主要列に絞った見やすいテーブル。従来項目（区分・原因区分・対応策・
+ *   期限・担当）を色付きバッジで目立たせる：
+ *   区分(リスク=rose/ボトルネック=amber)・事象内容・種別(RBS)・原因区分(小バッジ)・
+ *   スコア(P×I)・期限(超過=赤/7日以内=amber)・担当(名前バッジ)・対応策(truncate)・
+ *   ライフサイクル。
+ *   残りの項目（領域・オーナー・戦略・対応MTG・ステータス・備考など）は
+ *   行クリックの全項目編集モーダルで扱う。
  * - 行クリック → 全項目編集モーダル（RiskCategory/SubProject/Stakeholder/Meeting の
  *   各 select、確率・影響 1-5、脅威/好機トグルで戦略選択肢切替、対応タスク作成）。
  * - 下部: 種別管理（RBSカテゴリの追加・改名・削除。RoadmapPhase 編集UIの作法）。
@@ -25,6 +30,8 @@ import {
   ClipboardList,
   ExternalLink,
   FilterX,
+  AlertTriangle,
+  CalendarClock,
 } from 'lucide-react';
 import {
   LEVELS,
@@ -32,7 +39,6 @@ import {
   CAUSE_CATEGORIES,
   NEEDS_MTG_OPTIONS,
   STATUS_OPTIONS,
-  pickLevel,
   countByPriority,
   suggestPriority,
   listRisks,
@@ -185,7 +191,7 @@ function draftToInput(d: Draft): RiskInput {
   };
 }
 
-// 従来項目（編集モーダルの折りたたみセクションに表示する）。
+// 従来項目（編集モーダルの従来項目セクションに表示する）。
 type FieldKind = 'text' | 'multiline' | 'type' | 'cause' | 'level' | 'mtg' | 'status';
 const LEGACY_FIELDS: { key: keyof Draft; label: string; kind: FieldKind }[] = [
   { key: 'type', label: '区分（リスク/ボトルネック）', kind: 'type' },
@@ -203,23 +209,81 @@ const LEGACY_FIELDS: { key: keyof Draft; label: string; kind: FieldKind }[] = [
 ];
 
 // 一覧テーブルの列数（空状態行の colSpan 用）。
-// # + PMBOK列（事象内容/種別/領域/オーナー/脅威・好機/スコア/戦略/ライフサイクル）
-// + 従来列（LEGACY_FIELDS と同数）+ 操作列。PMBOK列を増減したらここも更新する。
-const PMBOK_COLUMN_COUNT = 8;
-const TABLE_COLUMN_COUNT = 1 + PMBOK_COLUMN_COUNT + LEGACY_FIELDS.length + 1;
+// # + 主要列（区分/事象内容/種別/原因区分/スコア/期限/担当/対応策/ライフサイクル）
+// + 操作列。列を増減したらここも更新する。
+const TABLE_COLUMN_COUNT = 11;
 
-/** 高/中/低 → セルの色（従来列）。 */
-function levelClasses(level: string | null): string {
-  switch (pickLevel(level)) {
-    case '高':
-      return 'border-red-200 bg-red-50 text-red-700';
-    case '中':
-      return 'border-amber-200 bg-amber-50 text-amber-700';
-    case '低':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+/** 区分（従来: リスク/ボトルネック）バッジの色。リスク=rose / ボトルネック=amber。 */
+function legacyTypeBadgeClasses(raw: string | null): string {
+  switch ((raw ?? '').trim()) {
+    case 'リスク':
+      return 'border-rose-300 bg-rose-50 text-rose-700';
+    case 'ボトルネック':
+      return 'border-amber-300 bg-amber-50 text-amber-800';
     default:
-      return 'border-gray-200 bg-gray-50 text-gray-500';
+      return 'border-gray-200 bg-gray-50 text-gray-600';
   }
+}
+
+/**
+ * 期限（自由記入）を日付として解釈する。対応形式:
+ * YYYY/M/D・YYYY-M-D・YYYY.M.D・YYYY年M月D日・M/D（年なしは今年と解釈）。
+ * 解釈できなければ null（プレーン表示にフォールバック）。
+ */
+function parseDeadline(raw: string | null | undefined): Date | null {
+  const s = (raw ?? '').trim();
+  if (!s) return null;
+  const ymd = s.match(/^(\d{4})[/\-.年](\d{1,2})[/\-.月](\d{1,2})日?/);
+  if (ymd) {
+    return buildLocalDate(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+  }
+  // 年なし M/D。「6/15まで」のような後続テキストも許容（YYYY形式と同じ寛容さ）。
+  const md = s.match(/^(\d{1,2})[/\-.月](\d{1,2})日?(?=\D|$)/);
+  if (md) {
+    const year = new Date().getFullYear();
+    const date = buildLocalDate(year, Number(md[1]), Number(md[2]));
+    if (!date) return null;
+    // 年境界の救済: 半年以上過去なら来年の日付と解釈する
+    // （例: 12月に「1/15」と書いたものを今年扱いにして誤超過にしない）。
+    const today = new Date();
+    const diffDays = (date.getTime() - today.getTime()) / 86_400_000;
+    if (diffDays < -183) {
+      return buildLocalDate(year + 1, Number(md[1]), Number(md[2]));
+    }
+    return date;
+  }
+  return null;
+}
+
+function buildLocalDate(y: number, m: number, d: number): Date | null {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const date = new Date(y, m - 1, d);
+  if (Number.isNaN(date.getTime())) return null;
+  // 2/31 のような存在しない日付が Date のロールオーバーで別日に化けるのを弾く
+  if (
+    date.getFullYear() !== y ||
+    date.getMonth() !== m - 1 ||
+    date.getDate() !== d
+  ) {
+    return null;
+  }
+  return date;
+}
+
+type DeadlineUrgency = 'overdue' | 'soon' | 'normal';
+
+/** 期限の緊急度: 超過=overdue / 7日以内=soon / それ以外=normal。読めなければ null。 */
+function deadlineUrgency(
+  raw: string | null | undefined,
+  now: Date = new Date(),
+): DeadlineUrgency | null {
+  const d = parseDeadline(raw);
+  if (!d) return null;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diffDays < 0) return 'overdue';
+  if (diffDays <= 7) return 'soon';
+  return 'normal';
 }
 
 /** 脅威/好機バッジの色。 */
@@ -293,7 +357,8 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // フィルタ（種別・領域・オーナー・ライフサイクル・脅威/好機）。
+  // フィルタ（区分・種別・領域・オーナー・ライフサイクル・脅威/好機）。
+  const [filterType, setFilterType] = useState('');
   const [filterRiskType, setFilterRiskType] = useState<'' | RiskType>('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterSubProject, setFilterSubProject] = useState('');
@@ -308,6 +373,8 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(riskToDraft(null));
+  // 従来項目セクション（既定で開く。ユーザーの開閉操作を再レンダー間で保持する）。
+  const [legacyOpen, setLegacyOpen] = useState(true);
 
   // 対応タスク作成。
   const [creatingTask, setCreatingTask] = useState(false);
@@ -337,6 +404,12 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
   // select フィルタ適用後の集合（ヒートマップはこの集合から集計する）。
   const filtered = useMemo(() => {
     return risks.filter((r) => {
+      if (filterType) {
+        const t = (r.type ?? '').trim();
+        if (filterType === NONE ? t !== '' : t !== filterType) {
+          return false;
+        }
+      }
       if (filterRiskType && normalizeRiskType(r.riskType) !== filterRiskType) {
         return false;
       }
@@ -360,7 +433,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
       }
       return true;
     });
-  }, [risks, filterRiskType, filterCategory, filterSubProject, filterOwner, filterLifecycle]);
+  }, [risks, filterType, filterRiskType, filterCategory, filterSubProject, filterOwner, filterLifecycle]);
 
   const heatCounts = useMemo(() => countHeatmapCells(filtered), [filtered]);
 
@@ -376,6 +449,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
   }, [filtered, cellFilter]);
 
   const hasFilter =
+    !!filterType ||
     !!filterRiskType ||
     !!filterCategory ||
     !!filterSubProject ||
@@ -384,6 +458,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
     !!cellFilter;
 
   const clearFilters = () => {
+    setFilterType('');
     setFilterRiskType('');
     setFilterCategory('');
     setFilterSubProject('');
@@ -401,6 +476,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
     setDraft(riskToDraft(byId.get(id) ?? null));
     setActionError(null);
     setCreatedTaskId(null);
+    setLegacyOpen(true);
     setModalOpen(true);
   };
 
@@ -409,6 +485,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
     setDraft(riskToDraft(null));
     setActionError(null);
     setCreatedTaskId(null);
+    setLegacyOpen(true);
     setModalOpen(true);
   };
 
@@ -659,6 +736,15 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
       {/* フィルタ */}
       <div className="flex flex-wrap items-end gap-2">
         <FilterSelect
+          label="区分"
+          value={filterType}
+          onChange={setFilterType}
+          options={[
+            { value: NONE, label: '（未設定）' },
+            ...RISK_TYPES.map((t) => ({ value: t, label: t })),
+          ]}
+        />
+        <FilterSelect
           label="脅威/好機"
           value={filterRiskType}
           onChange={(v) => setFilterRiskType(v as '' | RiskType)}
@@ -749,38 +835,32 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                   <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                     #
                   </th>
-                  <Th className="min-w-[220px]">事象内容</Th>
-                  <Th>種別</Th>
-                  <Th>領域</Th>
-                  <Th>オーナー</Th>
-                  <Th>脅威/好機</Th>
-                  <Th>スコア(P×I)</Th>
-                  <Th>戦略</Th>
-                  <Th>ライフサイクル</Th>
                   <Th>区分</Th>
+                  <Th className="min-w-[240px]">事象内容</Th>
+                  <Th>種別</Th>
                   <Th>原因区分</Th>
-                  <Th>発生確率(旧)</Th>
-                  <Th>影響度(旧)</Th>
-                  <Th>優先度</Th>
-                  <Th className="min-w-[150px]">対応策</Th>
-                  <Th>対応MTG</Th>
-                  <Th>MTG設定日</Th>
+                  <Th>スコア(P×I)</Th>
                   <Th>期限</Th>
                   <Th>担当</Th>
-                  <Th>ステータス</Th>
-                  <Th className="min-w-[120px]">備考</Th>
+                  <Th className="min-w-[180px]">対応策</Th>
+                  <Th>ライフサイクル</Th>
                   <th className="w-12 px-2 py-2" aria-label="操作" />
                 </tr>
               </thead>
               <tbody>
                 {visibleRisks.map((r, idx) => {
                   const cat = r.categoryId ? categoryById.get(r.categoryId) : undefined;
-                  const sub = r.subProjectId ? subProjectById.get(r.subProjectId) : undefined;
                   const ownerSh = r.ownerStakeholderId
                     ? stakeholderById.get(r.ownerStakeholderId)
                     : undefined;
                   const score = riskScore(r.probabilityScore, r.impactScore);
                   const lc = lifecycleMeta(r.lifecycle ?? 'IDENTIFIED');
+                  const isOpportunity =
+                    normalizeRiskType(r.riskType) === 'OPPORTUNITY';
+                  const legacyType = (r.type ?? '').trim();
+                  // 担当: 従来の自由記入を優先し、未記入なら PMBOK のリスクオーナー名。
+                  const legacyOwner = (r.owner ?? '').trim();
+                  const ownerLabel = legacyOwner || ownerSh?.name || '';
                   return (
                     <tr
                       key={r.id}
@@ -791,10 +871,29 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                       <td className="px-2 py-2 align-middle text-xs text-gray-400">
                         {idx + 1}
                       </td>
-                      {/* 事象内容 */}
-                      <td className="max-w-[280px] px-3 py-2 align-middle text-gray-900">
+                      {/* 区分（リスク=rose / ボトルネック=amber） */}
+                      <td className="px-3 py-2 align-middle">
+                        {legacyType ? (
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${legacyTypeBadgeClasses(r.type)}`}
+                          >
+                            {legacyType}
+                          </span>
+                        ) : (
+                          <Dash />
+                        )}
+                      </td>
+                      {/* 事象内容（好機のみ補助バッジ） */}
+                      <td className="max-w-[320px] px-3 py-2 align-middle text-gray-900">
                         {r.event ? (
                           <span className="line-clamp-2 whitespace-pre-wrap break-words font-medium">
+                            {isOpportunity && (
+                              <span
+                                className={`mr-1.5 inline-flex rounded-full border px-1.5 py-0 align-middle text-[10px] font-medium ${riskTypeBadgeClasses(r.riskType)}`}
+                              >
+                                {riskTypeLabel(r.riskType)}
+                              </span>
+                            )}
                             {r.event}
                           </span>
                         ) : (
@@ -804,69 +903,75 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                       {/* 種別（RBSカテゴリ） */}
                       <td className="px-3 py-2 align-middle">
                         {cat ? (
-                          <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">
+                          <span className="inline-flex whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">
                             {cat.name}
                           </span>
                         ) : (
                           <Dash />
                         )}
                       </td>
-                      {/* 領域 */}
-                      <td className="px-3 py-2 align-middle text-gray-700">
-                        {sub?.name ?? <Dash />}
-                      </td>
-                      {/* オーナー */}
-                      <td className="px-3 py-2 align-middle text-gray-700">
-                        {ownerSh?.name ?? <Dash />}
-                      </td>
-                      {/* 脅威/好機 */}
+                      {/* 原因区分（小バッジ） */}
                       <td className="px-3 py-2 align-middle">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${riskTypeBadgeClasses(r.riskType)}`}
-                        >
-                          {riskTypeLabel(r.riskType)}
-                        </span>
+                        {r.causeCategory ? (
+                          <span className="inline-flex whitespace-nowrap rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">
+                            {r.causeCategory}
+                          </span>
+                        ) : (
+                          <Dash />
+                        )}
                       </td>
                       {/* スコア（P×I 自動計算バッジ） */}
                       <td className="px-3 py-2 align-middle">
                         {score != null ? (
                           <span
                             className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-bold tabular-nums ${scoreBandBadgeClasses[scoreBand(score)]}`}
-                            title={`確率${pickScore(r.probabilityScore)} × 影響${pickScore(r.impactScore)}`}
+                            title={`${riskTypeLabel(r.riskType)} / 確率${pickScore(r.probabilityScore)} × 影響${pickScore(r.impactScore)}`}
                           >
                             {pickScore(r.probabilityScore)}×{pickScore(r.impactScore)}={score}
                           </span>
                         ) : (
-                          <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-400">
+                          <span className="inline-flex whitespace-nowrap rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-400">
                             未評価
                           </span>
                         )}
                       </td>
-                      {/* 戦略 */}
-                      <td className="px-3 py-2 align-middle text-gray-700">
-                        {r.strategy ?? <Dash />}
+                      {/* 期限（超過=赤 / 7日以内=amber） */}
+                      <DeadlineCell value={r.deadline} />
+                      {/* 担当（名前バッジ） */}
+                      <td className="px-3 py-2 align-middle">
+                        {ownerLabel ? (
+                          <span
+                            className="inline-flex max-w-[140px] rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800"
+                            title={
+                              ownerSh && legacyOwner && ownerSh.name !== legacyOwner
+                                ? `担当: ${legacyOwner} / リスクオーナー: ${ownerSh.name}`
+                                : ownerLabel
+                            }
+                          >
+                            <span className="truncate">{ownerLabel}</span>
+                          </span>
+                        ) : (
+                          <Dash />
+                        )}
+                      </td>
+                      {/* 対応策（truncate＋title） */}
+                      <td className="max-w-[260px] px-3 py-2 align-middle text-gray-700">
+                        {r.countermeasure ? (
+                          <span className="block truncate" title={r.countermeasure}>
+                            {r.countermeasure}
+                          </span>
+                        ) : (
+                          <Dash />
+                        )}
                       </td>
                       {/* ライフサイクル */}
                       <td className="px-3 py-2 align-middle">
                         <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${lc.chip}`}
+                          className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${lc.chip}`}
                         >
                           {lc.label}
                         </span>
                       </td>
-                      {/* 従来列 */}
-                      <LegacyCell value={r.type} />
-                      <LegacyCell value={r.causeCategory} />
-                      <LevelCell value={r.probability} />
-                      <LevelCell value={r.impact} />
-                      <LevelCell value={r.priority} />
-                      <LegacyCell value={r.countermeasure} clamp />
-                      <LegacyCell value={r.needsMtg} />
-                      <LegacyCell value={r.mtgDate} />
-                      <LegacyCell value={r.deadline} />
-                      <LegacyCell value={r.owner} />
-                      <LegacyCell value={r.status} />
-                      <LegacyCell value={r.note} clamp />
                       <td
                         className="px-2 py-2 text-center align-middle"
                         onClick={(e) => e.stopPropagation()}
@@ -899,6 +1004,10 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
               </tbody>
             </table>
           </div>
+          <p className="border-t border-gray-100 px-4 py-2 text-[11px] text-gray-400">
+            行クリックで全項目（領域・オーナー・戦略・発生確率/影響度（旧）・優先度・
+            対応MTG・ステータス・備考など）を表示・編集できます。
+          </p>
         </CardContent>
       </Card>
 
@@ -1248,9 +1357,13 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                 )}
               </div>
 
-              {/* 従来項目（折りたたみ） */}
-              <details className="rounded-lg border border-gray-200 p-3">
-                <summary className="cursor-pointer text-[11px] font-semibold text-gray-500">
+              {/* 従来項目（既定で展開。クリックで折りたたみ可能） */}
+              <details
+                open={legacyOpen}
+                onToggle={(e) => setLegacyOpen(e.currentTarget.open)}
+                className="rounded-lg border border-gray-200 p-3"
+              >
+                <summary className="cursor-pointer text-xs font-semibold text-gray-700">
                   従来項目（区分・原因区分・対応策・期限・担当など）
                 </summary>
                 <div className="mt-3 space-y-3">
@@ -1495,42 +1608,46 @@ function Dash() {
   return <span className="text-gray-300">—</span>;
 }
 
-function LegacyCell({
-  value,
-  clamp = false,
-}: {
-  value: string | null;
-  clamp?: boolean;
-}) {
-  return (
-    <td className="max-w-[220px] px-3 py-2 align-middle text-gray-700">
-      {value ? (
-        clamp ? (
-          <span className="line-clamp-2 whitespace-pre-wrap break-words">
-            {value}
-          </span>
-        ) : (
-          <span className="whitespace-nowrap">{value}</span>
-        )
-      ) : (
+/** 期限セル。超過=赤バッジ / 7日以内=amberバッジ / それ以外はプレーン表示。 */
+function DeadlineCell({ value }: { value: string | null }) {
+  const v = (value ?? '').trim();
+  if (!v) {
+    return (
+      <td className="px-3 py-2 align-middle">
         <Dash />
-      )}
-    </td>
-  );
-}
-
-function LevelCell({ value }: { value: string | null }) {
-  return (
-    <td className="px-3 py-2 align-middle">
-      {value ? (
+      </td>
+    );
+  }
+  const urgency = deadlineUrgency(v);
+  if (urgency === 'overdue') {
+    return (
+      <td className="px-3 py-2 align-middle">
         <span
-          className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${levelClasses(value)}`}
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-red-300 bg-red-50 px-2 py-0.5 text-xs font-bold text-red-700"
+          title="期限超過"
         >
-          {value}
+          <AlertTriangle className="h-3 w-3" />
+          {v}
         </span>
-      ) : (
-        <Dash />
-      )}
+      </td>
+    );
+  }
+  if (urgency === 'soon') {
+    return (
+      <td className="px-3 py-2 align-middle">
+        <span
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800"
+          title="期限まで7日以内"
+        >
+          <CalendarClock className="h-3 w-3" />
+          {v}
+        </span>
+      </td>
+    );
+  }
+  return (
+    <td className="whitespace-nowrap px-3 py-2 align-middle text-gray-700">
+      {v}
     </td>
   );
 }
