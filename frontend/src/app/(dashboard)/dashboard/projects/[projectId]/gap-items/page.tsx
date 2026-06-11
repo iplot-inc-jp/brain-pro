@@ -268,6 +268,13 @@ export default function GapItemsPage() {
     patchItem(item.id, { asisFlowId: next });
   };
 
+  // TOBEセル: 行の tobeFlowId を既存TOBEフローから選択して PUT 更新（ASISと対称）
+  const handleTobeFlowSelect = (item: GapItem, value: string) => {
+    const next = value === NONE ? null : value;
+    if ((item.tobeFlowId ?? null) === next) return;
+    patchItem(item.id, { tobeFlowId: next });
+  };
+
   // 対象業務フロー選択（フロー名を businessArea に入れる）
   const handleTargetFlowChange = (value: string) => {
     if (value === NONE) {
@@ -736,17 +743,24 @@ export default function GapItemsPage() {
                             </SelectContent>
                           </Select>
                         </td>
-                        {/* TOBE */}
+                        {/* TOBE: 既存TOBEフローから選択 */}
                         <td className="px-3 py-2 align-top">
-                          <textarea
-                            defaultValue={item.tobeDescription ?? ''}
-                            placeholder="あるべき姿（例: 自動受注で1件1分）"
-                            onBlur={(e) =>
-                              handleCellBlur(item, 'tobeDescription', e.target.value)
-                            }
-                            rows={2}
-                            className="w-full resize-none bg-transparent text-gray-700 outline-none focus:bg-white focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 placeholder:text-gray-300"
-                          />
+                          <Select
+                            value={item.tobeFlowId ?? NONE}
+                            onValueChange={(v) => handleTobeFlowSelect(item, v)}
+                          >
+                            <SelectTrigger className="h-8 bg-white border-gray-300 text-xs text-gray-700">
+                              <SelectValue placeholder="TOBEフローを選択" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white">
+                              <SelectItem value={NONE}>（未設定）</SelectItem>
+                              {tobeFlowOptions.map((f) => (
+                                <SelectItem key={f.id} value={f.id}>
+                                  {f.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </td>
                         {/* GAP: 既存の値から選択 or 自由入力できるコンボボックス */}
                         <td className="px-3 py-2 align-top bg-amber-50/40">

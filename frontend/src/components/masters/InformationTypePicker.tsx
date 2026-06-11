@@ -40,10 +40,17 @@ interface InformationTypePickerProps {
   projectId: string;
   /** 表示候補（呼び出し側が保持する一覧） */
   informationTypes: InformationType[];
-  /** 選択中の InformationType ID（未設定は null） */
+  /**
+   * 選択中の値。
+   * - valueMode='id'（既定）: InformationType の ID（未設定は null）
+   * - valueMode='name': InformationType の「名前」（未設定は null）
+   */
   value: string | null;
-  /** 選択変更（未設定選択時は null） */
-  onChange: (id: string | null) => void;
+  /**
+   * 選択変更（未設定選択時は null）。
+   * valueMode に応じて ID（既定）または名前を渡す。
+   */
+  onChange: (value: string | null) => void;
   /** 新規作成された InformationType（呼び出し側で一覧へ反映する） */
   onCreated?: (created: InformationType) => void;
   disabled?: boolean;
@@ -51,6 +58,13 @@ interface InformationTypePickerProps {
   allowNone?: boolean;
   noneLabel?: string;
   triggerClassName?: string;
+  /**
+   * value/onChange で扱う値の種別（既定 'id'）。
+   * - 'id': 従来動作（InformationType の ID で選択・新規作成時も ID を返す）
+   * - 'name': InformationType の「名前」で選択（FlowDefinition.input/output 等テキスト列向け）。
+   *   新規追加時は作成した種別の name を onChange する。
+   */
+  valueMode?: 'id' | 'name';
 }
 
 export function InformationTypePicker({
@@ -63,6 +77,7 @@ export function InformationTypePicker({
   allowNone = true,
   noneLabel = '— 未設定 —',
   triggerClassName = 'h-8 bg-white border-gray-300 text-gray-900 text-sm',
+  valueMode = 'id',
 }: InformationTypePickerProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -91,7 +106,7 @@ export function InformationTypePicker({
         category,
       });
       onCreated?.(created);
-      onChange(created.id);
+      onChange(valueMode === 'name' ? created.name : created.id);
       setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'INPUT/OUTPUT の作成に失敗しました');
@@ -99,6 +114,22 @@ export function InformationTypePicker({
       setSaving(false);
     }
   };
+
+  // valueMode='name' のとき select の option 値は種別「名前」を使う。
+  // 既存のフリーテキスト値が一覧に無い場合でも選択表示が消えないよう、補助 option を足す。
+  const byName = valueMode === 'name';
+  const optionValueOf = (it: InformationType) => (byName ? it.name : it.id);
+  // name-mode では option 値が「名前」になるため、同名種別が複数あると Radix の
+  // value が衝突して選択が曖昧になる。名前単位で先勝ちで一意化する（id-mode は id で一意なのでそのまま）。
+  const optionItems = byName
+    ? informationTypes.filter(
+        (it, i) =>
+          informationTypes.findIndex((o) => o.name === it.name) === i,
+      )
+    : informationTypes;
+  const currentInList =
+    value == null ||
+    optionItems.some((it) => optionValueOf(it) === value);
 
   return (
     <div className="flex items-center gap-1">
@@ -112,8 +143,13 @@ export function InformationTypePicker({
         </SelectTrigger>
         <SelectContent className="bg-white">
           {allowNone && <SelectItem value={NONE}>{noneLabel}</SelectItem>}
-          {informationTypes.map((it) => (
-            <SelectItem key={it.id} value={it.id}>
+          {/* 一覧に無い既存値（マスタ未登録の自由入力名など）も選択肢として残す。
+              Radix Select は value="" を許可しないため、空文字は補助 option を出さない。 */}
+          {!currentInList && value && (
+            <SelectItem value={value}>{value}</SelectItem>
+          )}
+          {optionItems.map((it) => (
+            <SelectItem key={it.id} value={optionValueOf(it)}>
               {it.name}（{INFORMATION_CATEGORY_LABELS[it.category]}）
             </SelectItem>
           ))}

@@ -54,6 +54,14 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
 import {
@@ -350,16 +358,18 @@ function DfdPanel({
 // ===========================================
 
 // 単一行テキスト項目（input で編集）
+// INPUT/OUTPUT は情報種別マスタからの選択式、次工程はロール選択式に置き換えるため、
+// この汎用リストからは外し、パネル内で個別レンダリングする。
 const DEF_INPUT_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?: string }[] = [
   { key: 'purpose', label: '目的（なぜ必要か）' },
   { key: 'owner', label: '担当（主担当）' },
-  { key: 'input', label: 'INPUT（何を受け取るか）' },
   { key: 'trigger', label: 'トリガー（いつ始まるか）' },
-  { key: 'output', label: 'OUTPUT（何を渡すか）' },
-  { key: 'nextProcess', label: '次工程（誰の何へ渡すか）' },
   { key: 'frequency', label: '頻度' },
   { key: 'system', label: '使用システム' },
 ];
+
+// 次工程ロール select の「未設定」を表すセンチネル（Radix Select は空文字値を許さない）。
+const NEXT_PROCESS_NONE = '__none__';
 
 // 複数行テキスト項目（textarea で編集）
 const DEF_TEXTAREA_FIELDS: { key: keyof FlowDefinition; label: string; placeholder?: string }[] = [
@@ -369,7 +379,25 @@ const DEF_TEXTAREA_FIELDS: { key: keyof FlowDefinition; label: string; placehold
   { key: 'tacitNotes', label: '暗黙知メモ（口頭ルール・勘どころ）' },
 ];
 
-function FlowDefinitionPanel({ flowId }: { flowId: string }) {
+function FlowDefinitionPanel({
+  flowId,
+  projectId,
+  roles,
+  informationTypes,
+  onCreatedInformationType,
+  onCreateRole,
+}: {
+  flowId: string;
+  projectId: string;
+  /** ロール一覧（次工程＝渡し先ロールの選択肢）。取得失敗時は空配列でも動く。 */
+  roles: Role[];
+  /** 情報種別マスタ（INPUT/OUTPUT の選択肢）。取得失敗時は空配列でも動く。 */
+  informationTypes: InformationType[];
+  /** その場で情報種別を新規作成したとき、親の一覧へ反映する。 */
+  onCreatedInformationType: (created: InformationType) => void;
+  /** 次工程ロールを新規作成する（POST /api/roles）。作成したロール名を返す。 */
+  onCreateRole: (name: string) => Promise<string | null>;
+}) {
   const [def, setDef] = useState<FlowDefinition | null>(null);
   const [steps, setSteps] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -377,6 +405,12 @@ function FlowDefinitionPanel({ flowId }: { flowId: string }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // 次工程（渡し先ロール）の新規追加フォーム
+  const [addingRole, setAddingRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [creatingRole, setCreatingRole] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -400,10 +434,13 @@ function FlowDefinitionPanel({ flowId }: { flowId: string }) {
     };
   }, [flowId]);
 
-  const setField = useCallback((key: keyof FlowDefinition, value: string) => {
-    setDef((prev) => (prev ? { ...prev, [key]: value } : prev));
-    setSavedAt(null);
-  }, []);
+  const setField = useCallback(
+    (key: keyof FlowDefinition, value: string | null) => {
+      setDef((prev) => (prev ? { ...prev, [key]: value } : prev));
+      setSavedAt(null);
+    },
+    [],
+  );
 
   const moveStep = useCallback((i: number, d: -1 | 1) => {
     setSteps((s) => {
@@ -430,6 +467,27 @@ function FlowDefinitionPanel({ flowId }: { flowId: string }) {
     setSteps((s) => [...s, '']);
     setSavedAt(null);
   }, []);
+
+  // 次工程ロールをその場で新規作成 → 作成したロール名を nextProcess に即セット。
+  const handleCreateRole = useCallback(async () => {
+    const trimmed = newRoleName.trim();
+    if (!trimmed) {
+      setRoleError('ロール名を入力してください');
+      return;
+    }
+    setCreatingRole(true);
+    setRoleError(null);
+    try {
+      const createdName = await onCreateRole(trimmed);
+      if (createdName) setField('nextProcess', createdName);
+      setNewRoleName('');
+      setAddingRole(false);
+    } catch (err) {
+      setRoleError(err instanceof Error ? err.message : 'ロールの作成に失敗しました');
+    } finally {
+      setCreatingRole(false);
+    }
+  }, [newRoleName, onCreateRole, setField]);
 
   const handleSave = useCallback(async () => {
     if (!def) return;
@@ -498,6 +556,128 @@ function FlowDefinitionPanel({ flowId }: { flowId: string }) {
               />
             </div>
           ))}
+
+          {/* INPUT（何を受け取るか）= 情報種別マスタから選択（＋その場で新規追加） */}
+          <div className="space-y-1">
+            <label className="flex items-center gap-1 text-sm font-medium text-gray-700">
+              INPUT（何を受け取るか）
+              <HelpTooltip text="情報種別マスタから選びます。一覧に無ければ「＋」でその場で追加できます。選んだ名前がそのまま保存されます。" />
+            </label>
+            <InformationTypePicker
+              projectId={projectId}
+              informationTypes={informationTypes}
+              value={(d.input as string | null) ?? null}
+              valueMode="name"
+              onChange={(v) => setField('input', v)}
+              onCreated={onCreatedInformationType}
+              triggerClassName="h-9 bg-white border-gray-300 text-gray-900 text-sm"
+            />
+          </div>
+
+          {/* OUTPUT（何を渡すか）= 情報種別マスタから選択（＋その場で新規追加） */}
+          <div className="space-y-1">
+            <label className="flex items-center gap-1 text-sm font-medium text-gray-700">
+              OUTPUT（何を渡すか）
+              <HelpTooltip text="情報種別マスタから選びます。一覧に無ければ「＋」でその場で追加できます。選んだ名前がそのまま保存されます。" />
+            </label>
+            <InformationTypePicker
+              projectId={projectId}
+              informationTypes={informationTypes}
+              value={(d.output as string | null) ?? null}
+              valueMode="name"
+              onChange={(v) => setField('output', v)}
+              onCreated={onCreatedInformationType}
+              triggerClassName="h-9 bg-white border-gray-300 text-gray-900 text-sm"
+            />
+          </div>
+
+          {/* 次工程（誰に渡すか）= ロール選択（＋その場で新規追加） */}
+          <div className="space-y-1 md:col-span-2">
+            <label className="flex items-center gap-1 text-sm font-medium text-gray-700">
+              次工程（誰に渡すか＝ロール）
+              <HelpTooltip text="この業務の OUTPUT を次に受け取るロールを選びます。一覧に無ければ「＋新規追加」で作成できます。選んだロール名が保存されます。" />
+            </label>
+            <div className="flex items-center gap-1">
+              <Select
+                value={(d.nextProcess as string | null) ?? NEXT_PROCESS_NONE}
+                onValueChange={(v) =>
+                  setField('nextProcess', v === NEXT_PROCESS_NONE ? null : v)
+                }
+              >
+                <SelectTrigger className="h-9 bg-white border-gray-300 text-gray-900 text-sm">
+                  <SelectValue placeholder="— 未設定 —" />
+                </SelectTrigger>
+                <SelectContent className="bg-white">
+                  <SelectItem value={NEXT_PROCESS_NONE}>— 未設定 —</SelectItem>
+                  {/* 一覧に無い既存値（ロール未登録の自由入力名など）も残す */}
+                  {d.nextProcess &&
+                    !roles.some((r) => r.name === d.nextProcess) && (
+                      <SelectItem value={d.nextProcess}>{d.nextProcess}</SelectItem>
+                    )}
+                  {roles.map((r) => (
+                    <SelectItem key={r.id} value={r.name}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!addingRole && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  title="新規ロールを追加"
+                  onClick={() => {
+                    setRoleError(null);
+                    setNewRoleName('');
+                    setAddingRole(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+            {addingRole && (
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  value={newRoleName}
+                  onChange={(e) => setNewRoleName(e.target.value)}
+                  placeholder="新しいロール名（例: 経理担当）"
+                  className="h-9 text-gray-900"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleCreateRole();
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleCreateRole()}
+                  disabled={creatingRole}
+                >
+                  {creatingRole && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                  追加して選択
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAddingRole(false);
+                    setRoleError(null);
+                  }}
+                  disabled={creatingRole}
+                >
+                  キャンセル
+                </Button>
+              </div>
+            )}
+            {roleError && <p className="text-sm text-red-600">{roleError}</p>}
+          </div>
         </CardContent>
       </Card>
 
@@ -1710,6 +1890,24 @@ export default function ProjectFlowDetailPage() {
     [projectId, selectedRoleIds, roles, persistSelectedRoles, fetchRoles, getHeaders]
   );
 
+  // 個別業務定義の「次工程（渡し先ロール）」用にロールをその場で新規作成する。
+  // POST /api/roles { projectId, name, type:'HUMAN' } → 一覧再取得 → 作成名を返す。
+  const handleCreateDefinitionRole = useCallback(
+    async (name: string): Promise<string | null> => {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/roles`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ projectId, name, type: 'HUMAN' }),
+      });
+      if (!res.ok) throw new Error('Failed to create role');
+      const created = (await res.json()) as Role;
+      await fetchRoles();
+      return created.name;
+    },
+    [projectId, fetchRoles, getHeaders]
+  );
+
   // ロール更新（名前 / 人・システム・その他 区分 / SYSTEM のとき system 紐づけ / 色）
   // PATCH /api/roles/:id に patch をそのまま送る → 成功後 fetchRoles で一覧更新。
   const handleUpdateRole = useCallback(
@@ -2223,7 +2421,18 @@ export default function ProjectFlowDetailPage() {
               ここで保存した内容は「業務定義シート（全フロー一覧）」にも反映されます。
             </p>
           </div>
-          <FlowDefinitionPanel flowId={flowId} />
+          <FlowDefinitionPanel
+            flowId={flowId}
+            projectId={projectId}
+            roles={roles}
+            informationTypes={informationTypes}
+            onCreatedInformationType={(created) =>
+              setInformationTypes((prev) =>
+                prev.some((it) => it.id === created.id) ? prev : [...prev, created]
+              )
+            }
+            onCreateRole={handleCreateDefinitionRole}
+          />
         </div>
       )}
 
