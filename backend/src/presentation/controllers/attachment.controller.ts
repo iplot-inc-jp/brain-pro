@@ -245,6 +245,70 @@ export class AttachmentController {
     });
   }
 
+  @Post('business-flows/:flowId/attachments')
+  @ApiOperation({ summary: '業務フローに添付ファイルをアップロード' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadToFlow(
+    @Param('flowId') flowId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new NotFoundException('No file uploaded');
+    }
+
+    const flow = await this.prisma.businessFlow.findUnique({
+      where: { id: flowId },
+    });
+    if (!flow) {
+      throw new NotFoundException('BusinessFlow not found');
+    }
+
+    const id = uuid();
+    const sanitized = sanitizeFilename(file.originalname);
+
+    // 保存先ディレクトリを保証
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const diskPath = path.join(UPLOAD_DIR, `${id}-${sanitized}`);
+    fs.writeFileSync(diskPath, file.buffer);
+
+    const kind = file.mimetype.startsWith('image/')
+      ? 'IMAGE'
+      : file.mimetype === 'application/pdf'
+        ? 'PDF'
+        : 'FILE';
+
+    // 既存添付数を order の初期値に
+    const order = await this.prisma.attachment.count({
+      where: { flowId },
+    });
+
+    const row = await this.prisma.attachment.create({
+      data: {
+        id,
+        projectId: flow.projectId,
+        flowId,
+        kind: kind as 'IMAGE' | 'PDF' | 'FILE',
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        url: `/api/attachments/${id}/file`,
+        size: file.size,
+        order,
+      },
+    });
+
+    return row;
+  }
+
+  @Get('business-flows/:flowId/attachments')
+  @ApiOperation({ summary: '業務フローの添付ファイル一覧を取得' })
+  async listForFlow(@Param('flowId') flowId: string) {
+    return this.prisma.attachment.findMany({
+      where: { flowId },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
   @Public()
   @Get('attachments/:id/file')
   @ApiOperation({ summary: '添付ファイルの実体を配信（認証不要）' })

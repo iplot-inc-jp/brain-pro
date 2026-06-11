@@ -27,6 +27,8 @@ export interface FlowDefinitionRow {
   // ノードの情報リンク（NodeInformationLink→InformationType）から集計した INPUT/OUTPUT（これが正）
   inputItems: string[];
   outputItems: string[];
+  // フローに紐づく添付ファイル件数（一覧のバッジ表示用。古いAPIレスポンスでは未定義）
+  attachmentCount?: number;
 }
 
 export const EMPTY_DEFINITION: Omit<FlowDefinition, 'flowId'> = {

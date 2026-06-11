@@ -17,14 +17,47 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
-import { Loader2, ClipboardList, GitBranch, Pencil, AlertCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Loader2,
+  ClipboardList,
+  GitBranch,
+  Pencil,
+  AlertCircle,
+  Paperclip,
+  Trash2,
+  Plus,
+  FileText,
+} from 'lucide-react';
 import {
   flowDefinitionApi,
   definitionToRow,
   type FlowDefinitionRow,
   type FlowDefinition,
 } from '@/lib/flow-definition';
+import { flowAttachmentApi, type FlowAttachment } from '@/lib/flow-attachments';
 import { informationTypeApi, type InformationType } from '@/lib/dfd';
+import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
+import { systemApi, type SystemMaster } from '@/lib/masters';
+import { listRoles, type Role } from '@/lib/stakeholders';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+/** JSON API 用ヘッダ（Bearer accessToken）。ロール新規作成（POST /api/roles）で使う */
+function jsonAuthHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  if (t) h['Authorization'] = `Bearer ${t}`;
+  return h;
+}
 
 // INPUT/OUTPUT で扱う「物体・情報・帳票」は情報種別マスタ（InformationType）から引く。
 const INFO_CATEGORY_LABEL: Record<string, string> = {
@@ -36,6 +69,9 @@ const INFO_CATEGORY_LABEL: Record<string, string> = {
 // INPUT/OUTPUT のフリーテキストはモーダルでの手動補足のみ（一覧では情報リンク集計をチップ表示）。
 const INFO_DATALIST_ID = 'bd-information-types';
 const INFO_KEYS = new Set<keyof FlowDefinition>(['input', 'output']);
+
+// モーダルでロール（Role マスタ）の選択式にする列キー（担当・次工程）
+const ROLE_FIELD_KEYS = new Set<keyof FlowDefinition>(['owner', 'nextProcess']);
 
 // インライン編集できる単純列（DO は要約 + 個別定義への導線なので除く）
 // INPUT は INPUT列（情報リンク集計のチップ）の前、OUTPUT は DO の後ろのチップ列なので、
@@ -101,6 +137,14 @@ function textToSteps(text: string): string[] {
     .split('\n')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/** バイト数を読みやすい単位に整形 */
+function formatBytes(size: number): string {
+  if (!size || size <= 0) return '0 B';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -205,12 +249,152 @@ function InfoLinkCell({
   );
 }
 
+// Radix Select は value="" を許可しない（過去に空文字 SelectItem でクラッシュした前例あり）ため、
+// 「未設定」はセンチネル値で表し、onChange 時に空文字へ変換する。
+const NONE_VALUE = '__none__';
+
+/**
+ * マスタ（ロール・システム等）の「名前」を選ぶ汎用セレクト＋「＋新規追加」。
+ * - 値は従来どおり文字列カラムに保存する（後方互換）。
+ * - 一覧に無い既存フリーテキスト値は補助 option として残す。
+ * - 「＋」からその場で新規追加（onCreate）→ 成功したら作成名を即選択。
+ */
+function MasterSelectField({
+  value,
+  options,
+  onChange,
+  onCreate,
+  disabled,
+  placeholder = '— 未設定 —',
+  createTitle,
+  createPlaceholder,
+}: {
+  /** 現在値（空文字 = 未設定） */
+  value: string;
+  /** 選択候補の名前一覧（重複・空は内部で除去） */
+  options: string[];
+  onChange: (value: string) => void;
+  /** 「追加して選択」確定時。マスタ作成＋呼び出し側一覧への反映まで行う（throw でエラー表示） */
+  onCreate: (name: string) => Promise<void>;
+  disabled?: boolean;
+  placeholder?: string;
+  createTitle: string;
+  createPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // 空・重複を除いた候補名
+  const names = options.filter((n, i) => n && options.indexOf(n) === i);
+  const currentInList = value === '' || names.includes(value);
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setCreateError('名称を入力してください');
+      return;
+    }
+    setSaving(true);
+    setCreateError(null);
+    try {
+      await onCreate(trimmed);
+      onChange(trimmed);
+      setOpen(false);
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : '作成に失敗しました');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <Select
+        value={value === '' ? NONE_VALUE : value}
+        onValueChange={(v) => onChange(v === NONE_VALUE ? '' : v)}
+        disabled={disabled}
+      >
+        <SelectTrigger className="h-9 w-full border-gray-300 bg-white text-sm text-gray-900">
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent className="bg-white">
+          <SelectItem value={NONE_VALUE}>{placeholder}</SelectItem>
+          {/* マスタ未登録の既存フリーテキスト値も選択肢として残す（後方互換）。
+              Radix Select は value="" を許可しないため、空文字の補助 option は出さない。 */}
+          {!currentInList && <SelectItem value={value}>{value}</SelectItem>}
+          {names.map((n) => (
+            <SelectItem key={n} value={n}>
+              {n}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-9 w-9 shrink-0"
+        title={createTitle}
+        disabled={disabled}
+        onClick={() => {
+          setName('');
+          setCreateError(null);
+          setOpen(true);
+        }}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+
+      <Dialog open={open} onOpenChange={(o) => !saving && setOpen(o)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{createTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-gray-600">名称</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={createPlaceholder}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void submit();
+                  }
+                }}
+              />
+            </div>
+            {createError && <p className="text-sm text-red-600">{createError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>
+              キャンセル
+            </Button>
+            <Button onClick={() => void submit()} disabled={saving}>
+              {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              追加して選択
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 export default function BusinessDefinitionPage() {
   const params = useParams();
   const projectId = params.projectId as string;
 
   const [rows, setRows] = useState<FlowDefinitionRow[]>([]);
   const [infoTypes, setInfoTypes] = useState<InformationType[]>([]);
+  // モーダルの選択式項目用マスタ（担当・次工程 = ロール / システム = System マスタ）
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [systems, setSystems] = useState<SystemMaster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -221,6 +405,12 @@ export default function BusinessDefinitionPage() {
   const [form, setForm] = useState<ModalForm | null>(null);
   const [modalSaving, setModalSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+
+  // 業務フロー添付ファイル（モーダル内の関連資料セクション）state
+  const [attachments, setAttachments] = useState<FlowAttachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,6 +448,53 @@ export default function BusinessDefinitionPage() {
     };
   }, [projectId]);
 
+  // 担当・次工程の候補（ロール）とシステムの候補（System マスタ）を取得。失敗しても本体は動かす。
+  useEffect(() => {
+    let cancelled = false;
+    listRoles(projectId)
+      .then((data) => {
+        if (!cancelled) setRoles(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRoles([]);
+      });
+    systemApi
+      .list(projectId)
+      .then((data) => {
+        if (!cancelled) setSystems(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setSystems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  // ロールの新規追加（POST /api/roles {projectId,name,type:'HUMAN'}）→ 再取得して候補へ反映
+  const createRole = useCallback(
+    async (name: string) => {
+      const res = await fetch(`${API_URL}/api/roles`, {
+        method: 'POST',
+        headers: jsonAuthHeaders(),
+        body: JSON.stringify({ projectId, name, type: 'HUMAN' }),
+      });
+      if (!res.ok) throw new Error('ロールの作成に失敗しました');
+      const list = await listRoles(projectId);
+      setRoles(Array.isArray(list) ? list : []);
+    },
+    [projectId]
+  );
+
+  // システムの新規追加（systemApi.create {name, kind:'PERIPHERAL'}）→ 候補へ反映
+  const createSystem = useCallback(
+    async (name: string) => {
+      const created = await systemApi.create(projectId, { name, kind: 'PERIPHERAL' });
+      setSystems((prev) => [...prev, created]);
+    },
+    [projectId]
+  );
+
   // セルの値をローカル state に反映（onChange）
   const setCell = useCallback((flowId: string, key: keyof FlowDefinition, value: string) => {
     setRows((prev) =>
@@ -294,7 +531,92 @@ export default function BusinessDefinitionPage() {
     setEditingRow(null);
     setForm(null);
     setModalError(null);
+    setAttachments([]);
+    setAttachmentError(null);
   }, []);
+
+  // 一覧表の添付数バッジ（📎n）をモーダル内の操作に追随させる
+  const syncRowAttachmentCount = useCallback((flowId: string, count: number) => {
+    setRows((prev) =>
+      prev.map((r) => (r.flowId === flowId ? { ...r, attachmentCount: count } : r))
+    );
+  }, []);
+
+  // モーダルを開いたフローの添付ファイル一覧を取得
+  useEffect(() => {
+    if (!editingRow) return;
+    const flowId = editingRow.flowId;
+    let cancelled = false;
+    setAttachmentsLoading(true);
+    setAttachmentError(null);
+    flowAttachmentApi
+      .list(flowId)
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data) ? data : [];
+        setAttachments(list);
+        syncRowAttachmentCount(flowId, list.length);
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setAttachmentError(err instanceof Error ? err.message : '添付ファイルの取得に失敗しました');
+      })
+      .finally(() => {
+        if (!cancelled) setAttachmentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingRow, syncRowAttachmentCount]);
+
+  // 添付ファイルをアップロード（選択即アップロード・複数可）。完了後に一覧を再取得して更新
+  const uploadAttachments = useCallback(
+    async (files: File[]) => {
+      if (!editingRow || files.length === 0) return;
+      const flowId = editingRow.flowId;
+      setAttachmentUploading(true);
+      setAttachmentError(null);
+      const failed: string[] = [];
+      for (const file of files) {
+        try {
+          await flowAttachmentApi.upload(flowId, file);
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      try {
+        const list = await flowAttachmentApi.list(flowId);
+        const next = Array.isArray(list) ? list : [];
+        setAttachments(next);
+        syncRowAttachmentCount(flowId, next.length);
+      } catch {
+        // 一覧再取得の失敗は無視（次回モーダルを開いた時に取得される）
+      }
+      if (failed.length > 0) {
+        setAttachmentError(`アップロードに失敗しました: ${failed.join(', ')}`);
+      }
+      setAttachmentUploading(false);
+    },
+    [editingRow, syncRowAttachmentCount]
+  );
+
+  // 添付ファイルを削除（confirm 付き）
+  const deleteAttachment = useCallback(
+    async (attachment: FlowAttachment) => {
+      if (!window.confirm(`「${attachment.filename}」を削除しますか？`)) return;
+      setAttachmentError(null);
+      try {
+        await flowAttachmentApi.remove(attachment.id);
+        const next = attachments.filter((a) => a.id !== attachment.id);
+        setAttachments(next);
+        const flowId = attachment.flowId ?? editingRow?.flowId;
+        if (flowId) syncRowAttachmentCount(flowId, next.length);
+      } catch (err) {
+        setAttachmentError(err instanceof Error ? err.message : '削除に失敗しました');
+      }
+    },
+    [attachments, editingRow, syncRowAttachmentCount]
+  );
 
   const setFormField = useCallback((key: keyof ModalForm, value: string) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -326,7 +648,7 @@ export default function BusinessDefinitionPage() {
   }, [editingRow, form, closeEdit]);
 
   const help =
-    '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）できます。INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計してチップ表示します（業務フロー側で編集）。「編集」ボタンからは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます（INPUT/OUTPUT は手動補足メモのみ）。';
+    '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）できます。INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計してチップ表示します（業務フロー側で編集）。「編集」ボタンからは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます。担当・次工程はロール、システムはシステムマスタ、INPUT/OUTPUT 補足は情報種別から選択でき（＋で新規追加）、写真・スクショの添付もモーダルから行えます。';
 
   // 親子階層（parentId）で DFS 順に並べ替えた表示用の行
   const treeRows = toTreeOrder(rows);
@@ -360,7 +682,7 @@ export default function BusinessDefinitionPage() {
                 '行は1つの業務フローです。業務フロー名をクリックすると、そのフローの「個別定義」タブを開きます。',
                 '目的・担当・頻度・システムの各セルは直接入力でき、フォーカスを外すと自動保存されます。',
                 'INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計したチップを表示します。内容を変えるには業務フロー側でノードの入出力を編集してください。',
-                '「編集」ボタンでは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます（INPUT/OUTPUT は手動補足メモのみ）。',
+                '「編集」ボタンでは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます。担当・次工程・システム・INPUT/OUTPUT 補足はマスタから選択でき（＋ボタンで新規追加して即選択）、写真・スクショの添付（複数可）もモーダル下部から行えます。',
                 '「業務フローへ」ボタンで、そのフローの業務フローエディタへ移動できます。',
               ]}
             />
@@ -462,6 +784,16 @@ export default function BusinessDefinitionPage() {
                               {row.flowName}
                             </span>
                           </Link>
+                          {/* 添付（写真・スクショ）の件数バッジ */}
+                          {(row.attachmentCount ?? 0) > 0 && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-0.5 rounded bg-gray-100 px-1 py-0.5 text-[10px] font-medium text-gray-500"
+                              title={`添付 ${row.attachmentCount} 件`}
+                            >
+                              <Paperclip className="h-3 w-3" />
+                              {row.attachmentCount}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -577,21 +909,59 @@ export default function BusinessDefinitionPage() {
               )}
 
               <div className="space-y-4">
-                {/* 単一行テキスト項目（2カラム） */}
+                {/* 単一行項目（2カラム）。マスタに紐づく項目は選択式（値は従来どおり文字列カラムに保存＝後方互換） */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {MODAL_TEXT_FIELDS.map((f) => (
-                    <div key={f.key} className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-600">{f.label}</label>
-                      <input
-                        value={form[f.key as EditableTextKey]}
-                        onChange={(e) => setFormField(f.key as keyof ModalForm, e.target.value)}
-                        disabled={modalSaving}
-                        list={INFO_KEYS.has(f.key) ? INFO_DATALIST_ID : undefined}
-                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300 disabled:opacity-50"
-                        placeholder="—"
-                      />
-                    </div>
-                  ))}
+                  {MODAL_TEXT_FIELDS.map((f) => {
+                    const key = f.key as EditableTextKey;
+                    return (
+                      <div key={f.key} className="space-y-1">
+                        <label className="text-xs font-semibold text-gray-600">{f.label}</label>
+                        {INFO_KEYS.has(f.key) ? (
+                          // INPUT/OUTPUT: 情報種別マスタから名前で選択（＋新規追加で即選択）
+                          <InformationTypePicker
+                            projectId={projectId}
+                            informationTypes={infoTypes}
+                            valueMode="name"
+                            value={form[key] || null}
+                            onChange={(v) => setFormField(key, v ?? '')}
+                            onCreated={(created) => setInfoTypes((prev) => [...prev, created])}
+                            disabled={modalSaving}
+                            triggerClassName="h-9 w-full border-gray-300 bg-white text-sm text-gray-900"
+                          />
+                        ) : ROLE_FIELD_KEYS.has(f.key) ? (
+                          // 担当・次工程: ロールマスタから選択（＋新規追加 → 再取得して即選択）
+                          <MasterSelectField
+                            value={form[key]}
+                            options={roles.map((r) => r.name)}
+                            onChange={(v) => setFormField(key, v)}
+                            onCreate={createRole}
+                            disabled={modalSaving}
+                            createTitle="ロールを追加"
+                            createPlaceholder="例: 営業担当"
+                          />
+                        ) : f.key === 'system' ? (
+                          // システム: System マスタから選択（＋新規追加は周辺システムとして登録 → 即選択）
+                          <MasterSelectField
+                            value={form.system}
+                            options={systems.map((s) => s.name)}
+                            onChange={(v) => setFormField('system', v)}
+                            onCreate={createSystem}
+                            disabled={modalSaving}
+                            createTitle="システムを追加"
+                            createPlaceholder="例: 販売管理システム"
+                          />
+                        ) : (
+                          <input
+                            value={form[key]}
+                            onChange={(e) => setFormField(f.key as keyof ModalForm, e.target.value)}
+                            disabled={modalSaving}
+                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300 disabled:opacity-50"
+                            placeholder="—"
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* DO 手順（1行1手順） */}
@@ -619,6 +989,114 @@ export default function BusinessDefinitionPage() {
                     />
                   </div>
                 ))}
+
+                {/* 添付（写真・スクショ）。アップロード即保存・モーダル保存とは独立 */}
+                <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+                      <Paperclip className="h-3.5 w-3.5" />
+                      添付（写真・スクショ）
+                    </label>
+                    <label
+                      className={`inline-flex cursor-pointer items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 ${
+                        attachmentUploading ? 'pointer-events-none opacity-50' : ''
+                      }`}
+                    >
+                      {attachmentUploading ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Paperclip className="h-3 w-3" />
+                      )}
+                      ファイルを追加
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        multiple
+                        className="hidden"
+                        disabled={attachmentUploading}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          if (files.length > 0) void uploadAttachments(files);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {attachmentError && (
+                    <p className="flex items-center gap-1 text-xs text-red-600">
+                      <AlertCircle className="h-3 w-3 shrink-0" />
+                      {attachmentError}
+                    </p>
+                  )}
+
+                  {attachmentsLoading ? (
+                    <div className="flex items-center gap-2 py-2 text-xs text-gray-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      読み込み中…
+                    </div>
+                  ) : attachments.length === 0 ? (
+                    <p className="py-1 text-xs text-gray-400">添付ファイルはまだありません。</p>
+                  ) : (
+                    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {attachments.map((a) => {
+                        const isImage = a.kind === 'IMAGE' || a.mimeType.startsWith('image/');
+                        return (
+                          <li
+                            key={a.id}
+                            className="rounded border border-gray-200 bg-white p-1.5"
+                          >
+                            <a
+                              href={flowAttachmentApi.fileUrl(a.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                              title={a.filename}
+                            >
+                              {isImage ? (
+                                // 画像はサムネイル表示（クリックで原寸を別タブ表示）
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={flowAttachmentApi.fileUrl(a.id)}
+                                  alt={a.filename}
+                                  className="h-24 w-full rounded bg-gray-100 object-cover"
+                                />
+                              ) : (
+                                // PDF 等はファイル名リンク
+                                <span className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded bg-gray-50 px-2 text-center">
+                                  <FileText className="h-6 w-6 text-gray-400" />
+                                  <span className="line-clamp-2 break-all text-[11px] text-blue-600 underline">
+                                    {a.filename}
+                                  </span>
+                                </span>
+                              )}
+                            </a>
+                            <div className="mt-1 flex items-center justify-between gap-1">
+                              <span
+                                className="min-w-0 flex-1 truncate text-[11px] text-gray-500"
+                                title={a.filename}
+                              >
+                                {a.filename}
+                              </span>
+                              <span className="shrink-0 text-[10px] text-gray-400">
+                                {formatBytes(a.size)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void deleteAttachment(a)}
+                                className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                title="削除"
+                                aria-label={`${a.filename} を削除`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
 
               <DialogFooter>

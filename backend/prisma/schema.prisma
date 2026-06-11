@@ -287,6 +287,8 @@ model BusinessFlow {
   annotations         FlowAnnotation[]
   // この ASIS 業務フローを参照する TOBE ビジョン
   asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
+  // この業務フローに紐づく添付ファイル
+  attachments         Attachment[]             @relation("FlowAttachments")
 
   @@map("business_flows")
 }
@@ -1118,11 +1120,13 @@ model Attachment {
   createdAt DateTime       @default(now()) @map("created_at")
 
   informationTypeId String?  @map("information_type_id")
+  flowId            String?  @map("flow_id")
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   phase   ProjectPhase? @relation(fields: [phaseId], references: [id], onDelete: Cascade)
   task    Task?         @relation(fields: [taskId], references: [id], onDelete: Cascade)
   informationType InformationType? @relation(fields: [informationTypeId], references: [id], onDelete: Cascade)
+  flow    BusinessFlow? @relation("FlowAttachments", fields: [flowId], references: [id], onDelete: Cascade)
 
   @@map("attachments")
 }

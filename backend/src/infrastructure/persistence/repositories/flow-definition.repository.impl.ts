@@ -46,6 +46,8 @@ export class FlowDefinitionRepositoryImpl implements IFlowDefinitionRepository {
             informationLinks: { include: { informationType: true } },
           },
         },
+        // フロー添付ファイル件数（一覧バッジ用。実体は持たず件数のみ）
+        _count: { select: { attachments: true } },
       },
     });
     return flows.map((f) => {
@@ -69,6 +71,7 @@ export class FlowDefinitionRepositoryImpl implements IFlowDefinitionRepository {
         definition: f.definition ? this.toEntity(f.definition) : null,
         inputItems: [...inputSet],
         outputItems: [...outputSet],
+        attachmentCount: f._count.attachments,
       };
     });
   }

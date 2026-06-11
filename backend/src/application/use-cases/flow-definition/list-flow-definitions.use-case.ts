@@ -16,6 +16,8 @@ export interface FlowDefinitionRow {
   // 情報リンク（NodeInformationLink→InformationType）から集計した INPUT/OUTPUT（これが正）
   inputItems: string[];
   outputItems: string[];
+  // フローに紐づく添付ファイル件数（一覧のバッジ表示用）
+  attachmentCount: number;
 }
 
 @Injectable()
@@ -38,6 +40,7 @@ export class ListFlowDefinitionsUseCase {
       parentId: r.parentId, depth: r.depth,
       definition: toFlowDefinitionOutput(r.flowId, r.definition),
       inputItems: r.inputItems, outputItems: r.outputItems,
+      attachmentCount: r.attachmentCount,
     }));
   }
 }

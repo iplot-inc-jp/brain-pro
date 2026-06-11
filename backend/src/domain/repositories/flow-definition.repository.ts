@@ -15,6 +15,8 @@ export interface FlowWithDefinition {
   // INPUT/OUTPUT 情報種別名（重複除去済み・これが正）
   inputItems: string[];
   outputItems: string[];
+  // フローに紐づく添付ファイル（Attachment.flowId）件数。一覧のバッジ表示用
+  attachmentCount: number;
 }
 
 export interface IFlowDefinitionRepository {
