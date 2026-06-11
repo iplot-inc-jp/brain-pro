@@ -13,3 +13,36 @@
 
 /* 接続元として選択中のバーをハイライト。 */
 .gantt .bar-wrapper.connect-source .bar { stroke: #2563eb; stroke-width: 2; }
+
+/* ===== バードラッグ不具合の修正（ベンダー既存ルールは変更しない） ===== */
+/*
+ * frappe-gantt はバー移動を svg.gantt 上の素の mousedown/mousemove/mouseup で
+ * 実装しており、preventDefault も touch-action 指定も持たない。そのため
+ * タッチパッド／タッチでバーを横方向にドラッグすると、ブラウザがその操作を
+ * パン（スクロール）ジェスチャとみなし、バーが動かず近傍のスクロールコンテナ
+ * （.gantt-container や外側の overflow-auto）が横スクロールしてしまう。
+ *
+ * ドラッグ対象であるバー（.bar-wrapper とその中身）とリサイズ／進捗ハンドル
+ * に touch-action:none を付け、ドラッグをスクロールではなく「操作」として
+ * 扱わせる。これでバー移動（on_date_change）が確実に発火し、表が勝手に横
+ * スクロールしなくなる。グリッドの空白部分は touch-action を変えないので、
+ * タッチでのタイムライン横スクロールは従来どおり可能。user-select:none も
+ * 明示する（ベンダーは .gantt にのみ付けているが、子要素にも確実に効かせる）。
+ */
+.gantt .bar-wrapper,
+.gantt .bar-wrapper *,
+.gantt .handle {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/*
+ * frappe-gantt 自身が .gantt-container に overflow:auto の横スクロールを持つ。
+ * 外側のホスト（.frappe-gantt-host / .gantt-host）でさらに overflow:auto を
+ * 重ねると二重スクロールになり、ドラッグ中に外側が動く原因になる。ホストは
+ * スクロールを持たせず、frappe 自身のスクロールに委ねる。
+ */
+.frappe-gantt-host { overflow: visible; }
+/* ドラッグ時に外側へスクロールが伝播して連鎖しないようにする。 */
+.gantt-container { overscroll-behavior: contain; }

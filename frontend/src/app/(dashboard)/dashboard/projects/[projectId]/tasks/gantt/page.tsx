@@ -23,6 +23,8 @@ import {
   Link2,
   X,
   Plus,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -86,6 +88,9 @@ export default function GanttPage() {
   // マウスでの依存（矢印）作成: 接続モードと、選択済みの先行タスク。
   const [connectMode, setConnectMode] = useState(false);
   const [pendingFromId, setPendingFromId] = useState<string | null>(null);
+
+  // ガントカードの全画面表示トグル（他ページの全画面と同じ作法）。
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // ---------------------------------------------------------------------
   // データ取得
@@ -284,6 +289,27 @@ export default function GanttPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [connectMode]);
 
+  // ESC で全画面を解除（入力欄フォーカス中は無視）。他ページの全画面と同じ作法。
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        t?.isContentEditable
+      ) {
+        return;
+      }
+      setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
+
   // ---------------------------------------------------------------------
   // 依存関係パネル -> バックエンド
   // ---------------------------------------------------------------------
@@ -455,11 +481,46 @@ export default function GanttPage() {
             </div>
           )}
 
-          <Card className="overflow-auto border-gray-200 bg-white">
-            {/* frappe-gantt（クライアント専用・SSR 無効） */}
+          {/*
+            ガントカード。frappe-gantt 自身が内部スクロール（.gantt-container）を
+            持つため、外側カードでは overflow-auto を重ねない（二重スクロール＝
+            ドラッグで外側が動く不具合の一因になるため）。relative + 全画面ボタン。
+          */}
+          <Card
+            className={
+              isFullscreen
+                ? 'fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0 bg-white'
+                : 'relative border-gray-200 bg-white'
+            }
+          >
+            {/* 全画面トグル（右上オーバーレイ）。 */}
+            <button
+              type="button"
+              onClick={() => setIsFullscreen((v) => !v)}
+              className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+              title={isFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
+              aria-pressed={isFullscreen}
+            >
+              {isFullscreen ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Maximize2 className="h-4 w-4" />
+              )}
+              {isFullscreen ? '縮小' : '全画面'}
+            </button>
+
+            {/*
+              frappe-gantt（クライアント専用・SSR 無効）。
+              全画面切替でコンテナ幅が変わるので key を変えて再マウントし、
+              新しい幅で確実に再描画させる。全画面時は残り高さいっぱいに広げ、
+              内側の .gantt-container がスクロールする。
+            */}
             <div
-              className={`gantt-host ${connectMode ? 'gantt-connect' : ''}`}
-              style={{ minHeight: 420 }}
+              key={isFullscreen ? 'fs' : 'normal'}
+              className={`gantt-host ${connectMode ? 'gantt-connect' : ''} ${
+                isFullscreen ? 'min-h-0 flex-1 overflow-auto' : ''
+              }`}
+              style={isFullscreen ? undefined : { minHeight: 420 }}
             >
               <FrappeGantt
                 tasks={frappeTasks}
