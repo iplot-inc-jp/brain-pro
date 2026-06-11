@@ -82,6 +82,8 @@ export type FlowSummary = {
   parentId?: string | null;
   depth?: number;
   kind?: 'ASIS' | 'TOBE';
+  /** TOBEフローが対応する ASIS フローID（project/:id/all の toResponse が返す）。 */
+  asisFlowId?: string | null;
 };
 
 export type FlowDataEdge = {

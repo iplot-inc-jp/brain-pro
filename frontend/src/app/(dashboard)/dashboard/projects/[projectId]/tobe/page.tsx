@@ -14,6 +14,7 @@ import {
   Sparkles,
   Network,
   Milestone,
+  Columns2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -104,11 +105,13 @@ function flattenSubProjects(
 // カード下部に「対応ASIS」セレクタを置き、選択でこのTOBEフロー自身の asisFlowId を更新する。
 function FlowCard({
   flow,
+  projectId,
   asisFlows,
   onOpen,
   onChangeAsis,
 }: {
   flow: BusinessFlow;
+  projectId: string;
   asisFlows: BusinessFlow[];
   onOpen: () => void;
   onChangeAsis: (asisFlowId: string | null) => void;
@@ -147,6 +150,18 @@ function FlowCard({
           ))}
         </select>
       </label>
+      {/* 対応ASIS が設定されている時だけ ASIS⇔TOBE 比較ビューへの導線を出す。
+          カード本体のクリック（onOpen）へ波及しないよう stopPropagation。 */}
+      {flow.asisFlowId && (
+        <Link
+          href={`/dashboard/projects/${projectId}/flows/compare?asis=${flow.asisFlowId}&tobe=${flow.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center gap-1 self-start text-xs font-medium text-indigo-600 hover:underline"
+        >
+          <Columns2 className="h-3.5 w-3.5" />
+          比較
+        </Link>
+      )}
     </div>
   );
 }
@@ -456,6 +471,7 @@ export default function TobeManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          projectId={projectId}
                           asisFlows={asisFlows}
                           onOpen={() => openFlow(flow.id)}
                           onChangeAsis={(asisFlowId) =>
@@ -482,6 +498,7 @@ export default function TobeManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          projectId={projectId}
                           asisFlows={asisFlows}
                           onOpen={() => openFlow(flow.id)}
                           onChangeAsis={(asisFlowId) =>

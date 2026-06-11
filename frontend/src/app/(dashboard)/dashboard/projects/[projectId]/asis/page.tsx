@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Layers,
   ChevronRight,
+  Columns2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -116,12 +117,14 @@ const priorityBadge: Record<GapItem['priority'], string> = {
 // このASISフローID に設定する（紐づけは BusinessFlow.asisFlowId に保存される）。
 function FlowCard({
   flow,
+  projectId,
   tobeFlows,
   linkedTobeId,
   onOpen,
   onChangeTobe,
 }: {
   flow: BusinessFlow;
+  projectId: string;
   tobeFlows: BusinessFlow[];
   linkedTobeId: string | null;
   onOpen: () => void;
@@ -161,6 +164,18 @@ function FlowCard({
           ))}
         </select>
       </label>
+      {/* 対応TOBE が設定されている時だけ ASIS⇔TOBE 比較ビューへの導線を出す。
+          カード本体のクリック（onOpen）へ波及しないよう stopPropagation。 */}
+      {linkedTobeId && (
+        <Link
+          href={`/dashboard/projects/${projectId}/flows/compare?asis=${flow.id}&tobe=${linkedTobeId}`}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex items-center gap-1 self-start text-xs font-medium text-indigo-600 hover:underline"
+        >
+          <Columns2 className="h-3.5 w-3.5" />
+          比較
+        </Link>
+      )}
     </div>
   );
 }
@@ -465,6 +480,7 @@ export default function AsisManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          projectId={projectId}
                           tobeFlows={tobeFlows}
                           linkedTobeId={
                             tobeFlows.find((t) => t.asisFlowId === flow.id)
@@ -495,6 +511,7 @@ export default function AsisManagementPage() {
                         <FlowCard
                           key={flow.id}
                           flow={flow}
+                          projectId={projectId}
                           tobeFlows={tobeFlows}
                           linkedTobeId={
                             tobeFlows.find((t) => t.asisFlowId === flow.id)
