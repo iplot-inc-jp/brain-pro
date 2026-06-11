@@ -17,10 +17,13 @@
 //  - 矢印 <path data-from data-to> の委譲クリックで onArrowClick(from,to) を呼ぶ。
 
 import { useEffect, useRef } from 'react';
+// frappe-gantt v1.2.2（MIT）の src をベンダリングしたローカルソース（./vendor/）。
+// スクロール暴れ・カクカクドラッグ・矢印経路をソースレベルで修正している
+// （変更点は ./vendor/README.md 参照）。型は既存の ambient 宣言を流用。
 import Gantt, {
   type FrappeTask,
   type FrappeViewMode,
-} from 'frappe-gantt';
+} from './vendor/index';
 // frappe-gantt の package.json exports は CSS サブパスを公開しないため、
 // dist/frappe-gantt.css をローカルにベンダリングして読み込む（MIT）。
 import './frappe-gantt.vendor.css';
@@ -62,6 +65,9 @@ export default function FrappeGantt({
 }: FrappeGanttProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const ganttRef = useRef<Gantt | null>(null);
+  // インスタンス生成直後の tasks effect 1 回分を refresh せずスキップするためのフラグ。
+  // マウント effect（生成側）が立て、tasks effect が消費する。
+  const skipNextRefreshRef = useRef(false);
 
   // コールバックは最新参照を ref に保持（インスタンスは初回のみ生成するため）。
   const cbRef = useRef({ onDateChange, onProgressChange, onClick, onArrowClick });
@@ -82,6 +88,9 @@ export default function FrappeGantt({
       bar_height: 22,
       padding: 14,
       popup_on: 'hover',
+      // 端に近づくと列を継ぎ足して scrollLeft を付け替える無限パディングは
+      // 「瞬間移動・ズレ」の原因なので無効化（vendor 既定も false だが明示）。
+      infinite_padding: false,
       on_date_change: (task, start, end) => {
         cbRef.current.onDateChange(String(task.id), start, end);
       },
@@ -93,6 +102,9 @@ export default function FrappeGantt({
       },
     });
     ganttRef.current = gantt;
+    // この直後に流れる tasks effect の refresh は不要（初期タスクは渡し済み）。
+    // 実行させると scroll_to:'today' の初期スクロールが scrollLeft=0 で上書きされる。
+    skipNextRefreshRef.current = true;
 
     // 矢印クリックは委譲リスナーで拾う。refresh() で矢印 <path> が作り直されても、
     // コンテナ自体は残るのでリスナーは生き続ける。
@@ -108,7 +120,10 @@ export default function FrappeGantt({
 
     return () => {
       el.removeEventListener('click', handleArrowClick);
-      // frappe-gantt に dispose API は無いので DOM を空にして破棄。
+      // vendor 独自の destroy() で document に登録された mouseup リスナー等を
+      // 解除してから DOM を空にする（再マウントのたびにリスナーが蓄積し
+      // デタッチ済み DOM ごとリークするのを防ぐ）。
+      ganttRef.current?.destroy();
       ganttRef.current = null;
       if (el) el.innerHTML = '';
     };
@@ -117,14 +132,33 @@ export default function FrappeGantt({
   }, []);
 
   // tasks 変化: refresh（現在の表示モードは維持される）。
+  // vendor 側 refresh が「左端に見えている日付」を保ったまま再描画するため、
+  // 保存→refresh のたびに today へスクロールが飛ぶことはない。
+  // インスタンス生成直後の 1 回はスキップする: 初期タスクはコンストラクタに渡し済みで
+  // refresh は不要な上、マウント直後の refresh が scroll_to:'today' の smooth スクロールを
+  // scrollLeft=0 の保存/復元で中断し、初期表示が today でなく左端になってしまうため。
+  // （単純な「初回フラグ」だと StrictMode の二重マウントで再マウント後の refresh を
+  //  スキップできないので、生成側 effect が立てるフラグを消費する形にする。）
   useEffect(() => {
+    if (skipNextRefreshRef.current) {
+      skipNextRefreshRef.current = false;
+      return;
+    }
     const gantt = ganttRef.current;
     if (!gantt) return;
     gantt.refresh(tasks.map((t) => ({ ...t })));
-    // refresh は内部で change_view_mode() を呼び現在モードを維持するが、
-    // 念のため viewMode を反映しておく。
-    gantt.change_view_mode(viewMode);
-  }, [tasks, viewMode]);
+  }, [tasks]);
+
+  // viewMode 変化: change_view_mode（maintain_pos=true で現在位置を保つ）。
+  // tasks 変化のたびに呼ぶと毎回 today へスクロールしてしまうため、
+  // 実際に viewMode が変わったときだけ呼ぶ。
+  const viewModeRef = useRef(viewMode);
+  useEffect(() => {
+    const gantt = ganttRef.current;
+    if (!gantt || viewModeRef.current === viewMode) return;
+    viewModeRef.current = viewMode;
+    gantt.change_view_mode(viewMode, true);
+  }, [viewMode]);
 
   // 接続モードの見た目（カーソル等）をコンテナのクラスで切り替える。
   useEffect(() => {
