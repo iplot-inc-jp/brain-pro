@@ -57,7 +57,7 @@ import {
   collectDescendantIds,
   taskStatusLabels,
   taskPriorityLabels,
-  issueNodeKindLabels,
+  issueNodeKindMeta,
   issueNodeKindOptionLabel,
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -1248,7 +1248,7 @@ function IssueOrigin({
   const label = nodeRef?.label ?? task.issueNodeLabel ?? null;
   const kind = nodeRef?.kind ?? task.issueNodeKind ?? null;
   if (!task.issueNodeId || !label || !kind) return null;
-  const meta = issueNodeKindLabels[kind];
+  const meta = issueNodeKindMeta(kind);
   const treeId = nodeRef?.treeId ?? null;
   const inner = (
     <span className="inline-flex items-center gap-1">

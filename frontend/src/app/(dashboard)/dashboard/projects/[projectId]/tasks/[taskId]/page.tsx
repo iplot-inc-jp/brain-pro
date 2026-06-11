@@ -42,7 +42,7 @@ import {
   attachmentsApi,
   taskStatusLabels,
   taskPriorityLabels,
-  issueNodeKindLabels,
+  issueNodeKindMeta,
   issueNodeKindOptionLabel,
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -736,7 +736,7 @@ export default function TaskDetailPage() {
               <DetailRow label="由来（打ち手/調査）">
                 {linkedNode ? (
                   (() => {
-                    const meta = issueNodeKindLabels[linkedNode.kind];
+                    const meta = issueNodeKindMeta(linkedNode.kind);
                     const chip = (
                       <span className="inline-flex items-center gap-1.5">
                         <span
