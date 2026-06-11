@@ -8,6 +8,7 @@ export interface CreateTobeVisionProps {
   countermeasure?: string | null;
   effect?: string | null;
   order?: number;
+  subProjectId?: string | null;
 }
 
 export interface ReconstructTobeVisionProps {
@@ -18,6 +19,7 @@ export interface ReconstructTobeVisionProps {
   countermeasure: string | null;
   effect: string | null;
   order: number;
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +30,7 @@ export interface UpdateTobeVisionProps {
   countermeasure?: string | null;
   effect?: string | null;
   order?: number;
+  subProjectId?: string | null;
 }
 
 /**
@@ -41,6 +44,7 @@ export class TobeVision extends BaseEntity {
   private _countermeasure: string | null;
   private _effect: string | null;
   private _order: number;
+  private _subProjectId: string | null;
 
   private constructor(
     id: string,
@@ -50,6 +54,7 @@ export class TobeVision extends BaseEntity {
     countermeasure: string | null,
     effect: string | null,
     order: number,
+    subProjectId: string | null,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -60,6 +65,7 @@ export class TobeVision extends BaseEntity {
     this._countermeasure = countermeasure;
     this._effect = effect;
     this._order = order;
+    this._subProjectId = subProjectId;
   }
 
   /**
@@ -79,6 +85,7 @@ export class TobeVision extends BaseEntity {
       props.countermeasure?.trim() || null,
       props.effect?.trim() || null,
       props.order ?? 0,
+      props.subProjectId ?? null,
       now,
       now,
     );
@@ -96,6 +103,7 @@ export class TobeVision extends BaseEntity {
       props.countermeasure,
       props.effect,
       props.order,
+      props.subProjectId,
       props.createdAt,
       props.updatedAt,
     );
@@ -118,6 +126,9 @@ export class TobeVision extends BaseEntity {
     }
     if (props.order !== undefined) {
       this._order = props.order;
+    }
+    if (props.subProjectId !== undefined) {
+      this._subProjectId = props.subProjectId ?? null;
     }
     this.touch();
   }
@@ -146,5 +157,9 @@ export class TobeVision extends BaseEntity {
 
   get order(): number {
     return this._order;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
   }
 }

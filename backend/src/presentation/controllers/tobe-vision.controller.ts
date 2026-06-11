@@ -57,6 +57,11 @@ class CreateTobeVisionDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  @ApiPropertyOptional({ description: '領域（サブプロジェクト）ID', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 class UpdateTobeVisionDto {
@@ -84,6 +89,11 @@ class UpdateTobeVisionDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  @ApiPropertyOptional({ description: '領域（サブプロジェクト）ID', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 }
 
 @ApiTags('TOBEビジョン')
@@ -130,6 +140,7 @@ export class TobeVisionController {
       countermeasure: dto.countermeasure,
       effect: dto.effect,
       order: dto.order,
+      subProjectId: dto.subProjectId,
     });
   }
 }
@@ -161,6 +172,7 @@ export class TobeVisionByIdController {
       countermeasure: dto.countermeasure,
       effect: dto.effect,
       order: dto.order,
+      subProjectId: dto.subProjectId,
     });
   }
 

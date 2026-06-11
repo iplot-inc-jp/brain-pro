@@ -1036,6 +1036,8 @@ model SubProject {
   systems          System[]
   constraints      Constraint[]
   informationTypes InformationType[]
+  tobeVisions      TobeVision[]
+  tobeRoadmaps     TobeRoadmap[]
 
   @@map("sub_projects")
 }
@@ -1604,6 +1606,8 @@ model AsisMemo {
 model TobeVision {
   id             String   @id @default(uuid())
   projectId      String   @map("project_id")
+  // サブ領域への紐づけ（データ連携。任意。既存 area は後方互換のため残置）
+  subProjectId   String?  @map("sub_project_id")
   area           String? // 領域
   vision         String?  @db.Text // ビジョン・あるべき姿
   countermeasure String?  @db.Text // 施策・対応
@@ -1612,7 +1616,10 @@ model TobeVision {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  // このビジョンに紐づくロードマップ施策
+  roadmaps   TobeRoadmap[]
 
   @@map("tobe_visions")
 }
@@ -1622,19 +1629,25 @@ model TobeVision {
 // ===========================================
 
 model TobeRoadmap {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  phase     String? // フェーズ
-  measure   String?  @db.Text // 施策
-  roi       String? // ROI
-  cost      String? // コスト
-  payback   String? // 回収期間
-  scope     String? // 範囲
-  order     Int      @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  // サブ領域への紐づけ（データ連携。任意）
+  subProjectId String?  @map("sub_project_id")
+  // 元になった TOBE ビジョンへの紐づけ（データ連携。任意）
+  tobeVisionId String?  @map("tobe_vision_id")
+  phase        String? // フェーズ
+  measure      String?  @db.Text // 施策
+  roi          String? // ROI
+  cost         String? // コスト
+  payback      String? // 回収期間
+  scope        String? // 範囲
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  tobeVision TobeVision? @relation(fields: [tobeVisionId], references: [id], onDelete: SetNull)
 
   @@map("tobe_roadmaps")
 }

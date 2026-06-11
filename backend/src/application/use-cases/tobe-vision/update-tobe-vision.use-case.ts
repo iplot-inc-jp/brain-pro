@@ -22,6 +22,7 @@ export interface UpdateTobeVisionInput {
   countermeasure?: string | null;
   effect?: string | null;
   order?: number;
+  subProjectId?: string | null;
 }
 
 /**
@@ -67,6 +68,7 @@ export class UpdateTobeVisionUseCase {
       countermeasure: input.countermeasure,
       effect: input.effect,
       order: input.order,
+      subProjectId: input.subProjectId,
     });
 
     // 5. 永続化

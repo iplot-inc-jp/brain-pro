@@ -19,6 +19,7 @@ export interface CreateTobeVisionInput {
   countermeasure?: string | null;
   effect?: string | null;
   order?: number;
+  subProjectId?: string | null;
 }
 
 export interface TobeVisionOutput {
@@ -29,6 +30,7 @@ export interface TobeVisionOutput {
   countermeasure: string | null;
   effect: string | null;
   order: number;
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +44,7 @@ export function toTobeVisionOutput(tobeVision: TobeVision): TobeVisionOutput {
     countermeasure: tobeVision.countermeasure,
     effect: tobeVision.effect,
     order: tobeVision.order,
+    subProjectId: tobeVision.subProjectId,
     createdAt: tobeVision.createdAt,
     updatedAt: tobeVision.updatedAt,
   };
@@ -89,6 +92,7 @@ export class CreateTobeVisionUseCase {
         countermeasure: input.countermeasure,
         effect: input.effect,
         order: input.order,
+        subProjectId: input.subProjectId,
       },
       id,
     );

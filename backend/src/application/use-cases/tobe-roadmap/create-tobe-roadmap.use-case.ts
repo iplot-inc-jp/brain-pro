@@ -21,6 +21,8 @@ export interface CreateTobeRoadmapInput {
   payback?: string | null;
   scope?: string | null;
   order?: number;
+  subProjectId?: string | null;
+  tobeVisionId?: string | null;
 }
 
 export interface TobeRoadmapOutput {
@@ -33,6 +35,8 @@ export interface TobeRoadmapOutput {
   payback: string | null;
   scope: string | null;
   order: number;
+  subProjectId: string | null;
+  tobeVisionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,6 +54,8 @@ export function toTobeRoadmapOutput(
     payback: tobeRoadmap.payback,
     scope: tobeRoadmap.scope,
     order: tobeRoadmap.order,
+    subProjectId: tobeRoadmap.subProjectId,
+    tobeVisionId: tobeRoadmap.tobeVisionId,
     createdAt: tobeRoadmap.createdAt,
     updatedAt: tobeRoadmap.updatedAt,
   };
@@ -99,6 +105,8 @@ export class CreateTobeRoadmapUseCase {
         payback: input.payback,
         scope: input.scope,
         order: input.order,
+        subProjectId: input.subProjectId,
+        tobeVisionId: input.tobeVisionId,
       },
       id,
     );

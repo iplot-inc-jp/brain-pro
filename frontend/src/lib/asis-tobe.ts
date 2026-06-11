@@ -37,7 +37,9 @@ export interface AsisMemo {
 export interface TobeVision {
   id: string;
   projectId: string;
-  area: string | null; // 領域
+  // 領域（SubProject マスタ）への紐づけ。データ連携の主役。未分類なら null。
+  subProjectId: string | null;
+  area: string | null; // 領域（フリーテキスト。後方互換のため残置）
   vision: string | null; // あるべき姿
   countermeasure: string | null; // 打ち手
   effect: string | null; // 期待効果
@@ -50,6 +52,10 @@ export interface TobeVision {
 export interface TobeRoadmap {
   id: string;
   projectId: string;
+  // 領域（SubProject マスタ）への紐づけ。未分類なら null。
+  subProjectId: string | null;
+  // 元になった あるべき姿・打ち手（TobeVision）への紐づけ。未選択なら null。
+  tobeVisionId: string | null;
   phase: string | null; // フェーズ
   measure: string | null; // 打ち手
   roi: string | null; // ROI

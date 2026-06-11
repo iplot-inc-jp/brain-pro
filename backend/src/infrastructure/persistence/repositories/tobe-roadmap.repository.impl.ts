@@ -13,6 +13,8 @@ export class TobeRoadmapRepositoryImpl implements ITobeRoadmapRepository {
   private toDomain(data: {
     id: string;
     projectId: string;
+    subProjectId: string | null;
+    tobeVisionId: string | null;
     phase: string | null;
     measure: string | null;
     roi: string | null;
@@ -26,6 +28,8 @@ export class TobeRoadmapRepositoryImpl implements ITobeRoadmapRepository {
     return TobeRoadmap.reconstruct({
       id: data.id,
       projectId: data.projectId,
+      subProjectId: data.subProjectId,
+      tobeVisionId: data.tobeVisionId,
       phase: data.phase,
       measure: data.measure,
       roi: data.roi,
@@ -55,6 +59,8 @@ export class TobeRoadmapRepositoryImpl implements ITobeRoadmapRepository {
   async save(tobeRoadmap: TobeRoadmap): Promise<void> {
     const data = {
       projectId: tobeRoadmap.projectId,
+      subProjectId: tobeRoadmap.subProjectId,
+      tobeVisionId: tobeRoadmap.tobeVisionId,
       phase: tobeRoadmap.phase,
       measure: tobeRoadmap.measure,
       roi: tobeRoadmap.roi,

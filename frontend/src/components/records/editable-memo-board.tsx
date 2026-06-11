@@ -25,11 +25,24 @@ export interface MemoRow {
   order: number;
 }
 
-/** 列定義。kind を省略すると 'text'（複数行は 'multiline'）。 */
+/** select 列の選択肢（value は保存される ID、空文字は「未選択」）。 */
+export interface MemoSelectOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * 列定義。kind を省略すると 'text'（複数行は 'multiline'）。
+ * kind='select' のときは options（ID→ラベル）を渡す。空文字 value で「未選択」を表す。
+ */
 export interface MemoColumn<T> {
   key: keyof T & string;
   label: string;
-  kind?: 'text' | 'multiline';
+  kind?: 'text' | 'multiline' | 'select';
+  /** kind='select' の選択肢。先頭に「未選択(空文字)」相当を含めず、本体が自動で付与する。 */
+  options?: MemoSelectOption[];
+  /** select の「未選択」表示ラベル（既定: 「未選択」）。 */
+  emptyLabel?: string;
 }
 
 /** 渡される CRUD クライアント（asis-tobe.ts の各 api と互換）。 */
@@ -215,14 +228,20 @@ export function EditableMemoBoard<T extends MemoRow, TInput>({
                         ((r as Record<string, unknown>)[col.key] as
                           | string
                           | null) ?? '';
+                      // select 列は ID ではなく対応するラベルを表示する。
+                      const display =
+                        col.kind === 'select'
+                          ? (col.options?.find((o) => o.value === raw)?.label ??
+                            '')
+                          : raw;
                       return (
                         <td
                           key={col.key}
                           className="max-w-[260px] px-3 py-2 align-middle text-gray-900"
                         >
-                          {raw ? (
+                          {display ? (
                             <span className="line-clamp-2 whitespace-pre-wrap break-words">
-                              {raw}
+                              {display}
                             </span>
                           ) : (
                             <span className="text-gray-300">—</span>
@@ -294,7 +313,20 @@ export function EditableMemoBoard<T extends MemoRow, TInput>({
                     <label className="flex items-center justify-between text-[11px] font-medium text-gray-500">
                       <span>{col.label}</span>
                     </label>
-                    {col.kind === 'text' ? (
+                    {col.kind === 'select' ? (
+                      <select
+                        value={value}
+                        onChange={(e) => setDraftField(col.key, e.target.value)}
+                        className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="">{col.emptyLabel ?? '未選択'}</option>
+                        {(col.options ?? []).map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : col.kind === 'text' ? (
                       <input
                         type="text"
                         value={value}

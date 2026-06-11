@@ -24,6 +24,8 @@ export interface UpdateTobeRoadmapInput {
   payback?: string | null;
   scope?: string | null;
   order?: number;
+  subProjectId?: string | null;
+  tobeVisionId?: string | null;
 }
 
 /**
@@ -73,6 +75,8 @@ export class UpdateTobeRoadmapUseCase {
       payback: input.payback,
       scope: input.scope,
       order: input.order,
+      subProjectId: input.subProjectId,
+      tobeVisionId: input.tobeVisionId,
     });
 
     // 5. 永続化

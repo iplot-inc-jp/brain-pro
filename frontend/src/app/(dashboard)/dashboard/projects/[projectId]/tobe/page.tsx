@@ -109,6 +109,8 @@ export default function TobeManagementPage() {
   const [flows, setFlows] = useState<BusinessFlow[]>([]);
   const [subProjects, setSubProjects] = useState<SubProject[]>([]);
   const [folders, setFolders] = useState<FlowFolder[]>([]);
+  // 段階設計の「打ち手」セレクト用。あるべき姿・打ち手（TobeVision）を ID→ラベルで参照する。
+  const [tobeVisions, setTobeVisions] = useState<TobeVision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,15 +127,18 @@ export default function TobeManagementPage() {
     setError(null);
     try {
       // 領域（SubProject）は ASIS と共通の subProjectApi.list で取得する。
-      const [flowRes, subProjectsData, folderRes] = await Promise.all([
-        fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
-          headers: authHeaders(),
-        }),
-        subProjectApi.list(projectId).catch(() => [] as SubProject[]),
-        fetch(`${API_URL}/api/projects/${projectId}/flow-folders`, {
-          headers: authHeaders(),
-        }),
-      ]);
+      // あるべき姿・打ち手（TobeVision）は段階設計の「打ち手」セレクトの選択肢に使う。
+      const [flowRes, subProjectsData, folderRes, tobeVisionsData] =
+        await Promise.all([
+          fetch(`${API_URL}/api/business-flows/project/${projectId}/all`, {
+            headers: authHeaders(),
+          }),
+          subProjectApi.list(projectId).catch(() => [] as SubProject[]),
+          fetch(`${API_URL}/api/projects/${projectId}/flow-folders`, {
+            headers: authHeaders(),
+          }),
+          tobeVisionApi.list(projectId).catch(() => [] as TobeVision[]),
+        ]);
 
       if (flowRes.ok) {
         const data = await flowRes.json();
@@ -142,6 +147,7 @@ export default function TobeManagementPage() {
         setError('業務フローの読み込みに失敗しました');
       }
       setSubProjects(Array.isArray(subProjectsData) ? subProjectsData : []);
+      setTobeVisions(Array.isArray(tobeVisionsData) ? tobeVisionsData : []);
       if (folderRes.ok) {
         const data = await folderRes.json();
         setFolders(Array.isArray(data) ? data : []);
@@ -176,6 +182,32 @@ export default function TobeManagementPage() {
   const folderName = useCallback(
     (id?: string | null) => folders.find((f) => f.id === id)?.name ?? null,
     [folders]
+  );
+
+  // メモボードの select 列用：領域／サブ領域（全角スペースで入れ子インデント）。
+  const subProjectOptions = useMemo(
+    () =>
+      flatSubProjects.map(({ sub, depth }) => ({
+        value: sub.id,
+        label: `${'　'.repeat(depth)}${sub.name}`,
+      })),
+    [flatSubProjects]
+  );
+
+  // 段階設計の「打ち手」select 用：あるべき姿・打ち手（TobeVision）を ID→ラベルで。
+  // ラベルは「打ち手」優先、無ければ「あるべき姿」、どちらも無ければ領域名で代替する。
+  const tobeVisionOptions = useMemo(
+    () =>
+      tobeVisions.map((v) => {
+        const label =
+          v.countermeasure?.trim() ||
+          v.vision?.trim() ||
+          subProjectName(v.subProjectId) ||
+          v.area?.trim() ||
+          '（無題の打ち手）';
+        return { value: v.id, label };
+      }),
+    [tobeVisions, subProjectName]
   );
 
   const openFlow = (id: string) =>
@@ -369,10 +401,19 @@ export default function TobeManagementPage() {
               api={tobeVisionApi}
               entityLabel="あるべき姿"
               columns={[
-                { key: 'area', label: '領域', kind: 'text' },
+                // 領域は ASIS と共通の SubProject マスタから選択（データ連携の主役）。
+                {
+                  key: 'subProjectId',
+                  label: '領域',
+                  kind: 'select',
+                  options: subProjectOptions,
+                  emptyLabel: '未分類',
+                },
                 { key: 'vision', label: 'あるべき姿', kind: 'multiline' },
                 { key: 'countermeasure', label: '打ち手', kind: 'multiline' },
                 { key: 'effect', label: '期待効果', kind: 'multiline' },
+                // 旧フリーテキストの領域メモ（後方互換のため残置）。
+                { key: 'area', label: '領域メモ（自由記述）', kind: 'text' },
               ]}
             />
           </section>
@@ -394,7 +435,23 @@ export default function TobeManagementPage() {
               entityLabel="段階設計"
               columns={[
                 { key: 'phase', label: 'フェーズ', kind: 'text' },
-                { key: 'measure', label: '打ち手', kind: 'multiline' },
+                // 「あるべき姿・打ち手」テーブルの行を選んで紐づける（データ連携）。
+                {
+                  key: 'tobeVisionId',
+                  label: '紐づく打ち手（あるべき姿）',
+                  kind: 'select',
+                  options: tobeVisionOptions,
+                  emptyLabel: '未選択',
+                },
+                // 領域は ASIS と共通の SubProject マスタから選択。
+                {
+                  key: 'subProjectId',
+                  label: '領域',
+                  kind: 'select',
+                  options: subProjectOptions,
+                  emptyLabel: '未分類',
+                },
+                { key: 'measure', label: '打ち手（補足）', kind: 'multiline' },
                 { key: 'roi', label: 'ROI', kind: 'text' },
                 { key: 'cost', label: '実装コスト', kind: 'text' },
                 { key: 'payback', label: '回収期間', kind: 'text' },

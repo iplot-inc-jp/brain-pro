@@ -67,6 +67,16 @@ class CreateTobeRoadmapDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  @ApiPropertyOptional({ description: '領域（サブプロジェクト）ID', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: '元になったTOBEビジョンID', nullable: true })
+  @IsOptional()
+  @IsString()
+  tobeVisionId?: string | null;
 }
 
 class UpdateTobeRoadmapDto {
@@ -104,6 +114,16 @@ class UpdateTobeRoadmapDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  @ApiPropertyOptional({ description: '領域（サブプロジェクト）ID', nullable: true })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: '元になったTOBEビジョンID', nullable: true })
+  @IsOptional()
+  @IsString()
+  tobeVisionId?: string | null;
 }
 
 @ApiTags('TOBEロードマップ')
@@ -152,6 +172,8 @@ export class TobeRoadmapController {
       payback: dto.payback,
       scope: dto.scope,
       order: dto.order,
+      subProjectId: dto.subProjectId,
+      tobeVisionId: dto.tobeVisionId,
     });
   }
 }
@@ -185,6 +207,8 @@ export class TobeRoadmapByIdController {
       payback: dto.payback,
       scope: dto.scope,
       order: dto.order,
+      subProjectId: dto.subProjectId,
+      tobeVisionId: dto.tobeVisionId,
     });
   }
 

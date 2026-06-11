@@ -13,6 +13,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
   private toDomain(data: {
     id: string;
     projectId: string;
+    subProjectId: string | null;
     area: string | null;
     vision: string | null;
     countermeasure: string | null;
@@ -24,6 +25,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
     return TobeVision.reconstruct({
       id: data.id,
       projectId: data.projectId,
+      subProjectId: data.subProjectId,
       area: data.area,
       vision: data.vision,
       countermeasure: data.countermeasure,
@@ -51,6 +53,7 @@ export class TobeVisionRepositoryImpl implements ITobeVisionRepository {
   async save(tobeVision: TobeVision): Promise<void> {
     const data = {
       projectId: tobeVision.projectId,
+      subProjectId: tobeVision.subProjectId,
       area: tobeVision.area,
       vision: tobeVision.vision,
       countermeasure: tobeVision.countermeasure,

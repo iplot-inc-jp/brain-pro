@@ -10,6 +10,8 @@ export interface CreateTobeRoadmapProps {
   payback?: string | null;
   scope?: string | null;
   order?: number;
+  subProjectId?: string | null;
+  tobeVisionId?: string | null;
 }
 
 export interface ReconstructTobeRoadmapProps {
@@ -22,6 +24,8 @@ export interface ReconstructTobeRoadmapProps {
   payback: string | null;
   scope: string | null;
   order: number;
+  subProjectId: string | null;
+  tobeVisionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,6 +38,8 @@ export interface UpdateTobeRoadmapProps {
   payback?: string | null;
   scope?: string | null;
   order?: number;
+  subProjectId?: string | null;
+  tobeVisionId?: string | null;
 }
 
 /**
@@ -49,6 +55,8 @@ export class TobeRoadmap extends BaseEntity {
   private _payback: string | null;
   private _scope: string | null;
   private _order: number;
+  private _subProjectId: string | null;
+  private _tobeVisionId: string | null;
 
   private constructor(
     id: string,
@@ -60,6 +68,8 @@ export class TobeRoadmap extends BaseEntity {
     payback: string | null,
     scope: string | null,
     order: number,
+    subProjectId: string | null,
+    tobeVisionId: string | null,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -72,6 +82,8 @@ export class TobeRoadmap extends BaseEntity {
     this._payback = payback;
     this._scope = scope;
     this._order = order;
+    this._subProjectId = subProjectId;
+    this._tobeVisionId = tobeVisionId;
   }
 
   /**
@@ -93,6 +105,8 @@ export class TobeRoadmap extends BaseEntity {
       props.payback?.trim() || null,
       props.scope?.trim() || null,
       props.order ?? 0,
+      props.subProjectId ?? null,
+      props.tobeVisionId ?? null,
       now,
       now,
     );
@@ -112,6 +126,8 @@ export class TobeRoadmap extends BaseEntity {
       props.payback,
       props.scope,
       props.order,
+      props.subProjectId,
+      props.tobeVisionId,
       props.createdAt,
       props.updatedAt,
     );
@@ -140,6 +156,12 @@ export class TobeRoadmap extends BaseEntity {
     }
     if (props.order !== undefined) {
       this._order = props.order;
+    }
+    if (props.subProjectId !== undefined) {
+      this._subProjectId = props.subProjectId ?? null;
+    }
+    if (props.tobeVisionId !== undefined) {
+      this._tobeVisionId = props.tobeVisionId ?? null;
     }
     this.touch();
   }
@@ -176,5 +198,13 @@ export class TobeRoadmap extends BaseEntity {
 
   get order(): number {
     return this._order;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
+  }
+
+  get tobeVisionId(): string | null {
+    return this._tobeVisionId;
   }
 }
