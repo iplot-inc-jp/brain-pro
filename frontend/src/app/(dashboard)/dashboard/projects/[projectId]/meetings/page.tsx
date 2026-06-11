@@ -25,6 +25,7 @@ import {
   Pause,
   Play,
   ExternalLink,
+  ShieldAlert,
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
@@ -40,6 +41,14 @@ import {
   setMeetingStakeholders,
   listStakeholders,
 } from '@/lib/stakeholders';
+import {
+  listRisks,
+  riskScore,
+  scoreBand,
+  scoreBandBadgeClasses,
+  lifecycleMeta,
+  type Risk,
+} from '@/lib/risks';
 
 // 形式の選択肢（schema 上は自由文字列だが UI では3択 + 未設定）。
 const FORMAT_OPTIONS = ['対面', 'オンライン', 'ハイブリッド'] as const;
@@ -47,6 +56,15 @@ const FORMAT_OPTIONS = ['対面', 'オンライン', 'ハイブリッド'] as co
 /** ステータス表示（ACTIVE=開催中 / SUSPENDED=休止。null は開催中扱い）。 */
 function isActive(status: string | null): boolean {
   return status !== 'SUSPENDED';
+}
+
+/** リスクの表示名（事象内容 → code → 無題 の順）。 */
+function riskName(r: Risk): string {
+  return (r.event ?? '').trim() || (r.code ?? '').trim() || '（無題のリスク）';
+}
+
+function truncateText(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 /** 形式→バッジ色。 */
@@ -145,6 +163,7 @@ export default function MeetingsPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
+  const [risks, setRisks] = useState<Risk[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,12 +177,14 @@ export default function MeetingsPage() {
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [mt, sh] = await Promise.all([
+      const [mt, sh, rs] = await Promise.all([
         listMeetings(projectId),
         listStakeholders(projectId),
+        listRisks(projectId),
       ]);
       setMeetings(mt);
       setStakeholders(sh);
+      setRisks(rs);
     } catch (e) {
       setError(e instanceof Error ? e.message : '読み込みに失敗しました');
     }
@@ -185,6 +206,18 @@ export default function MeetingsPage() {
     () => new Map(stakeholders.map((s) => [s.id, s])),
     [stakeholders],
   );
+
+  // 会議 → レビュー対象リスク（Risk.reviewMeetingId による逆引き）。
+  const risksByMeeting = useMemo(() => {
+    const m = new Map<string, Risk[]>();
+    for (const r of risks) {
+      if (!r.reviewMeetingId) continue;
+      const arr = m.get(r.reviewMeetingId) ?? [];
+      arr.push(r);
+      m.set(r.reviewMeetingId, arr);
+    }
+    return m;
+  }, [risks]);
 
   const openCreate = () => {
     setEditId(null);
@@ -359,6 +392,9 @@ export default function MeetingsPage() {
                     <th className="min-w-[200px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
                       対象ステークホルダー
                     </th>
+                    <th className="min-w-[180px] bg-rose-50 px-3 py-2 text-left text-xs font-semibold text-rose-700">
+                      レビュー対象リスク
+                    </th>
                     <th className="w-12 px-2 py-2" aria-label="操作" />
                   </tr>
                 </thead>
@@ -367,6 +403,7 @@ export default function MeetingsPage() {
                     const owner = m.ownerStakeholderId
                       ? stakeholderById.get(m.ownerStakeholderId)
                       : undefined;
+                    const reviewRisks = risksByMeeting.get(m.id) ?? [];
                     const active = isActive(m.status);
                     return (
                       <tr
@@ -478,6 +515,44 @@ export default function MeetingsPage() {
                           </div>
                         </td>
 
+                        {/* レビュー対象リスク（Risk.reviewMeetingId の逆引き） */}
+                        <td
+                          className="bg-rose-50/40 px-3 py-2.5 align-middle"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex max-w-[260px] flex-wrap gap-1">
+                            {reviewRisks.length === 0 && (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                            {reviewRisks.map((r) => {
+                              const score = riskScore(
+                                r.probabilityScore,
+                                r.impactScore,
+                              );
+                              return (
+                                <Link
+                                  key={r.id}
+                                  href={`/dashboard/projects/${projectId}/risk-management`}
+                                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] text-rose-800 hover:bg-rose-200"
+                                  title={`${riskName(r)}（リスクマネジメントで開く）`}
+                                >
+                                  <ShieldAlert className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">
+                                    {truncateText(riskName(r), 16)}
+                                  </span>
+                                  {score != null && (
+                                    <span
+                                      className={`inline-flex shrink-0 rounded-full border px-1 text-[10px] font-bold tabular-nums ${scoreBandBadgeClasses[scoreBand(score)]}`}
+                                    >
+                                      {score}
+                                    </span>
+                                  )}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </td>
+
                         <td
                           className="px-2 py-2.5 text-center align-middle"
                           onClick={(e) => e.stopPropagation()}
@@ -498,7 +573,7 @@ export default function MeetingsPage() {
                   {meetings.length === 0 && (
                     <tr>
                       <td
-                        colSpan={11}
+                        colSpan={12}
                         className="px-4 py-10 text-center text-sm text-gray-400"
                       >
                         まだ会議体がありません。「会議体を追加」から始めましょう。
@@ -779,6 +854,74 @@ export default function MeetingsPage() {
                   </div>
                 )}
               </Field>
+
+              {/* レビュー対象リスク（Risk.reviewMeetingId の逆引き、読み取り専用） */}
+              {editId && (
+                <Field label="レビュー対象リスク">
+                  {(() => {
+                    const reviewRisks = risksByMeeting.get(editId) ?? [];
+                    if (reviewRisks.length === 0) {
+                      return (
+                        <p className="text-xs text-gray-400">
+                          この会議をレビュー会議に設定しているリスクはありません。
+                          紐付けは
+                          <Link
+                            href={`/dashboard/projects/${projectId}/risk-management`}
+                            className="mx-1 font-medium text-blue-600 hover:underline"
+                          >
+                            リスクマネジメント
+                          </Link>
+                          の各リスク編集（レビュー会議）から行います。
+                        </p>
+                      );
+                    }
+                    return (
+                      <ul className="space-y-1 rounded-md border border-gray-200 p-2">
+                        {reviewRisks.map((r) => {
+                          const score = riskScore(
+                            r.probabilityScore,
+                            r.impactScore,
+                          );
+                          const lc = lifecycleMeta(r.lifecycle ?? 'IDENTIFIED');
+                          return (
+                            <li
+                              key={r.id}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              {score != null ? (
+                                <span
+                                  className={`inline-flex shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${scoreBandBadgeClasses[scoreBand(score)]}`}
+                                  title="スコア（確率×影響）"
+                                >
+                                  {score}
+                                </span>
+                              ) : (
+                                <span className="inline-flex shrink-0 rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-400">
+                                  未評価
+                                </span>
+                              )}
+                              <span
+                                className={`inline-flex shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${lc.chip}`}
+                              >
+                                {lc.label}
+                              </span>
+                              <Link
+                                href={`/dashboard/projects/${projectId}/risk-management`}
+                                className="inline-flex min-w-0 items-center gap-1 text-blue-600 hover:underline"
+                                title="リスクマネジメントで開く"
+                              >
+                                <ShieldAlert className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{riskName(r)}</span>
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+                </Field>
+              )}
 
               <Field label="アジェンダ雛形">
                 <textarea

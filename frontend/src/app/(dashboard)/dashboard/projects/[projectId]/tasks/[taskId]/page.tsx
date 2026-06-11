@@ -35,6 +35,7 @@ import {
   FileText,
   GitBranch,
   Image as ImageIcon,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -55,6 +56,13 @@ import {
   type TaskAttachment,
   type IssueNodeRef,
 } from '@/lib/tasks';
+import {
+  listRisks,
+  riskScore,
+  scoreBand,
+  scoreBandBadgeClasses,
+  type Risk,
+} from '@/lib/risks';
 
 type EditState = {
   title: string;
@@ -205,6 +213,30 @@ export default function TaskDetailPage() {
     }
     return null;
   }, [task, issueNodeById]);
+
+  // 由来リスク（riskId が付いたリスク対応タスクのみ取得・表示）
+  const [originRisk, setOriginRisk] = useState<Risk | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const riskId = task?.riskId;
+    if (!riskId) {
+      setOriginRisk(null);
+      return;
+    }
+    (async () => {
+      try {
+        const risks = await listRisks(projectId);
+        if (!cancelled) {
+          setOriginRisk(risks.find((r) => r.id === riskId) ?? null);
+        }
+      } catch {
+        // 由来リスクの表示は補助情報なので、取得失敗は黙って無視する
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [task?.riskId, projectId]);
 
   const parent = task?.parentId ? taskById.get(task.parentId) ?? null : null;
 
@@ -771,6 +803,41 @@ export default function TaskDetailPage() {
                   <span className="text-gray-400">なし</span>
                 )}
               </DetailRow>
+
+              {/* 由来リスク（リスク対応タスク） */}
+              {task.riskId && (
+                <DetailRow label="由来リスク">
+                  <Link
+                    href={`/dashboard/projects/${projectId}/risk-management`}
+                    className="inline-flex items-center gap-1.5 text-blue-600 hover:underline"
+                    title="リスクマネジメントで開く"
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    <span>
+                      {originRisk
+                        ? (originRisk.event ?? '').trim() ||
+                          (originRisk.code ?? '').trim() ||
+                          '（無題のリスク）'
+                        : 'リスクマネジメントで確認'}
+                    </span>
+                    {originRisk &&
+                      (() => {
+                        const score = riskScore(
+                          originRisk.probabilityScore,
+                          originRisk.impactScore,
+                        );
+                        return score != null ? (
+                          <span
+                            className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${scoreBandBadgeClasses[scoreBand(score)]}`}
+                            title="スコア（確率×影響）"
+                          >
+                            {score}
+                          </span>
+                        ) : null;
+                      })()}
+                  </Link>
+                </DetailRow>
+              )}
 
               {/* 親タスク */}
               <DetailRow label="親タスク">

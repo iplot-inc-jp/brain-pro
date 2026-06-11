@@ -15,6 +15,7 @@ export * from './dfd.controller';
 export * from './stakeholder.controller';
 export * from './meeting.controller';
 export * from './risk.controller';
+export * from './risk-category.controller';
 export * from './supplier.controller';
 export * from './product.controller';
 export * from './demand-data.controller';

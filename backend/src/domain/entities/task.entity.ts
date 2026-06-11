@@ -32,6 +32,8 @@ export interface CreateTaskProps {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
+  riskId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -55,6 +57,8 @@ export interface ReconstructTaskProps {
   issueNodeId: string | null;
   /** 紐付くノードの最小情報（join 済みの場合のみ）。 */
   linkedIssueNode?: LinkedIssueNode | null;
+  /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
+  riskId: string | null;
   startDate: Date | null;
   dueDate: Date | null;
   progress: number;
@@ -79,6 +83,8 @@ export interface UpdateTaskProps {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** リスク対応タスクの紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
+  riskId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -111,6 +117,7 @@ export class Task extends BaseEntity {
   private _assigneeName: string | null;
   private _assigneeRoleId: string | null;
   private _issueNodeId: string | null;
+  private _riskId: string | null;
   private _startDate: Date | null;
   private _dueDate: Date | null;
   private _progress: number;
@@ -133,6 +140,7 @@ export class Task extends BaseEntity {
     assigneeName: string | null,
     assigneeRoleId: string | null,
     issueNodeId: string | null,
+    riskId: string | null,
     startDate: Date | null,
     dueDate: Date | null,
     progress: number,
@@ -155,6 +163,7 @@ export class Task extends BaseEntity {
     this._assigneeName = assigneeName;
     this._assigneeRoleId = assigneeRoleId;
     this._issueNodeId = issueNodeId;
+    this._riskId = riskId;
     this._startDate = startDate;
     this._dueDate = dueDate;
     this._progress = progress;
@@ -246,6 +255,7 @@ export class Task extends BaseEntity {
       props.assigneeName?.trim() || null,
       props.assigneeRoleId ?? null,
       props.issueNodeId ?? null,
+      props.riskId ?? null,
       props.startDate ?? null,
       props.dueDate ?? null,
       progress,
@@ -274,6 +284,7 @@ export class Task extends BaseEntity {
       props.assigneeName,
       props.assigneeRoleId,
       props.issueNodeId,
+      props.riskId,
       props.startDate,
       props.dueDate,
       props.progress,
@@ -315,6 +326,9 @@ export class Task extends BaseEntity {
     }
     if (props.issueNodeId !== undefined) {
       this.linkIssueNode(props.issueNodeId ?? null);
+    }
+    if (props.riskId !== undefined) {
+      this._riskId = props.riskId ?? null;
     }
     if (props.startDate !== undefined) {
       this._startDate = props.startDate ?? null;
@@ -425,6 +439,11 @@ export class Task extends BaseEntity {
 
   get issueNodeId(): string | null {
     return this._issueNodeId;
+  }
+
+  /** リスク対応タスクの紐付け先リスクID（未紐付けは null）。 */
+  get riskId(): string | null {
+    return this._riskId;
   }
 
   /** read 時に join された紐付けノードの最小情報（無ければ null）。 */

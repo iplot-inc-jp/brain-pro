@@ -31,6 +31,7 @@ import {
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
   RISK_REPOSITORY,
+  RISK_CATEGORY_REPOSITORY,
   SUPPLIER_REPOSITORY,
   PRODUCT_REPOSITORY,
   DEMAND_DATA_REPOSITORY,
@@ -157,6 +158,11 @@ import {
   GetRisksUseCase,
   UpdateRiskUseCase,
   DeleteRiskUseCase,
+  // RiskCategory
+  CreateRiskCategoryUseCase,
+  GetRiskCategoriesUseCase,
+  UpdateRiskCategoryUseCase,
+  DeleteRiskCategoryUseCase,
   // Supplier
   CreateSupplierUseCase,
   GetSuppliersUseCase,
@@ -232,6 +238,7 @@ import {
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
   RiskRepositoryImpl,
+  RiskCategoryRepositoryImpl,
   SupplierRepositoryImpl,
   ProductRepositoryImpl,
   DemandDataRepositoryImpl,
@@ -273,6 +280,8 @@ import {
   MeetingByIdController,
   RiskController,
   RiskByIdController,
+  RiskCategoryController,
+  RiskCategoryByIdController,
   SupplierController,
   SupplierByIdController,
   ProductController,
@@ -392,6 +401,8 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     MeetingByIdController,
     RiskController,
     RiskByIdController,
+    RiskCategoryController,
+    RiskCategoryByIdController,
     SupplierController,
     SupplierByIdController,
     ProductController,
@@ -522,6 +533,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: RISK_REPOSITORY,
       useClass: RiskRepositoryImpl,
+    },
+    {
+      provide: RISK_CATEGORY_REPOSITORY,
+      useClass: RiskCategoryRepositoryImpl,
     },
     {
       provide: SUPPLIER_REPOSITORY,
@@ -672,6 +687,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetRisksUseCase,
     UpdateRiskUseCase,
     DeleteRiskUseCase,
+    // RiskCategory
+    CreateRiskCategoryUseCase,
+    GetRiskCategoriesUseCase,
+    UpdateRiskCategoryUseCase,
+    DeleteRiskCategoryUseCase,
     // Supplier
     CreateSupplierUseCase,
     GetSuppliersUseCase,

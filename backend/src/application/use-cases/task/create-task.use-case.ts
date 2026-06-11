@@ -30,6 +30,8 @@ export interface CreateTaskInput {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
+  riskId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -97,6 +99,7 @@ export class CreateTaskUseCase {
         assigneeName: input.assigneeName,
         assigneeRoleId: input.assigneeRoleId,
         issueNodeId: input.issueNodeId,
+        riskId: input.riskId,
         startDate: input.startDate,
         dueDate: input.dueDate,
         progress: input.progress,

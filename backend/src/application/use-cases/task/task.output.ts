@@ -17,6 +17,8 @@ export interface TaskOutput {
   issueNodeLabel: string | null;
   /** 紐付くノードの種別。未紐付けは null。 */
   issueNodeKind: IssueNodeKind | null;
+  /** リスク対応タスクの紐付け先リスクID。未紐付けは null。 */
+  riskId: string | null;
   startDate: Date | null;
   dueDate: Date | null;
   progress: number;
@@ -69,6 +71,7 @@ export function toTaskOutput(task: Task): TaskOutput {
     issueNodeId: task.issueNodeId,
     issueNodeLabel: node ? node.label : null,
     issueNodeKind: node ? node.kind : null,
+    riskId: task.riskId,
     startDate: task.startDate,
     dueDate: task.dueDate,
     progress: task.progress,

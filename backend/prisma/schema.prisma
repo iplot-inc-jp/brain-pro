@@ -108,6 +108,7 @@ model Project {
   stakeholders      Stakeholder[]
   meetings          Meeting[]
   risks             Risk[]
+  riskCategories    RiskCategory[]
   suppliers         Supplier[]
   products          Product[]
   demandData        DemandData[]
@@ -1056,6 +1057,7 @@ model SubProject {
   informationTypes InformationType[]
   tobeVisions      TobeVision[]
   tobeRoadmaps     TobeRoadmap[]
+  risks            Risk[]
 
   @@map("sub_projects")
 }
@@ -1205,6 +1207,8 @@ model Task {
   assigneeRoleId String?      @map("assignee_role_id")
   // イシューツリーのノードへの紐付け（ISSUE/CAUSE/COUNTERMEASURE）。任意。
   issueNodeId    String?      @map("issue_node_id")
+  // リスク対応タスクの紐付け（任意）
+  riskId         String?      @map("risk_id")
   startDate      DateTime?    @map("start_date")
   dueDate        DateTime?    @map("due_date")
   progress       Int          @default(0)
@@ -1221,6 +1225,7 @@ model Task {
   children     Task[]           @relation("TaskHierarchy")
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
   issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
+  risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
   // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）
   predecessors TaskDependency[] @relation("DepSuccessor")
   // この依存関係でこのタスクが先行側（後続タスクから参照される）
@@ -1398,6 +1403,7 @@ model Stakeholder {
   meetings        MeetingStakeholder[]
   reportCalendars ReportCalendar[]
   ownedMeetings   Meeting[]            @relation("MeetingOwner")
+  ownedRisks      Risk[]               @relation("RiskOwner")
 
   @@map("stakeholders")
 }
@@ -1434,6 +1440,7 @@ model Meeting {
   owner           Stakeholder?         @relation("MeetingOwner", fields: [ownerStakeholderId], references: [id], onDelete: SetNull)
   stakeholders    MeetingStakeholder[]
   reportCalendars ReportCalendar[]
+  risks           Risk[]
 
   @@map("meetings")
 }
@@ -1456,8 +1463,25 @@ model MeetingStakeholder {
 }
 
 // ===========================================
-// リスク・ボトルネック登録簿
+// リスク・ボトルネック登録簿（PMBOK準拠）
 // ===========================================
+
+// RBS（リスク・ブレークダウン・ストラクチャー）のカテゴリ
+model RiskCategory {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  risks   Risk[]
+
+  // 初期カテゴリの冪等シード（同時GET競合時の重複挿入防止）に必須
+  @@unique([projectId, name])
+  @@map("risk_categories")
+}
 
 model Risk {
   id             String   @id @default(uuid())
@@ -1466,8 +1490,8 @@ model Risk {
   type           String? // リスク / ボトルネック
   event          String?  @db.Text // 事象内容
   causeCategory  String?  @map("cause_category") // 人 / 情報 / 決裁 / 技術 / 外部
-  probability    String? // 高 / 中 / 低
-  impact         String? // 高 / 中 / 低
+  probability    String? // 高 / 中 / 低（旧・後方互換のため残置）
+  impact         String? // 高 / 中 / 低（旧・後方互換のため残置）
   priority       String?
   countermeasure String?  @db.Text // 対応策（予防・軽減）
   needsMtg       String?  @map("needs_mtg") // 要 / 不要
@@ -1480,7 +1504,26 @@ model Risk {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // --- PMBOK準拠の追加項目（全て optional・後方互換） ---
+  categoryId         String? @map("category_id") // RBSカテゴリ
+  subProjectId       String? @map("sub_project_id") // 対象サブ領域
+  ownerStakeholderId String? @map("owner_stakeholder_id") // リスクオーナー
+  reviewMeetingId    String? @map("review_meeting_id") // レビュー会議体
+  probabilityScore   Int?    @map("probability_score") // 発生確率 1-5
+  impactScore        Int?    @map("impact_score") // 影響度 1-5
+  riskType           String? @default("THREAT") @map("risk_type") // THREAT / OPPORTUNITY
+  strategy           String? // 回避 / 転嫁 / 軽減 / 受容 / 活用 / 共有 / 強化
+  responsePlan       String? @map("response_plan") @db.Text // 対応計画
+  contingencyPlan    String? @map("contingency_plan") @db.Text // コンティンジェンシー計画
+  trigger            String? @db.Text // トリガー条件
+  lifecycle          String? @default("IDENTIFIED") // IDENTIFIED / ANALYZED / RESPONDING / MONITORING / OCCURRED / CLOSED
+
+  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category         RiskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subProject       SubProject?   @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  ownerStakeholder Stakeholder?  @relation("RiskOwner", fields: [ownerStakeholderId], references: [id], onDelete: SetNull)
+  reviewMeeting    Meeting?      @relation(fields: [reviewMeetingId], references: [id], onDelete: SetNull)
+  tasks            Task[]
 
   @@map("risks")
 }

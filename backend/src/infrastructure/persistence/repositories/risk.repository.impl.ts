@@ -28,6 +28,18 @@ export class RiskRepositoryImpl implements IRiskRepository {
     status: string | null;
     note: string | null;
     order: number;
+    categoryId: string | null;
+    subProjectId: string | null;
+    ownerStakeholderId: string | null;
+    reviewMeetingId: string | null;
+    probabilityScore: number | null;
+    impactScore: number | null;
+    riskType: string | null;
+    strategy: string | null;
+    responsePlan: string | null;
+    contingencyPlan: string | null;
+    trigger: string | null;
+    lifecycle: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): Risk {
@@ -49,6 +61,18 @@ export class RiskRepositoryImpl implements IRiskRepository {
       status: data.status,
       note: data.note,
       order: data.order,
+      categoryId: data.categoryId,
+      subProjectId: data.subProjectId,
+      ownerStakeholderId: data.ownerStakeholderId,
+      reviewMeetingId: data.reviewMeetingId,
+      probabilityScore: data.probabilityScore,
+      impactScore: data.impactScore,
+      riskType: data.riskType,
+      strategy: data.strategy,
+      responsePlan: data.responsePlan,
+      contingencyPlan: data.contingencyPlan,
+      trigger: data.trigger,
+      lifecycle: data.lifecycle,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -86,6 +110,18 @@ export class RiskRepositoryImpl implements IRiskRepository {
       status: risk.status,
       note: risk.note,
       order: risk.order,
+      categoryId: risk.categoryId,
+      subProjectId: risk.subProjectId,
+      ownerStakeholderId: risk.ownerStakeholderId,
+      reviewMeetingId: risk.reviewMeetingId,
+      probabilityScore: risk.probabilityScore,
+      impactScore: risk.impactScore,
+      riskType: risk.riskType,
+      strategy: risk.strategy,
+      responsePlan: risk.responsePlan,
+      contingencyPlan: risk.contingencyPlan,
+      trigger: risk.trigger,
+      lifecycle: risk.lifecycle,
     };
 
     await this.prisma.risk.upsert({

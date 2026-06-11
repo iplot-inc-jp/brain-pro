@@ -18,6 +18,7 @@ export * from './constraint';
 export * from './stakeholder';
 export * from './meeting';
 export * from './risk';
+export * from './risk-category';
 export * from './supplier';
 export * from './product';
 export * from './demand-data';

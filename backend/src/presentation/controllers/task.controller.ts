@@ -126,6 +126,15 @@ class CreateTaskDto {
   issueNodeId?: string | null;
 
   @ApiProperty({
+    description: '紐付けるリスクID（リスク対応タスク）。null で未紐付け',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  riskId?: string | null;
+
+  @ApiProperty({
     description: '開始日（ISO文字列）',
     required: false,
     nullable: true,
@@ -246,6 +255,16 @@ class UpdateTaskDto {
   @IsOptional()
   @IsString()
   issueNodeId?: string | null;
+
+  @ApiProperty({
+    description:
+      '紐付けるリスクID。指定で紐付け差し替え / null で紐付け解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  riskId?: string | null;
 
   @ApiProperty({
     description: '開始日（ISO文字列）',
@@ -370,6 +389,7 @@ export class TaskController {
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,
+      riskId: dto.riskId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,
@@ -430,6 +450,7 @@ export class TaskByIdController {
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,
+      riskId: dto.riskId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,

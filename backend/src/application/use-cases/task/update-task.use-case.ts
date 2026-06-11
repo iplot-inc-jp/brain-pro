@@ -30,6 +30,8 @@ export interface UpdateTaskInput {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** リスク対応タスクの紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
+  riskId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -111,6 +113,7 @@ export class UpdateTaskUseCase {
       assigneeName: input.assigneeName,
       assigneeRoleId: input.assigneeRoleId,
       issueNodeId: input.issueNodeId,
+      riskId: input.riskId,
       startDate: input.startDate,
       dueDate: input.dueDate,
       progress: input.progress,

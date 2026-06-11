@@ -17,7 +17,7 @@ import {
   ApiParam,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt } from 'class-validator';
+import { IsString, IsOptional, IsInt, Min, Max } from 'class-validator';
 import {
   CreateRiskUseCase,
   GetRisksUseCase,
@@ -107,6 +107,77 @@ class CreateRiskDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  // --- PMBOK準拠の追加項目（全て optional・後方互換） ---
+
+  @ApiPropertyOptional({ description: 'RBSカテゴリID（null で未分類）' })
+  @IsOptional()
+  @IsString()
+  categoryId?: string | null;
+
+  @ApiPropertyOptional({ description: '対象サブ領域（サブプロジェクト）ID' })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: 'リスクオーナー（ステークホルダー）ID' })
+  @IsOptional()
+  @IsString()
+  ownerStakeholderId?: string | null;
+
+  @ApiPropertyOptional({ description: 'レビュー会議体（ミーティング）ID' })
+  @IsOptional()
+  @IsString()
+  reviewMeetingId?: string | null;
+
+  @ApiPropertyOptional({ description: '発生確率スコア（1-5）', minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  probabilityScore?: number | null;
+
+  @ApiPropertyOptional({ description: '影響度スコア（1-5）', minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  impactScore?: number | null;
+
+  @ApiPropertyOptional({ description: 'リスク種別（THREAT / OPPORTUNITY）' })
+  @IsOptional()
+  @IsString()
+  riskType?: string | null;
+
+  @ApiPropertyOptional({
+    description: '対応戦略（回避/転嫁/軽減/受容/活用/共有/強化）',
+  })
+  @IsOptional()
+  @IsString()
+  strategy?: string | null;
+
+  @ApiPropertyOptional({ description: '対応計画' })
+  @IsOptional()
+  @IsString()
+  responsePlan?: string | null;
+
+  @ApiPropertyOptional({ description: 'コンティンジェンシー計画' })
+  @IsOptional()
+  @IsString()
+  contingencyPlan?: string | null;
+
+  @ApiPropertyOptional({ description: 'トリガー条件' })
+  @IsOptional()
+  @IsString()
+  trigger?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'ライフサイクル（IDENTIFIED / ANALYZED / RESPONDING / MONITORING / OCCURRED / CLOSED）',
+  })
+  @IsOptional()
+  @IsString()
+  lifecycle?: string | null;
 }
 
 class UpdateRiskDto {
@@ -184,6 +255,77 @@ class UpdateRiskDto {
   @IsOptional()
   @IsInt()
   order?: number;
+
+  // --- PMBOK準拠の追加項目（全て optional・後方互換） ---
+
+  @ApiPropertyOptional({ description: 'RBSカテゴリID（null で未分類）' })
+  @IsOptional()
+  @IsString()
+  categoryId?: string | null;
+
+  @ApiPropertyOptional({ description: '対象サブ領域（サブプロジェクト）ID' })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
+
+  @ApiPropertyOptional({ description: 'リスクオーナー（ステークホルダー）ID' })
+  @IsOptional()
+  @IsString()
+  ownerStakeholderId?: string | null;
+
+  @ApiPropertyOptional({ description: 'レビュー会議体（ミーティング）ID' })
+  @IsOptional()
+  @IsString()
+  reviewMeetingId?: string | null;
+
+  @ApiPropertyOptional({ description: '発生確率スコア（1-5）', minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  probabilityScore?: number | null;
+
+  @ApiPropertyOptional({ description: '影響度スコア（1-5）', minimum: 1, maximum: 5 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  impactScore?: number | null;
+
+  @ApiPropertyOptional({ description: 'リスク種別（THREAT / OPPORTUNITY）' })
+  @IsOptional()
+  @IsString()
+  riskType?: string | null;
+
+  @ApiPropertyOptional({
+    description: '対応戦略（回避/転嫁/軽減/受容/活用/共有/強化）',
+  })
+  @IsOptional()
+  @IsString()
+  strategy?: string | null;
+
+  @ApiPropertyOptional({ description: '対応計画' })
+  @IsOptional()
+  @IsString()
+  responsePlan?: string | null;
+
+  @ApiPropertyOptional({ description: 'コンティンジェンシー計画' })
+  @IsOptional()
+  @IsString()
+  contingencyPlan?: string | null;
+
+  @ApiPropertyOptional({ description: 'トリガー条件' })
+  @IsOptional()
+  @IsString()
+  trigger?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'ライフサイクル（IDENTIFIED / ANALYZED / RESPONDING / MONITORING / OCCURRED / CLOSED）',
+  })
+  @IsOptional()
+  @IsString()
+  lifecycle?: string | null;
 }
 
 @ApiTags('リスク・ボトルネック')
@@ -240,6 +382,18 @@ export class RiskController {
       status: dto.status,
       note: dto.note,
       order: dto.order,
+      categoryId: dto.categoryId,
+      subProjectId: dto.subProjectId,
+      ownerStakeholderId: dto.ownerStakeholderId,
+      reviewMeetingId: dto.reviewMeetingId,
+      probabilityScore: dto.probabilityScore,
+      impactScore: dto.impactScore,
+      riskType: dto.riskType,
+      strategy: dto.strategy,
+      responsePlan: dto.responsePlan,
+      contingencyPlan: dto.contingencyPlan,
+      trigger: dto.trigger,
+      lifecycle: dto.lifecycle,
     });
   }
 }
@@ -281,6 +435,18 @@ export class RiskByIdController {
       status: dto.status,
       note: dto.note,
       order: dto.order,
+      categoryId: dto.categoryId,
+      subProjectId: dto.subProjectId,
+      ownerStakeholderId: dto.ownerStakeholderId,
+      reviewMeetingId: dto.reviewMeetingId,
+      probabilityScore: dto.probabilityScore,
+      impactScore: dto.impactScore,
+      riskType: dto.riskType,
+      strategy: dto.strategy,
+      responsePlan: dto.responsePlan,
+      contingencyPlan: dto.contingencyPlan,
+      trigger: dto.trigger,
+      lifecycle: dto.lifecycle,
     });
   }
 

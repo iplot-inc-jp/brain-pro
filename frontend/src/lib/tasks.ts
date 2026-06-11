@@ -35,6 +35,8 @@ export interface Task {
   order: number;
   /** 由来となる課題ツリーのノード（打ち手 / 調査）への紐付け。未設定なら null。 */
   issueNodeId: string | null;
+  /** 由来となるリスク（リスク対応タスク）への紐付け。未設定なら null。 */
+  riskId?: string | null;
   /** 紐付いた課題ノードのラベル（TaskOutput でのみ付与される表示用） */
   issueNodeLabel?: string | null;
   /** 紐付いた課題ノードの種別（CAUSE=調査 / COUNTERMEASURE=打ち手） */
