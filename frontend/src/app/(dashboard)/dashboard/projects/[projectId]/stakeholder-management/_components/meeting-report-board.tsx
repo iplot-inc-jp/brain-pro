@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Loader2,
@@ -9,6 +10,7 @@ import {
   Users,
   Megaphone,
   CalendarClock,
+  ExternalLink,
 } from 'lucide-react';
 import {
   type Meeting,
@@ -259,14 +261,23 @@ export function MeetingReportBoard({ projectId }: { projectId: string }) {
             <CalendarClock className="h-4 w-4 text-blue-600" />
             会議体
           </h3>
-          <button
-            type="button"
-            onClick={handleAdd}
-            className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
-            会議体を追加
-          </button>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/dashboard/projects/${projectId}/meetings`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+            >
+              会議マスタで管理
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+            <button
+              type="button"
+              onClick={handleAdd}
+              className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4" />
+              会議体を追加
+            </button>
+          </div>
         </div>
 
         {error && (

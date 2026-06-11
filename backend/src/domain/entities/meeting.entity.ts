@@ -13,6 +13,12 @@ export interface CreateMeetingProps {
   preMaterials?: string | null;
   minutesOwner?: string | null;
   decisionMaker?: string | null;
+  format?: string | null;
+  durationMinutes?: number | null;
+  locationUrl?: string | null;
+  ownerStakeholderId?: string | null;
+  status?: string | null;
+  goal?: string | null;
   note?: string | null;
   order?: number;
 }
@@ -30,6 +36,12 @@ export interface ReconstructMeetingProps {
   preMaterials: string | null;
   minutesOwner: string | null;
   decisionMaker: string | null;
+  format: string | null;
+  durationMinutes: number | null;
+  locationUrl: string | null;
+  ownerStakeholderId: string | null;
+  status: string | null;
+  goal: string | null;
   note: string | null;
   order: number;
   stakeholderIds?: string[];
@@ -48,6 +60,12 @@ export interface UpdateMeetingProps {
   preMaterials?: string | null;
   minutesOwner?: string | null;
   decisionMaker?: string | null;
+  format?: string | null;
+  durationMinutes?: number | null;
+  locationUrl?: string | null;
+  ownerStakeholderId?: string | null;
+  status?: string | null;
+  goal?: string | null;
   note?: string | null;
   order?: number;
 }
@@ -68,6 +86,12 @@ export class Meeting extends BaseEntity {
   private _preMaterials: string | null;
   private _minutesOwner: string | null;
   private _decisionMaker: string | null;
+  private _format: string | null;
+  private _durationMinutes: number | null;
+  private _locationUrl: string | null;
+  private _ownerStakeholderId: string | null;
+  private _status: string | null;
+  private _goal: string | null;
   private _note: string | null;
   private _order: number;
   private _stakeholderIds: string[];
@@ -85,6 +109,12 @@ export class Meeting extends BaseEntity {
     preMaterials: string | null,
     minutesOwner: string | null,
     decisionMaker: string | null,
+    format: string | null,
+    durationMinutes: number | null,
+    locationUrl: string | null,
+    ownerStakeholderId: string | null,
+    status: string | null,
+    goal: string | null,
     note: string | null,
     order: number,
     stakeholderIds: string[],
@@ -103,6 +133,12 @@ export class Meeting extends BaseEntity {
     this._preMaterials = preMaterials;
     this._minutesOwner = minutesOwner;
     this._decisionMaker = decisionMaker;
+    this._format = format;
+    this._durationMinutes = durationMinutes;
+    this._locationUrl = locationUrl;
+    this._ownerStakeholderId = ownerStakeholderId;
+    this._status = status;
+    this._goal = goal;
     this._note = note;
     this._order = order;
     this._stakeholderIds = stakeholderIds;
@@ -124,6 +160,10 @@ export class Meeting extends BaseEntity {
       throw new ValidationError('Meeting name must be at most 200 characters');
     }
 
+    if (props.durationMinutes != null && props.durationMinutes < 0) {
+      throw new ValidationError('Duration minutes must not be negative');
+    }
+
     const now = new Date();
     return new Meeting(
       id,
@@ -138,6 +178,12 @@ export class Meeting extends BaseEntity {
       props.preMaterials?.trim() || null,
       props.minutesOwner?.trim() || null,
       props.decisionMaker?.trim() || null,
+      props.format?.trim() || null,
+      props.durationMinutes ?? null,
+      props.locationUrl?.trim() || null,
+      props.ownerStakeholderId?.trim() || null,
+      props.status?.trim() || 'ACTIVE',
+      props.goal?.trim() || null,
       props.note?.trim() || null,
       props.order ?? 0,
       [],
@@ -163,6 +209,12 @@ export class Meeting extends BaseEntity {
       props.preMaterials,
       props.minutesOwner,
       props.decisionMaker,
+      props.format,
+      props.durationMinutes,
+      props.locationUrl,
+      props.ownerStakeholderId,
+      props.status,
+      props.goal,
       props.note,
       props.order,
       props.stakeholderIds ?? [],
@@ -212,6 +264,27 @@ export class Meeting extends BaseEntity {
     }
     if (props.decisionMaker !== undefined) {
       this._decisionMaker = props.decisionMaker?.trim() || null;
+    }
+    if (props.format !== undefined) {
+      this._format = props.format?.trim() || null;
+    }
+    if (props.durationMinutes !== undefined) {
+      if (props.durationMinutes != null && props.durationMinutes < 0) {
+        throw new ValidationError('Duration minutes must not be negative');
+      }
+      this._durationMinutes = props.durationMinutes ?? null;
+    }
+    if (props.locationUrl !== undefined) {
+      this._locationUrl = props.locationUrl?.trim() || null;
+    }
+    if (props.ownerStakeholderId !== undefined) {
+      this._ownerStakeholderId = props.ownerStakeholderId?.trim() || null;
+    }
+    if (props.status !== undefined) {
+      this._status = props.status?.trim() || null;
+    }
+    if (props.goal !== undefined) {
+      this._goal = props.goal?.trim() || null;
     }
     if (props.note !== undefined) {
       this._note = props.note?.trim() || null;
@@ -273,6 +346,30 @@ export class Meeting extends BaseEntity {
 
   get decisionMaker(): string | null {
     return this._decisionMaker;
+  }
+
+  get format(): string | null {
+    return this._format;
+  }
+
+  get durationMinutes(): number | null {
+    return this._durationMinutes;
+  }
+
+  get locationUrl(): string | null {
+    return this._locationUrl;
+  }
+
+  get ownerStakeholderId(): string | null {
+    return this._ownerStakeholderId;
+  }
+
+  get status(): string | null {
+    return this._status;
+  }
+
+  get goal(): string | null {
+    return this._goal;
   }
 
   get note(): string | null {

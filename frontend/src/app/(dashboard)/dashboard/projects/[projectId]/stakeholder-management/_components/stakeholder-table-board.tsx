@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Loader2,
@@ -12,6 +13,7 @@ import {
   Save,
   UserCog,
   Users,
+  Crown,
 } from 'lucide-react';
 import {
   INFLUENCE_LEVELS,
@@ -23,12 +25,14 @@ import {
   type Stakeholder,
   type StakeholderInput,
   type Role,
+  type Meeting,
   listStakeholders,
   createStakeholder,
   updateStakeholder,
   deleteStakeholder,
   listRoles,
   updateRole,
+  listMeetings,
 } from '@/lib/stakeholders';
 
 // 編集モーダルに出す全フィールド（表示順とラベル・複数行可否）。
@@ -114,6 +118,7 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
   const {
     stakeholders,
     roles,
+    meetings,
     loading,
     error,
     reload,
@@ -146,6 +151,24 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     () => buildInfluenceSupportGrid(stakeholders),
     [stakeholders],
   );
+
+  // 参加会議の逆引き（Meeting.stakeholderIds + 主催 ownerStakeholderId）。
+  // stakeholderId → その人が参加/主催する会議のリスト。
+  const meetingsByStakeholder = useMemo(() => {
+    const map = new Map<string, { meeting: Meeting; isOwner: boolean }[]>();
+    for (const m of meetings) {
+      const memberIds =
+        m.ownerStakeholderId && !m.stakeholderIds.includes(m.ownerStakeholderId)
+          ? [...m.stakeholderIds, m.ownerStakeholderId]
+          : m.stakeholderIds;
+      for (const sid of memberIds) {
+        const arr = map.get(sid) ?? [];
+        arr.push({ meeting: m, isOwner: m.ownerStakeholderId === sid });
+        map.set(sid, arr);
+      }
+    }
+    return map;
+  }, [meetings]);
 
   const unplaced = useMemo(
     () =>
@@ -322,6 +345,9 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                       {col.label}
                     </th>
                   ))}
+                  <th className="min-w-[160px] whitespace-nowrap bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
+                    参加会議
+                  </th>
                   <th className="w-12 px-2 py-2" aria-label="操作" />
                 </tr>
               </thead>
@@ -352,6 +378,37 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                         )}
                       </td>
                     ))}
+
+                    {/* 参加会議（会議マスタの逆引き。主催は王冠アイコン付き） */}
+                    <td
+                      className="bg-blue-50/40 px-3 py-2 align-middle"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex max-w-[260px] flex-wrap gap-1">
+                        {(meetingsByStakeholder.get(s.id) ?? []).map(
+                          ({ meeting, isOwner }) => (
+                            <Link
+                              key={meeting.id}
+                              href={`/dashboard/projects/${projectId}/meetings`}
+                              className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-800 transition-colors hover:bg-blue-200"
+                              title={
+                                isOwner
+                                  ? `${meeting.name}（主催）— 会議マスタで管理`
+                                  : `${meeting.name} — 会議マスタで管理`
+                              }
+                            >
+                              {isOwner && (
+                                <Crown className="h-3 w-3 text-amber-500" />
+                              )}
+                              {meeting.name || '（無題）'}
+                            </Link>
+                          ),
+                        )}
+                        {(meetingsByStakeholder.get(s.id) ?? []).length ===
+                          0 && <span className="text-xs text-gray-300">—</span>}
+                      </div>
+                    </td>
+
                     <td
                       className="px-2 py-2 text-center align-middle"
                       onClick={(e) => e.stopPropagation()}
@@ -371,7 +428,7 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                 {stakeholders.length === 0 && (
                   <tr>
                     <td
-                      colSpan={TABLE_COLS.length + 2}
+                      colSpan={TABLE_COLS.length + 3}
                       className="px-4 py-10 text-center text-sm text-gray-400"
                     >
                       まだステークホルダーがいません。「ステークホルダーを追加」から始めましょう。
@@ -836,18 +893,22 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
 function useStakeholderData(projectId: string) {
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [sh, rl] = await Promise.all([
+      // 会議は「参加会議」チップの逆引き用。失敗しても本体は出す。
+      const [sh, rl, mt] = await Promise.all([
         listStakeholders(projectId),
         listRoles(projectId),
+        listMeetings(projectId).catch(() => [] as Meeting[]),
       ]);
       setStakeholders(sh);
       setRoles(rl);
+      setMeetings(mt);
     } catch (e) {
       setError(e instanceof Error ? e.message : '読み込みに失敗しました');
     }
@@ -868,6 +929,7 @@ function useStakeholderData(projectId: string) {
   return {
     stakeholders,
     roles,
+    meetings,
     loading,
     error,
     reload,

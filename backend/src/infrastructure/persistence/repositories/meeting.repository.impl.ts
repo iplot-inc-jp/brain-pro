@@ -23,6 +23,12 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
     preMaterials: string | null;
     minutesOwner: string | null;
     decisionMaker: string | null;
+    format: string | null;
+    durationMinutes: number | null;
+    locationUrl: string | null;
+    ownerStakeholderId: string | null;
+    status: string | null;
+    goal: string | null;
     note: string | null;
     order: number;
     createdAt: Date;
@@ -42,6 +48,12 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
       preMaterials: data.preMaterials,
       minutesOwner: data.minutesOwner,
       decisionMaker: data.decisionMaker,
+      format: data.format,
+      durationMinutes: data.durationMinutes,
+      locationUrl: data.locationUrl,
+      ownerStakeholderId: data.ownerStakeholderId,
+      status: data.status,
+      goal: data.goal,
       note: data.note,
       order: data.order,
       stakeholderIds: (data.stakeholders ?? []).map((s) => s.stakeholderId),
@@ -81,6 +93,12 @@ export class MeetingRepositoryImpl implements IMeetingRepository {
       preMaterials: meeting.preMaterials,
       minutesOwner: meeting.minutesOwner,
       decisionMaker: meeting.decisionMaker,
+      format: meeting.format,
+      durationMinutes: meeting.durationMinutes,
+      locationUrl: meeting.locationUrl,
+      ownerStakeholderId: meeting.ownerStakeholderId,
+      status: meeting.status,
+      goal: meeting.goal,
       note: meeting.note,
       order: meeting.order,
     };

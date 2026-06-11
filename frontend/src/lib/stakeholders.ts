@@ -62,6 +62,18 @@ export interface Meeting {
   preMaterials: string | null;
   minutesOwner: string | null;
   decisionMaker: string | null;
+  /** 形式（対面 / オンライン / ハイブリッド、自由文字列） */
+  format: string | null;
+  /** 所要時間（分） */
+  durationMinutes: number | null;
+  /** 場所 or 会議URL */
+  locationUrl: string | null;
+  /** 主催/ファシリテーター（Stakeholder の FK） */
+  ownerStakeholderId: string | null;
+  /** ステータス（ACTIVE=開催中 / SUSPENDED=休止） */
+  status: string | null;
+  /** この会議のゴール/アウトプット */
+  goal: string | null;
   note: string | null;
   order: number;
   stakeholderIds: string[];

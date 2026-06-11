@@ -3,12 +3,15 @@ import {
   Meeting,
   IMeetingRepository,
   MEETING_REPOSITORY,
+  IStakeholderRepository,
+  STAKEHOLDER_REPOSITORY,
   ProjectRepository,
   PROJECT_REPOSITORY,
   OrganizationRepository,
   ORGANIZATION_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
+  ValidationError,
 } from '../../../domain';
 
 export interface CreateMeetingInput {
@@ -24,6 +27,12 @@ export interface CreateMeetingInput {
   preMaterials?: string | null;
   minutesOwner?: string | null;
   decisionMaker?: string | null;
+  format?: string | null;
+  durationMinutes?: number | null;
+  locationUrl?: string | null;
+  ownerStakeholderId?: string | null;
+  status?: string | null;
+  goal?: string | null;
   note?: string | null;
   order?: number;
 }
@@ -41,6 +50,12 @@ export interface MeetingOutput {
   preMaterials: string | null;
   minutesOwner: string | null;
   decisionMaker: string | null;
+  format: string | null;
+  durationMinutes: number | null;
+  locationUrl: string | null;
+  ownerStakeholderId: string | null;
+  status: string | null;
+  goal: string | null;
   note: string | null;
   order: number;
   stakeholderIds: string[];
@@ -62,6 +77,12 @@ export function toMeetingOutput(meeting: Meeting): MeetingOutput {
     preMaterials: meeting.preMaterials,
     minutesOwner: meeting.minutesOwner,
     decisionMaker: meeting.decisionMaker,
+    format: meeting.format,
+    durationMinutes: meeting.durationMinutes,
+    locationUrl: meeting.locationUrl,
+    ownerStakeholderId: meeting.ownerStakeholderId,
+    status: meeting.status,
+    goal: meeting.goal,
     note: meeting.note,
     order: meeting.order,
     stakeholderIds: meeting.stakeholderIds,
@@ -78,6 +99,8 @@ export class CreateMeetingUseCase {
   constructor(
     @Inject(MEETING_REPOSITORY)
     private readonly meetingRepository: IMeetingRepository,
+    @Inject(STAKEHOLDER_REPOSITORY)
+    private readonly stakeholderRepository: IStakeholderRepository,
     @Inject(PROJECT_REPOSITORY)
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
@@ -100,10 +123,25 @@ export class CreateMeetingUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    // 3. ID生成
+    // 3. 主催ステークホルダーが同じプロジェクトに属することを検証
+    const ownerStakeholderId = input.ownerStakeholderId?.trim();
+    if (ownerStakeholderId) {
+      const stakeholder =
+        await this.stakeholderRepository.findById(ownerStakeholderId);
+      if (!stakeholder) {
+        throw new EntityNotFoundError('Stakeholder', ownerStakeholderId);
+      }
+      if (stakeholder.projectId !== input.projectId) {
+        throw new ValidationError(
+          'Owner stakeholder does not belong to the same project as the meeting',
+        );
+      }
+    }
+
+    // 4. ID生成
     const id = this.meetingRepository.generateId();
 
-    // 4. エンティティ生成
+    // 5. エンティティ生成
     const meeting = Meeting.create(
       {
         projectId: input.projectId,
@@ -117,16 +155,22 @@ export class CreateMeetingUseCase {
         preMaterials: input.preMaterials,
         minutesOwner: input.minutesOwner,
         decisionMaker: input.decisionMaker,
+        format: input.format,
+        durationMinutes: input.durationMinutes,
+        locationUrl: input.locationUrl,
+        ownerStakeholderId: input.ownerStakeholderId,
+        status: input.status,
+        goal: input.goal,
         note: input.note,
         order: input.order,
       },
       id,
     );
 
-    // 5. 永続化
+    // 6. 永続化
     await this.meetingRepository.save(meeting);
 
-    // 6. 出力返却
+    // 7. 出力返却
     return toMeetingOutput(meeting);
   }
 }

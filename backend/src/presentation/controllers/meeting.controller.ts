@@ -19,7 +19,7 @@ import {
   ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsArray, Min } from 'class-validator';
 import {
   CreateMeetingUseCase,
   GetMeetingsUseCase,
@@ -79,6 +79,43 @@ class CreateMeetingDto {
   @IsOptional()
   @IsString()
   minutesOwner?: string | null;
+
+  @ApiPropertyOptional({
+    description: '形式（対面 / オンライン / ハイブリッド）',
+  })
+  @IsOptional()
+  @IsString()
+  format?: string | null;
+
+  @ApiPropertyOptional({ description: '所要時間（分）', minimum: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  durationMinutes?: number | null;
+
+  @ApiPropertyOptional({ description: '場所 or 会議URL' })
+  @IsOptional()
+  @IsString()
+  locationUrl?: string | null;
+
+  @ApiPropertyOptional({
+    description: '主催/ファシリテーター（ステークホルダーID）',
+  })
+  @IsOptional()
+  @IsString()
+  ownerStakeholderId?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'ステータス（ACTIVE=開催中 / SUSPENDED=休止）',
+  })
+  @IsOptional()
+  @IsString()
+  status?: string | null;
+
+  @ApiPropertyOptional({ description: 'この会議のゴール/アウトプット' })
+  @IsOptional()
+  @IsString()
+  goal?: string | null;
 
   @ApiPropertyOptional({ description: '意思決定者' })
   @IsOptional()
@@ -146,6 +183,43 @@ class UpdateMeetingDto {
   @IsOptional()
   @IsString()
   decisionMaker?: string | null;
+
+  @ApiPropertyOptional({
+    description: '形式（対面 / オンライン / ハイブリッド）',
+  })
+  @IsOptional()
+  @IsString()
+  format?: string | null;
+
+  @ApiPropertyOptional({ description: '所要時間（分）', minimum: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  durationMinutes?: number | null;
+
+  @ApiPropertyOptional({ description: '場所 or 会議URL' })
+  @IsOptional()
+  @IsString()
+  locationUrl?: string | null;
+
+  @ApiPropertyOptional({
+    description: '主催/ファシリテーター（ステークホルダーID）',
+  })
+  @IsOptional()
+  @IsString()
+  ownerStakeholderId?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'ステータス（ACTIVE=開催中 / SUSPENDED=休止）',
+  })
+  @IsOptional()
+  @IsString()
+  status?: string | null;
+
+  @ApiPropertyOptional({ description: 'この会議のゴール/アウトプット' })
+  @IsOptional()
+  @IsString()
+  goal?: string | null;
 
   @ApiPropertyOptional({ description: '備考' })
   @IsOptional()
@@ -219,6 +293,12 @@ export class MeetingController {
       preMaterials: dto.preMaterials,
       minutesOwner: dto.minutesOwner,
       decisionMaker: dto.decisionMaker,
+      format: dto.format,
+      durationMinutes: dto.durationMinutes,
+      locationUrl: dto.locationUrl,
+      ownerStakeholderId: dto.ownerStakeholderId,
+      status: dto.status,
+      goal: dto.goal,
       note: dto.note,
       order: dto.order,
     });
@@ -258,6 +338,12 @@ export class MeetingByIdController {
       preMaterials: dto.preMaterials,
       minutesOwner: dto.minutesOwner,
       decisionMaker: dto.decisionMaker,
+      format: dto.format,
+      durationMinutes: dto.durationMinutes,
+      locationUrl: dto.locationUrl,
+      ownerStakeholderId: dto.ownerStakeholderId,
+      status: dto.status,
+      goal: dto.goal,
       note: dto.note,
       order: dto.order,
     });
