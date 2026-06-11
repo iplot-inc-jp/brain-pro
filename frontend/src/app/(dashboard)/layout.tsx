@@ -37,6 +37,7 @@ import {
   ArrowLeftRight,
   Server,
   Lock,
+  type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 
@@ -491,6 +492,74 @@ function FlowTree({
   )
 }
 
+// ====== 縮小（アイコンのみ）サイドバー用ヘルパー ======
+
+// 縮小時にアイコン下へ表示する短縮ラベル（全名は title 属性で補完）
+const COLLAPSED_SHORT_LABELS: Record<string, string> = {
+  'ダッシュボード': 'ホーム',
+  'INPUT/OUTPUT': 'IN/OUT',
+  '業務定義シート': '業務定義',
+  'データカタログ': 'カタログ',
+  'ステークホルダーマネジメント': 'ステーク…',
+  'リスクマネジメント': 'リスク…',
+}
+
+function collapsedLabel(name: string): string {
+  const mapped = COLLAPSED_SHORT_LABELS[name]
+  if (mapped) return mapped
+  // 未登録の長い名前は 5 文字 + … に短縮（全名は title で確認できる）
+  return name.length > 6 ? `${name.slice(0, 5)}…` : name
+}
+
+// 縮小時のグループ小見出し（2〜3文字程度）
+const COLLAPSED_GROUP_LABELS: Record<string, string> = {
+  '共通マスタ': 'マスタ',
+  '現状把握': '現状',
+  '課題・打ち手': '課題',
+}
+
+// 縮小時のナビ項目（アイコン＋その下に小さな名前の縦積み）
+function CollapsedNavLink({
+  item,
+  isActive,
+  onNavigate,
+}: {
+  item: { name: string; href: string; icon: LucideIcon }
+  isActive: boolean
+  onNavigate: () => void
+}) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      title={item.name}
+      className={cn(
+        'w-full flex flex-col items-center gap-0.5 py-2 px-0.5 rounded-lg transition-colors',
+        'text-muted-foreground hover:text-foreground hover:bg-secondary',
+        isActive && 'text-primary font-medium bg-primary/10'
+      )}
+    >
+      <item.icon className="h-5 w-5 flex-shrink-0" />
+      <span className="w-full text-[9px] leading-tight text-center truncate">
+        {collapsedLabel(item.name)}
+      </span>
+    </Link>
+  )
+}
+
+// 縮小時のグループ区切り（薄い線＋短い小見出し）
+function CollapsedGroupDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-1 pt-3 pb-1" title={label}>
+      <div className="h-px flex-1 bg-border" />
+      <span className="text-[9px] font-semibold tracking-wide text-muted-foreground/70 whitespace-nowrap">
+        {COLLAPSED_GROUP_LABELS[label] ?? label}
+      </span>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  )
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -625,37 +694,26 @@ export default function DashboardLayout({
           'fixed inset-y-0 left-0 z-50 bg-card border-r border-border transform transition-all duration-200 ease-in-out',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0',
-          sidebarCollapsed ? 'lg:w-16' : 'lg:w-64',
+          sidebarCollapsed ? 'lg:w-20' : 'lg:w-64',
           'w-64'
         )}
       >
-        <div className="flex flex-col h-full">
+        {/* ===== 展開表示（モバイルは常にこちら。lg は非縮小時のみ） ===== */}
+        <div className={cn('flex flex-col h-full', sidebarCollapsed && 'lg:hidden')}>
           {/* Logo */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-            <Link
-              href="/dashboard"
-              className={cn("flex items-center gap-3", sidebarCollapsed && "lg:hidden")}
-            >
+            <Link href="/dashboard" className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
                 <Database className="h-5 w-5 text-primary" />
               </div>
               <span className="font-mono text-lg font-semibold text-foreground">DataFlow</span>
             </Link>
-            {sidebarCollapsed && (
-              <Link href="/dashboard" className="hidden lg:flex items-center justify-center w-full">
-                <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
-                  <Database className="h-5 w-5 text-primary" />
-                </div>
-              </Link>
-            )}
             <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className={cn(
-                "hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors",
-                sidebarCollapsed && "w-full justify-center mt-2"
-              )}
+              onClick={() => setSidebarCollapsed(true)}
+              title="メニューを縮小"
+              className="hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
             >
-              {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              <PanelLeftClose className="h-4 w-4" />
             </button>
           </div>
 
@@ -669,24 +727,17 @@ export default function DashboardLayout({
                   key={item.name}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  title={sidebarCollapsed ? item.name : undefined}
-                  className={cn(
-                    'sidebar-link',
-                    isActive && 'active',
-                    sidebarCollapsed && 'lg:justify-center lg:px-2'
-                  )}
+                  className={cn('sidebar-link', isActive && 'active')}
                 >
                   <item.icon className="h-5 w-5 flex-shrink-0" />
-                  <span className={cn('text-sm', sidebarCollapsed && 'lg:hidden')}>{item.name}</span>
-                  {isActive && !sidebarCollapsed && (
-                    <ChevronRight className="h-4 w-4 ml-auto text-primary" />
-                  )}
+                  <span className="text-sm">{item.name}</span>
+                  {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
                 </Link>
               )
             })}
 
             {/* プロジェクト名ヘッダー */}
-            {projectId && !sidebarCollapsed && (
+            {projectId && (
               <div className="pt-4 pb-2 px-1">
                 <div className="section-title text-xs">
                   <FolderOpen className="h-3.5 w-3.5 text-primary" />
@@ -694,14 +745,9 @@ export default function DashboardLayout({
                 </div>
               </div>
             )}
-            {projectId && sidebarCollapsed && (
-              <div className="hidden lg:block py-2">
-                <div className="border-t border-border" />
-              </div>
-            )}
 
             {/* 業務フローブラウザ（プロジェクト → サブプロジェクト → ASIS/TOBE → フロー） */}
-            {projectId && !sidebarCollapsed && (
+            {projectId && (
               <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 px-3 pt-1 text-[11px] font-semibold tracking-wide text-gray-400">
                   <GitBranch className="h-3.5 w-3.5 text-primary/70" />
@@ -722,11 +768,9 @@ export default function DashboardLayout({
               projectGroups.map((group) => (
                 <div key={group.label} className="space-y-0.5">
                   {/* グループ見出し */}
-                  {!sidebarCollapsed && (
-                    <div className="text-[11px] font-semibold text-gray-400 tracking-wide px-3 pt-3">
-                      {group.label}
-                    </div>
-                  )}
+                  <div className="text-[11px] font-semibold text-gray-400 tracking-wide px-3 pt-3">
+                    {group.label}
+                  </div>
                   {group.items.map((item) => {
                     const isActive = isLinkActive(item.href)
                     return (
@@ -734,21 +778,11 @@ export default function DashboardLayout({
                         <Link
                           href={item.href}
                           onClick={() => setSidebarOpen(false)}
-                          title={sidebarCollapsed ? item.name : undefined}
-                          className={cn(
-                            'sidebar-link',
-                            isActive && 'active',
-                            !sidebarCollapsed && 'ml-2',
-                            sidebarCollapsed && 'lg:justify-center lg:px-2'
-                          )}
+                          className={cn('sidebar-link ml-2', isActive && 'active')}
                         >
                           <item.icon className="h-5 w-5 flex-shrink-0" />
-                          <span className={cn('text-sm', sidebarCollapsed && 'lg:hidden')}>
-                            {item.name}
-                          </span>
-                          {isActive && !sidebarCollapsed && (
-                            <ChevronRight className="h-4 w-4 ml-auto text-primary" />
-                          )}
+                          <span className="text-sm">{item.name}</span>
+                          {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
                         </Link>
                       </div>
                     )
@@ -757,7 +791,7 @@ export default function DashboardLayout({
               ))}
 
             {/* アカウント（最下部、フラット） */}
-            <div className={cn('pt-3', !sidebarCollapsed && 'mt-1')}>
+            <div className="pt-3 mt-1">
               {accountNav.map((item) => {
                 const isActive = isLinkActive(item.href)
                 return (
@@ -765,25 +799,18 @@ export default function DashboardLayout({
                     key={item.name}
                     href={item.href}
                     onClick={() => setSidebarOpen(false)}
-                    title={sidebarCollapsed ? item.name : undefined}
-                    className={cn(
-                      'sidebar-link',
-                      isActive && 'active',
-                      sidebarCollapsed && 'lg:justify-center lg:px-2'
-                    )}
+                    className={cn('sidebar-link', isActive && 'active')}
                   >
                     <item.icon className="h-5 w-5 flex-shrink-0" />
-                    <span className={cn('text-sm', sidebarCollapsed && 'lg:hidden')}>{item.name}</span>
-                    {isActive && !sidebarCollapsed && (
-                      <ChevronRight className="h-4 w-4 ml-auto text-primary" />
-                    )}
+                    <span className="text-sm">{item.name}</span>
+                    {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
                   </Link>
                 )
               })}
             </div>
 
             {/* Hint when no project selected */}
-            {!projectId && !sidebarCollapsed && (
+            {!projectId && (
               <div className="pt-6 px-1">
                 <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
                   <div className="flex items-start gap-2">
@@ -804,14 +831,91 @@ export default function DashboardLayout({
                 localStorage.removeItem('accessToken')
                 window.location.href = '/login'
               }}
-              title={sidebarCollapsed ? 'ログアウト' : undefined}
-              className={cn(
-                "sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10",
-                sidebarCollapsed ? 'lg:justify-center lg:px-2' : 'justify-start'
-              )}
+              className="sidebar-link w-full justify-start text-red-400 hover:text-red-300 hover:bg-red-500/10"
             >
               <LogOut className="h-5 w-5 flex-shrink-0" />
-              <span className={cn("text-sm", sidebarCollapsed && 'lg:hidden')}>ログアウト</span>
+              <span className="text-sm">ログアウト</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ===== 縮小（アイコンのみ）表示: lg かつ縮小時のみ ===== */}
+        <div className={cn('hidden h-full flex-col', sidebarCollapsed && 'lg:flex')}>
+          {/* 縮小カラム全体をスクロール（スクロールバーは細く、アイコンに重ねない） */}
+          <div className="sidebar-scroll flex-1 min-h-0 overflow-y-auto">
+            {/* ヘッダー（ロゴ＋展開トグル）: sticky でアイコン列と重ならない */}
+            <div className="sticky top-0 z-10 bg-card border-b border-border flex flex-col items-center gap-1 px-1.5 py-3">
+              <Link href="/dashboard" title="ダッシュボード">
+                <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
+                  <Database className="h-5 w-5 text-primary" />
+                </div>
+              </Link>
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                title="メニューを展開"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* アイコン列（アイコン＋その下に名前） */}
+            <nav className="px-1.5 py-2 space-y-0.5">
+              {/* プロジェクト非依存のトップナビ */}
+              {baseNav.map((item) => (
+                <CollapsedNavLink
+                  key={item.name}
+                  item={item}
+                  isActive={isLinkActive(item.href)}
+                  onNavigate={() => setSidebarOpen(false)}
+                />
+              ))}
+
+              {/* プロジェクト依存ナビ（グループは薄い線＋小見出しで区切る。
+                  FlowTree は縮小時は描画しない（領域はグループ内アイコンから辿れる） */}
+              {projectId &&
+                projectGroups.map((group) => (
+                  <div key={group.label}>
+                    <CollapsedGroupDivider label={group.label} />
+                    <div className="space-y-0.5">
+                      {group.items.map((item) => (
+                        <CollapsedNavLink
+                          key={item.name}
+                          item={item}
+                          isActive={isLinkActive(item.href)}
+                          onNavigate={() => setSidebarOpen(false)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+              {/* アカウント（最下部、フラット） */}
+              <div className="pt-2 mt-2 border-t border-border space-y-0.5">
+                {accountNav.map((item) => (
+                  <CollapsedNavLink
+                    key={item.name}
+                    item={item}
+                    isActive={isLinkActive(item.href)}
+                    onNavigate={() => setSidebarOpen(false)}
+                  />
+                ))}
+              </div>
+            </nav>
+          </div>
+
+          {/* ログアウト（最下部固定） */}
+          <div className="px-1.5 py-2 border-t border-border">
+            <button
+              onClick={() => {
+                localStorage.removeItem('accessToken')
+                window.location.href = '/login'
+              }}
+              title="ログアウト"
+              className="w-full flex flex-col items-center gap-0.5 py-2 px-0.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            >
+              <LogOut className="h-5 w-5 flex-shrink-0" />
+              <span className="w-full text-[9px] leading-tight text-center truncate">ログアウト</span>
             </button>
           </div>
         </div>
@@ -828,7 +932,7 @@ export default function DashboardLayout({
       {/* Main content */}
       <main className={cn(
         "min-h-screen pt-14 lg:pt-0 transition-all duration-200",
-        sidebarCollapsed ? 'lg:pl-16' : 'lg:pl-64'
+        sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
       )}>
         <div className="p-5 sm:p-6 lg:p-8">{children}</div>
       </main>
