@@ -3,20 +3,22 @@
 /**
  * ASIS⇔TOBE 比較ビュー。
  *
- * ASIS フローと、それに対応する TOBE フローを上下に並べて閲覧専用で比較する。
+ * ASIS フローと、それに対応する TOBE フローを「1つのコンテナを上下50/50に分けた
+ * 閲覧用ビューア」で比較する。コンテナ全体で1つの全画面トグルを持つ。
  * 対応付けは BusinessFlow.asisFlowId（TOBEフロー → 対応ASISフロー）で解決する。
  *
  *  - useSearchParams で asis(=ASISフローID) / tobe(=TOBEフローID) を受ける。
  *    片方/両方欠ける場合は上部にセレクタを出し、ASIS を選ぶと対応 TOBE
  *    （tobeFlows.find(t => t.asisFlowId === asisId)）を自動選択する。
- *  - 各キャンバスは既存 SwimlaneCanvas を「閲覧用途」で流用する。
- *    編集系コールバック（onXxx）は一切渡さないため編集ツールバーが出ず閲覧寄りになる。
- *    必須 props は flowData / roles のみ（SwimlaneCanvasProps 準拠）。
+ *  - 各ペインは既存 SwimlaneCanvas を embedded（閲覧用埋め込み）で流用する。
+ *    embedded のとき SwimlaneCanvas 自前のツールバー/全画面/IO候補パネル/パンくず
+ *    バッジは描画されない。編集系コールバック（onXxx）も一切渡さない。
+ *  - 全画面はこのページの1つのトグル（isCompareFullscreen）のみ。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, GitCompare, ArrowDown } from 'lucide-react';
+import { Loader2, GitCompare, Maximize2, Minimize2 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { SwimlaneCanvas } from '@/components/flow-editor/SwimlaneCanvas';
 import type { FlowData, FlowSummary, Role } from '@/components/flow-editor/flow-types';
@@ -32,20 +34,21 @@ function getHeaders(): Record<string, string> {
 }
 
 /**
- * 1本のフロー詳細（flowData）を閲覧専用キャンバスに描く枠。
- * 未選択/未取得ならプレースホルダを表示する。高さ固定のラッパに入れる。
+ * 比較コンテナ内の1ペイン（上=ASIS / 下=TOBE）。relative で SwimlaneCanvas を満たし、
+ * 左上に小さなラベル（色バッジ + フロー名）をオーバーレイ表示する。
+ * 未選択/未取得ならプレースホルダを表示する。
  */
 function ComparePane({
-  title,
-  accentClass,
+  label,
+  badgeClass,
   flowData,
   roles,
   projectId,
   loading,
   emptyLabel,
 }: {
-  title: string;
-  accentClass: string;
+  label: string;
+  badgeClass: string;
   flowData: FlowData | null;
   roles: Role[];
   projectId: string;
@@ -53,35 +56,31 @@ function ComparePane({
   emptyLabel: string;
 }) {
   return (
-    <section className="space-y-2">
-      <h2 className={`flex items-center gap-2 text-base font-bold ${accentClass}`}>
-        <GitCompare className="h-4 w-4" />
-        {title}
+    <div className="relative h-full w-full overflow-hidden bg-white">
+      {/* 左上ラベル（オーバーレイ）。SwimlaneCanvas 自前のパンくずは embedded で消えている。 */}
+      <div className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-2">
+        <span className={`rounded px-1.5 py-0.5 text-[11px] font-bold ${badgeClass}`}>
+          {label}
+        </span>
         {flowData && (
-          <span className="truncate text-sm font-normal text-muted-foreground">
+          <span className="max-w-[40vw] truncate rounded bg-white/80 px-1.5 py-0.5 text-xs font-medium text-gray-700 shadow-sm">
             {flowData.name}
           </span>
         )}
-      </h2>
-      {/* 高さ固定のラッパ。SwimlaneCanvas は内部に ReactFlowProvider を持つので2つ並べてよい。 */}
-      <div
-        className="overflow-hidden rounded-lg border border-gray-200 bg-white"
-        style={{ height: '44vh' }}
-      >
-        {loading ? (
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-          </div>
-        ) : flowData ? (
-          // 編集系コールバックを渡さない＝閲覧用途。必須 props（flowData / roles）のみ最小で渡す。
-          <SwimlaneCanvas flowData={flowData} roles={roles} projectId={projectId} />
-        ) : (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            {emptyLabel}
-          </div>
-        )}
       </div>
-    </section>
+      {loading ? (
+        <div className="flex h-full items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        </div>
+      ) : flowData ? (
+        // 編集系コールバックは渡さない＝閲覧用途。embedded で自前ツールバー等を隠す。
+        <SwimlaneCanvas flowData={flowData} roles={roles} projectId={projectId} embedded />
+      ) : (
+        <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+          {emptyLabel}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -102,6 +101,9 @@ export default function FlowComparePage() {
   // 選択中の ASIS / TOBE フローID（null=未選択）。
   const [asisId, setAsisId] = useState<string | null>(asisParam);
   const [tobeId, setTobeId] = useState<string | null>(tobeParam);
+
+  // コンテナ全体の全画面トグル（SwimlaneCanvas 自前の全画面は embedded で消えている）。
+  const [isCompareFullscreen, setIsCompareFullscreen] = useState(false);
 
   // URL → state 同期。同一ルートのままクエリだけ変わる遷移（クライアントナビ・
   // ブラウザ戻る/進む・URL手編集）でも表示中フローを追従させる。
@@ -256,6 +258,22 @@ export default function FlowComparePage() {
     };
   }, [tobeId]);
 
+  // Esc で全画面解除（入力欄フォーカス中は無視）。
+  useEffect(() => {
+    if (!isCompareFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) {
+        return;
+      }
+      setIsCompareFullscreen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCompareFullscreen]);
+
   // 戻る導線（ASIS 管理へ）。
   const backHref = `/dashboard/projects/${projectId}/asis`;
 
@@ -328,31 +346,59 @@ export default function FlowComparePage() {
         </div>
       )}
 
-      {/* 上半分: ASIS / 下半分: TOBE。 */}
-      <div className="space-y-3">
-        <ComparePane
-          title="ASIS（現状）"
-          accentClass="text-amber-700"
-          flowData={asisFlow}
-          roles={roles}
-          projectId={projectId}
-          loading={listLoading || asisLoading}
-          emptyLabel="対応するフローがありません / ASISフローを選択してください"
-        />
+      {/* 1つのコンテナを縦に2分割（上=ASIS / 下=TOBE）。全体で1つの全画面トグル。
+          全画面時は fixed inset-0 で前面に出るためヘッダー/セレクタは自然に隠れる。 */}
+      <div
+        className={
+          isCompareFullscreen
+            ? 'fixed inset-0 z-50 flex flex-col bg-white'
+            : 'relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white'
+        }
+        style={isCompareFullscreen ? undefined : { height: 'calc(100vh - 220px)', minHeight: '480px' }}
+      >
+        {/* 全体で1つの全画面ボタン（右上オーバーレイ）。 */}
+        <button
+          type="button"
+          onClick={() => setIsCompareFullscreen((v) => !v)}
+          className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+          title={isCompareFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
+        >
+          {isCompareFullscreen ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
+          {isCompareFullscreen ? '縮小' : '全画面'}
+        </button>
 
-        <div className="flex items-center justify-center">
-          <ArrowDown className="h-5 w-5 text-gray-400" />
+        {/* 上半分（50%）= ASIS */}
+        <div className="min-h-0 flex-1">
+          <ComparePane
+            label="ASIS"
+            badgeClass="bg-blue-100 text-blue-700"
+            flowData={asisFlow}
+            roles={roles}
+            projectId={projectId}
+            loading={listLoading || asisLoading}
+            emptyLabel="対応するフローがありません / ASISフローを選択してください"
+          />
         </div>
 
-        <ComparePane
-          title="TOBE（あるべき姿）"
-          accentClass="text-emerald-700"
-          flowData={tobeFlow}
-          roles={roles}
-          projectId={projectId}
-          loading={listLoading || tobeLoading}
-          emptyLabel="対応するフローがありません / TOBEフローを選択してください"
-        />
+        {/* 区切り線 */}
+        <div className="h-px shrink-0 bg-gray-300" />
+
+        {/* 下半分（50%）= TOBE */}
+        <div className="min-h-0 flex-1">
+          <ComparePane
+            label="TOBE"
+            badgeClass="bg-emerald-100 text-emerald-700"
+            flowData={tobeFlow}
+            roles={roles}
+            projectId={projectId}
+            loading={listLoading || tobeLoading}
+            emptyLabel="対応するフローがありません / TOBEフローを選択してください"
+          />
+        </div>
       </div>
     </div>
   );

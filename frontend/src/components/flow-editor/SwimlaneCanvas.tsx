@@ -376,6 +376,12 @@ export interface SwimlaneCanvasProps {
   ) => void;
   /** 注釈を削除する（ホバー時の ✕）。 */
   onDeleteAnnotation?: (id: string) => void;
+  /**
+   * 比較ビュー等で、自前のツールバー（右上）/全画面ボタン/IO候補パネル（左サイド）/
+   * 左上パンくずバッジを隠す閲覧用埋め込みモード。
+   * true のとき編集系UIを描画しない（MiniMap/Controls/ロール編集パネルは従来どおり）。
+   */
+  embedded?: boolean;
 }
 
 // ===========================================
@@ -2609,9 +2615,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         onReconnect={onReconnect}
         onNodesChange={onNodesChange}
         deleteKeyCode={null}
-        nodesDraggable
-        nodesConnectable
-        elementsSelectable
+        nodesDraggable={!props.embedded}
+        nodesConnectable={!props.embedded}
+        elementsSelectable={!props.embedded}
         connectionMode={ConnectionMode.Loose}
         connectionLineComponent={GhostConnectionLine}
         minZoom={0.2}
@@ -2623,11 +2629,13 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         proOptions={{ hideAttribution: true }}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={() => { setSelectedEdgeId(null); closeMenu(); }}
-        onEdgeClick={(_, edge) => setSelectedEdgeId(edge.id)}
+        onEdgeClick={(_, edge) => { if (props.embedded) return; setSelectedEdgeId(edge.id); }}
         onNodeClick={(_, node) => {
+          if (props.embedded) return;
           if (node.type === 'content') setEditingNodeId(node.id);
         }}
         onNodeDoubleClick={(_, node) => {
+          if (props.embedded) return;
           if (node.type !== 'content') return;
           // ドリルダウン: 子フローがあれば開き、無ければ作成してから遷移（呼び出し側に委譲）
           if (props.onNodeDoubleClick) {
@@ -2639,6 +2647,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           if (src?.childFlowId) props.onOpenChildFlow?.(node.id, src.childFlowId);
         }}
         onNodeContextMenu={(e, node) => {
+          if (props.embedded) return; // 閲覧用埋め込みでは右クリックメニューを出さない
           // レーン・付箋（annotation）は対象外。付箋の削除/編集は AnnotationNode 側で完結する
           if (node.type !== 'content') return;
           e.preventDefault();
@@ -2646,10 +2655,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           setMenu({ kind: 'node', x: e.clientX, y: e.clientY, nodeId: node.id, hasChildFlow: !!src?.hasChildFlow });
         }}
         onEdgeContextMenu={(e, edge) => {
+          if (props.embedded) return;
           e.preventDefault();
           setMenu({ kind: 'edge', x: e.clientX, y: e.clientY, edgeId: edge.id });
         }}
         onPaneContextMenu={(e) => {
+          if (props.embedded) return;
           e.preventDefault();
           setMenu({ kind: 'pane', x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY });
         }}
@@ -2663,37 +2674,39 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           maskColor="rgba(0,0,0,0.04)"
         />
 
-        <Panel position="top-left" className="bg-white border border-gray-200 rounded-lg shadow-sm p-2">
-          <div className="flex items-center gap-2">
-            {flowData.breadcrumbs.length > 1 && props.onBack && (
-              <Button variant="ghost" size="sm" onClick={props.onBack} className="text-gray-600">
-                <ChevronLeft className="w-4 h-4 mr-1" />戻る
-              </Button>
-            )}
-            <div className="flex items-center gap-1 text-sm">
-              {flowData.kind && (
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold mr-1 ${
-                    flowData.kind === 'TOBE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
-                  }`}
-                >
-                  {flowData.kind}
-                </span>
+        {!props.embedded && (
+          <Panel position="top-left" className="bg-white border border-gray-200 rounded-lg shadow-sm p-2">
+            <div className="flex items-center gap-2">
+              {flowData.breadcrumbs.length > 1 && props.onBack && (
+                <Button variant="ghost" size="sm" onClick={props.onBack} className="text-gray-600">
+                  <ChevronLeft className="w-4 h-4 mr-1" />戻る
+                </Button>
               )}
-              {flowData.confidence === 'HYPOTHESIS' && (
-                <span className="px-1.5 py-0.5 rounded text-[11px] bg-amber-100 text-amber-700 mr-1">仮説</span>
-              )}
-              {flowData.breadcrumbs.map((c, i) => (
-                <span key={c.id} className="flex items-center">
-                  {i > 0 && <span className="text-gray-400 mx-1">/</span>}
-                  <span className={i === flowData.breadcrumbs.length - 1 ? 'font-medium text-gray-900' : 'text-gray-500'}>
-                    {c.name}
+              <div className="flex items-center gap-1 text-sm">
+                {flowData.kind && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[11px] font-bold mr-1 ${
+                      flowData.kind === 'TOBE' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'
+                    }`}
+                  >
+                    {flowData.kind}
                   </span>
-                </span>
-              ))}
+                )}
+                {flowData.confidence === 'HYPOTHESIS' && (
+                  <span className="px-1.5 py-0.5 rounded text-[11px] bg-amber-100 text-amber-700 mr-1">仮説</span>
+                )}
+                {flowData.breadcrumbs.map((c, i) => (
+                  <span key={c.id} className="flex items-center">
+                    {i > 0 && <span className="text-gray-400 mx-1">/</span>}
+                    <span className={i === flowData.breadcrumbs.length - 1 ? 'font-medium text-gray-900' : 'text-gray-500'}>
+                      {c.name}
+                    </span>
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
-        </Panel>
+          </Panel>
+        )}
 
         {/* ロール一覧 + フロー途中でのロール追加 + ロール編集（左上、パンくずの下）。
             ヘッダーを掴んで自由に動かせる（box は AddRoleControl 内の DraggableFloating が持つ）。 */}
@@ -2712,6 +2725,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         )}
 
         {/* ツールバー（右上）: Undo/Redo + 整形 + 縦横トグル + PNG出力 */}
+        {!props.embedded && (
         <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
           <div className="flex flex-wrap items-center gap-1.5">
             {(props.onUndo || props.onRedo) && (
@@ -2854,13 +2868,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             </Button>
           </div>
         </Panel>
+        )}
       </ReactFlow>
 
       {/* 左サイド: INPUT/OUTPUT 候補（DFD と共通の情報種別マスタ一覧。折りたたみ可） ④ */}
-      <InformationTypeSidePanel
-        informationTypes={props.informationTypes ?? []}
-        onCreateInformationType={props.onCreateInformationType}
-      />
+      {!props.embedded && (
+        <InformationTypeSidePanel
+          informationTypes={props.informationTypes ?? []}
+          onCreateInformationType={props.onCreateInformationType}
+        />
+      )}
 
       {/* コンテキストメニュー */}
       {menu && (
