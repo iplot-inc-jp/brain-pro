@@ -587,9 +587,13 @@ export function computeFlowLayout(
     // ノードの無い列でもデフォルトサイズ分の幅を確保（ピッチ計算の半分に使う）。
     columnMainSize[t] = maxMain > 0 ? maxMain : (isHorizontal ? opt.nodeWidth : opt.nodeHeight);
   }
-  // 列中心を累積（marginX を先頭列中心の前余白とみなす）。
+  // 列中心を累積。先頭列は「左端（縦なら上端）＝ marginX」になるよう中心を
+  // marginX + 先頭列の実サイズ/2 に置く（中心を marginX にすると半分が
+  // レーンラベル帯側へはみ出し、先頭ノードがラベルと重なるため）。
   const columnCenter: number[] = [];
-  let mainCursor = opt.marginX;
+  let mainCursor =
+    opt.marginX +
+    (columnMainSize[0] ?? (isHorizontal ? opt.nodeWidth : opt.nodeHeight)) / 2;
   for (let t = 0; t <= maxTimeline; t++) {
     if (t === 0) {
       columnCenter[0] = mainCursor;

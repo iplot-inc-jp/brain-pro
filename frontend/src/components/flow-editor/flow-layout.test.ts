@@ -579,6 +579,23 @@ describe('computeFlowLayout (nearest-side edge handles)', () => {
 // computeFlowLayout — ノード個別サイズ対応
 // ===========================================
 describe('computeFlowLayout (per-node sizes)', () => {
+  it('先頭列ノードの左端は marginX 以上（レーンラベル帯に食い込まない）', () => {
+    // 幅広にリサイズした先頭ノードでも、左端（縦なら上端）が marginX より
+    // ラベル帯側へはみ出さないこと。中心=marginX に置く旧実装では半分が帯に重なっていた。
+    const nodes: LayoutInputNode[] = [
+      { id: 'wide', roleId: 'r-customer', order: 0, width: 320 },
+      { id: 'b', roleId: 'r-customer', order: 1 },
+    ];
+    const edges: LayoutInputEdge[] = [{ id: 'e1', source: 'wide', target: 'b' }];
+    for (const orientation of ['horizontal', 'vertical'] as const) {
+      const layout = computeFlowLayout(nodes, edges, roles, { orientation });
+      const wide = layout.nodes.find((n) => n.id === 'wide')!;
+      const mainLeft =
+        orientation === 'horizontal' ? wide.x - wide.width / 2 : wide.y - wide.height / 2;
+      expect(mainLeft).toBeGreaterThanOrEqual(DEFAULT_LAYOUT_OPTIONS.marginX);
+    }
+  });
+
   it('個別 width/height を指定したノードはその実サイズで返る（horizontal）', () => {
     const nodes: LayoutInputNode[] = [
       { id: 'a', roleId: 'r-customer', order: 0, width: 240, height: 120 },

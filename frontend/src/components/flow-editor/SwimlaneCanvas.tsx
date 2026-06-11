@@ -2728,47 +2728,24 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const toggleOrientation = useCallback(() => {
     const next: FlowOrientation = orientation === 'horizontal' ? 'vertical' : 'horizontal';
     applyOrientation(next);
-
-    const opposite: Record<string, string> = {
-      top: 'bottom',
-      bottom: 'top',
-      left: 'right',
-      right: 'left',
-    };
-    // 転置後の各ノード中心（最近接サイド計算に使う）。
-    const newCenter = new Map<string, { x: number; y: number }>();
-    const positions: NodePositionPatch[] = flowData.nodes.map((n) => {
-      const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
-      // 保存済みリサイズ値があれば実サイズで中心↔左上を換算（無ければ既定 NODE_W/H）。
-      const w = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
-      const h = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
-      // 旧中心の x↔y を入れ替えて転置（左上 → 中心 → 入替 → 左上）。
-      // ノード自身の w/h は転置しない（向きが変わってもノードの寸法は保持）。
-      const cx = pos.y + h / 2;
-      const cy = pos.x + w / 2;
-      newCenter.set(n.id, { x: cx, y: cy });
-      return {
-        id: n.id,
-        positionX: cx - w / 2,
-        positionY: cy - h / 2,
-        roleId: n.roleId ?? n.role?.id ?? null,
-        order: typeof n.order === 'number' ? n.order : undefined,
-      };
-    });
-    const edges: EdgeHandlePatch[] = flowData.edges.map((e) => {
-      const a = newCenter.get(e.sourceNodeId);
-      const b = newCenter.get(e.targetNodeId);
-      if (!a || !b) {
-        return { id: e.id, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null };
-      }
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const sourceHandle =
-        Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'bottom' : 'top';
-      return { id: e.id, sourceHandle, targetHandle: opposite[sourceHandle] };
-    });
-    void props.onTidyNodes?.(positions, edges);
-  }, [orientation, applyOrientation, flowData.nodes, flowData.edges, effectivePositions, props]);
+    // 縦横切替は「ノード実サイズ＋矢印前後関係を考慮した再整形」で並べ直す。
+    // 単純な座標転置だとノードは回転せず幅×高さのままのため、サイズの違うノードや
+    // 並列分岐が重なってしまう。computeFlowLayout は layoutInputNodes の width/height と
+    // 運ぶ情報チップ幅を考慮するので、新しい向きでも重なりなく配置できる。
+    const relaid = computeFlowLayout(layoutInputNodes, layoutInputEdges, laneRoles, {
+      orientation: next,
+      laneHeightOverrides,
+    } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
+    persistLayout(relaid);
+  }, [
+    orientation,
+    applyOrientation,
+    layoutInputNodes,
+    layoutInputEdges,
+    laneRoles,
+    laneHeightOverrides,
+    persistLayout,
+  ]);
 
   return (
     <div
