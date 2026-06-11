@@ -1159,12 +1159,45 @@ export default function ProjectFlowDetailPage() {
         });
 
         if (!res.ok) throw new Error('Failed to update node');
-        fetchFlowData(flowData.id);
+        // 移動/リサイズ/レーン変更だけのパッチは、サーバ再取得せずローカルへ楽観反映する。
+        // （毎回フル再取得するとキャンバスが丸ごと再構築されて一瞬チラつく。
+        //   複数選択ドラッグではノード数ぶん再取得が走っていた）
+        const MOVE_KEYS = new Set(['positionX', 'positionY', 'roleId', 'width', 'height']);
+        const isMoveOnly = Object.keys(patch).every((k) => MOVE_KEYS.has(k));
+        if (isMoveOnly) {
+          setFlowData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  nodes: prev.nodes.map((n) =>
+                    n.id === nodeId
+                      ? {
+                          ...n,
+                          ...(patch.positionX !== undefined ? { positionX: patch.positionX } : {}),
+                          ...(patch.positionY !== undefined ? { positionY: patch.positionY } : {}),
+                          ...(patch.width !== undefined ? { width: patch.width } : {}),
+                          ...(patch.height !== undefined ? { height: patch.height } : {}),
+                          ...(patch.roleId !== undefined
+                            ? {
+                                roleId: patch.roleId,
+                                role: roles.find((r) => r.id === patch.roleId) ?? n.role,
+                              }
+                            : {}),
+                        }
+                      : n
+                  ),
+                }
+              : prev
+          );
+        } else {
+          // ラベル/種別/メタデータ等の構造変更は従来どおり再取得で整合させる
+          fetchFlowData(flowData.id);
+        }
       } catch (err) {
         console.error('Failed to update node:', err);
       }
     },
-    [flowData, fetchFlowData, getHeaders]
+    [flowData, fetchFlowData, getHeaders, roles]
   );
 
   // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）→ 再取得。
