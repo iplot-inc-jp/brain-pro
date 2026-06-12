@@ -6,7 +6,11 @@ import {
   EntityNotFoundError, EntityAlreadyExistsError, ValidationError,
   DataObjectRelation,
 } from '../../../domain';
-import { RelationCardinalityValue } from '../../../domain/entities/data-object-relation.entity';
+import {
+  RelationCardinalityValue,
+  RelationHandleValue,
+  RelationPathStyleValue,
+} from '../../../domain/entities/data-object-relation.entity';
 import { authorizeProject } from './data-object-authz';
 import { ObjectRelationOutput, toObjectRelationOutput } from './data-object.output';
 
@@ -31,6 +35,9 @@ export interface CreateObjectRelationInput {
   cardinality?: RelationCardinalityValue;
   label?: string | null;
   description?: string | null;
+  pathStyle?: RelationPathStyleValue | null;
+  sourceHandle?: RelationHandleValue | null;
+  targetHandle?: RelationHandleValue | null;
 }
 
 @Injectable()
@@ -52,6 +59,9 @@ export class CreateObjectRelationUseCase {
         cardinality: input.cardinality ?? 'ONE_TO_MANY',
         label: input.label ?? null,
         description: input.description ?? null,
+        pathStyle: input.pathStyle ?? null,
+        sourceHandle: input.sourceHandle ?? null,
+        targetHandle: input.targetHandle ?? null,
       },
       this.repo.generateId(),
     );
@@ -83,6 +93,11 @@ export interface UpdateObjectRelationInput {
   cardinality?: RelationCardinalityValue;
   label?: string | null;
   description?: string | null;
+  /** undefined=変更なし / null=既定の直線へ戻す */
+  pathStyle?: RelationPathStyleValue | null;
+  /** undefined=変更なし / null=自動アンカーへ戻す */
+  sourceHandle?: RelationHandleValue | null;
+  targetHandle?: RelationHandleValue | null;
 }
 
 @Injectable()
@@ -109,6 +124,13 @@ export class UpdateObjectRelationUseCase {
     if (input.cardinality !== undefined) relation.updateCardinality(input.cardinality);
     if (input.label !== undefined) relation.updateLabel(input.label);
     if (input.description !== undefined) relation.updateDescription(input.description);
+    if (input.pathStyle !== undefined) relation.updatePathStyle(input.pathStyle);
+    if (input.sourceHandle !== undefined || input.targetHandle !== undefined) {
+      relation.updateHandles(
+        input.sourceHandle !== undefined ? input.sourceHandle : relation.sourceHandle,
+        input.targetHandle !== undefined ? input.targetHandle : relation.targetHandle,
+      );
+    }
     await this.repo.saveRelation(relation);
     return toObjectRelationOutput(relation);
   }

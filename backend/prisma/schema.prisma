@@ -129,6 +129,7 @@ model Project {
   adoptionStatuses        AdoptionStatus[]
   dataObjects             DataObject[]
   dataObjectRelations     DataObjectRelation[]
+  dataObjectAnnotations   DataObjectAnnotation[]
   kpis                    Kpi[]
 
   @@unique([organizationId, slug])
@@ -1549,6 +1550,11 @@ model DataObjectRelation {
   cardinality    RelationCardinality @default(ONE_TO_MANY)
   label          String?
   description    String?             @db.Text
+  // 線形: 'straight'（null=既定の直線） | 'bezier'（曲線）。FlowEdge/DfdFlow の pathStyle と同じ規約
+  pathStyle      String?             @map("path_style")
+  // 接続辺: 'top'|'right'|'bottom'|'left'、null=自動（カード中心間の交点アンカー）
+  sourceHandle   String?             @map("source_handle")
+  targetHandle   String?             @map("target_handle")
   createdAt      DateTime            @default(now()) @map("created_at")
   updatedAt      DateTime            @updatedAt @map("updated_at")
 
@@ -1557,6 +1563,27 @@ model DataObjectRelation {
   targetObject DataObject @relation("DataObjectRelTarget", fields: [targetObjectId], references: [id], onDelete: Cascade)
 
   @@map("data_object_relations")
+}
+
+// オブジェクト関係性マップ上の付箋/メモ（FlowAnnotation/DfdAnnotation と同型・プロジェクト単位）
+model DataObjectAnnotation {
+  id        String             @id @default(uuid())
+  projectId String             @map("project_id")
+  kind      FlowAnnotationKind @default(STICKY)
+  text      String             @default("") @db.Text
+  positionX Float              @default(0) @map("position_x")
+  positionY Float              @default(0) @map("position_y")
+  width     Float?             @map("width")
+  height    Float?             @map("height")
+  color     String?
+  order     Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("data_object_annotations")
 }
 
 enum InformationCategory {

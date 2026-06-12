@@ -2,6 +2,8 @@ import { DataObject } from '../../../domain/entities/data-object.entity';
 import {
   DataObjectRelation,
   RelationCardinalityValue,
+  RelationHandleValue,
+  RelationPathStyleValue,
 } from '../../../domain/entities/data-object-relation.entity';
 import {
   ObjectGraph,
@@ -35,6 +37,11 @@ export interface ObjectRelationOutput {
   cardinality: RelationCardinalityValue;
   label: string | null;
   description: string | null;
+  /** 線形: 'straight'（null=既定の直線） | 'bezier'（曲線） */
+  pathStyle: RelationPathStyleValue | null;
+  /** 接続辺: 'top'|'right'|'bottom'|'left'、null=自動 */
+  sourceHandle: RelationHandleValue | null;
+  targetHandle: RelationHandleValue | null;
 }
 
 export interface ObjectGraphOutput {
@@ -112,6 +119,9 @@ export function toObjectRelationOutput(r: DataObjectRelation): ObjectRelationOut
     cardinality: r.cardinality,
     label: r.label,
     description: r.description,
+    pathStyle: r.pathStyle,
+    sourceHandle: r.sourceHandle,
+    targetHandle: r.targetHandle,
   };
 }
 

@@ -6,10 +6,14 @@
  * React Flow を使わず、viewBox 変換（translate+scale）だけで
  * ズーム（ホイール）/ パン（背景ドラッグ）/ ノードドラッグを実装する。
  *  - オブジェクト = 角丸カード（色帯＋名前＋テーブル数/DFDバッジ）。foreignObject で描画。
- *  - リレーション = 直線エッジ。両端に 1/N 表記、中央に 1:1/1:多/多:多 チップ＋ラベル。
+ *  - リレーション = 直線（既定）または3次ベジェ曲線エッジ（pathStyle='bezier'）。
+ *    両端に 1/N 表記、中央に 1:1/1:多/多:多 チップ＋ラベル。
  *    カーディナリティごとに線色を変える（1:1=青, 1:多=緑, 多:多=橙）。
+ *    端点は自動（カード境界との交点）または上下左右の辺中点（sourceHandle/targetHandle）。
  *  - エッジ追加 = 「2クリック接続」モード（ガントの依存編集と同じUX。ESCで中断）。
- *  - エッジクリック → その場に編集ポップ（カーディナリティ/ラベル/削除）。
+ *    接続モード中はカード4辺の中点に丸ノブが出て、ノブclickでその辺をアンカーに指定できる。
+ *  - エッジクリック → その場に編集ポップ（カーディナリティ/線形/始点辺・終点辺/ラベル/削除）。
+ *  - 付箋（STICKY）/メモ（COMMENT）= foreignObject の注釈。ドラッグ移動・ダブルクリックで編集・hoverで削除。
  *  - ノードドラッグ終了 → onObjectMoved（親がデバウンスして SaveObjectPositions）。
  */
 
@@ -32,11 +36,15 @@ import {
   Loader2,
   Trash2,
   X,
+  StickyNote,
+  MessageSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   RELATION_CARDINALITY_OPTIONS,
+  type DataObjectAnnotationDto,
+  type DataObjectAnnotationKind,
   type DataObjectDto,
   type ObjectRelationDto,
   type RelationCardinality,
@@ -70,6 +78,50 @@ function rectAnchor(cx: number, cy: number, tx: number, ty: number): Point {
   return { x: cx + dx * s, y: cy + dy * s };
 }
 
+/** エッジ端点のアンカー辺（上下左右）。null は自動（rectAnchor） */
+const SIDES = ['top', 'right', 'bottom', 'left'] as const;
+type SideHandle = (typeof SIDES)[number];
+
+/** 辺ごとの「外向き法線」単位ベクトル（ベジェ制御点の伸ばし方向） */
+const SIDE_NORMALS: Record<SideHandle, Point> = {
+  top: { x: 0, y: -1 },
+  right: { x: 1, y: 0 },
+  bottom: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+};
+
+/** カード左上原点から見た各辺中点（接続ノブの位置と共用） */
+const SIDE_MIDPOINTS: Record<SideHandle, Point> = {
+  top: { x: CARD_W / 2, y: 0 },
+  right: { x: CARD_W, y: CARD_H / 2 },
+  bottom: { x: CARD_W / 2, y: CARD_H },
+  left: { x: 0, y: CARD_H / 2 },
+};
+
+/** カード左上 (x,y) の指定辺の中点（上下左右アンカーのエッジ端点） */
+function sideAnchor(x: number, y: number, side: SideHandle): Point {
+  const m = SIDE_MIDPOINTS[side];
+  return { x: x + m.x, y: y + m.y };
+}
+
+/** API の string|null を SideHandle に絞り込む（不正値は自動扱い） */
+function asSide(v: string | null | undefined): SideHandle | null {
+  return SIDES.includes(v as SideHandle) ? (v as SideHandle) : null;
+}
+
+/** エッジ編集ポップの始点辺/終点辺セレクタ（''=自動アンカー） */
+const HANDLE_OPTIONS: ReadonlyArray<{ value: '' | SideHandle; label: string }> = [
+  { value: '', label: '自動' },
+  { value: 'top', label: '上' },
+  { value: 'right', label: '右' },
+  { value: 'bottom', label: '下' },
+  { value: 'left', label: '左' },
+];
+
+/** 付箋/メモの既定サイズ（width/height 未設定時） */
+const ANNOT_W = 170;
+const ANNOT_H = 100;
+
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
@@ -77,24 +129,45 @@ function clamp(v: number, min: number, max: number): number {
 export interface ObjectMapCanvasProps {
   objects: DataObjectDto[];
   relations: ObjectRelationDto[];
+  /** 付箋/メモ（接続モード・オブジェクト選択の対象外） */
+  annotations: DataObjectAnnotationDto[];
   selectedObjectId: string | null;
   onSelectObject: (id: string | null) => void;
   /** ノードドラッグ終了時（親側で楽観更新＋デバウンス保存する） */
   onObjectMoved: (id: string, x: number, y: number) => void;
-  onCreateRelation: (sourceObjectId: string, targetObjectId: string) => void | Promise<void>;
+  /** sourceHandle/targetHandle は辺ノブで指定された場合のみ非null（null=自動アンカー） */
+  onCreateRelation: (
+    sourceObjectId: string,
+    targetObjectId: string,
+    sourceHandle?: string | null,
+    targetHandle?: string | null,
+  ) => void | Promise<void>;
   onUpdateRelation: (
     id: string,
-    patch: { cardinality?: RelationCardinality; label?: string | null },
+    patch: {
+      cardinality?: RelationCardinality;
+      label?: string | null;
+      pathStyle?: string | null;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
+    },
   ) => void | Promise<void>;
   onDeleteRelation: (id: string) => void | Promise<void>;
   onAddObject: () => void;
   onImportFromDfd: () => void;
   importing: boolean;
+  /** 付箋/メモの作成（位置はキャンバスが現在のビュー中心付近で決める） */
+  onAddAnnotation: (kind: DataObjectAnnotationKind, x: number, y: number) => void | Promise<void>;
+  /** 付箋/メモのドラッグ終了時（親側で楽観更新＋デバウンス保存する） */
+  onAnnotationMoved: (id: string, x: number, y: number) => void;
+  onUpdateAnnotationText: (id: string, text: string) => void | Promise<void>;
+  onDeleteAnnotation: (id: string) => void | Promise<void>;
 }
 
 export function ObjectMapCanvas({
   objects,
   relations,
+  annotations,
   selectedObjectId,
   onSelectObject,
   onObjectMoved,
@@ -104,6 +177,10 @@ export function ObjectMapCanvas({
   onAddObject,
   onImportFromDfd,
   importing,
+  onAddAnnotation,
+  onAnnotationMoved,
+  onUpdateAnnotationText,
+  onDeleteAnnotation,
 }: ObjectMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -119,20 +196,34 @@ export function ObjectMapCanvas({
   const suppressClickRef = useRef(false);
   const panRef = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
 
-  // 2クリック接続モード
+  // 2クリック接続モード（connectSourceHandle = 接続元で選んだ辺。null=自動）
   const [connectMode, setConnectMode] = useState(false);
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
+  const [connectSourceHandle, setConnectSourceHandle] = useState<SideHandle | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point | null>(null);
+  // 接続ノブの hover（r拡大・色強調用）
+  const [hoverKnob, setHoverKnob] = useState<{ objId: string; side: SideHandle } | null>(null);
 
   // エッジ編集ポップ（コンテナ相対のスクリーン座標）
   const [edgeEdit, setEdgeEdit] = useState<{ id: string; x: number; y: number } | null>(null);
   const [edgeLabelDraft, setEdgeLabelDraft] = useState('');
+
+  // 付箋/メモのインライン編集・hover（✕ボタン表示用）
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+  const [annotationDraft, setAnnotationDraft] = useState('');
+  const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
 
   const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o] as const)), [objects]);
   const editingRelation = edgeEdit ? relations.find((r) => r.id === edgeEdit.id) ?? null : null;
 
   const posOf = useCallback(
     (o: DataObjectDto): Point => dragPos[o.id] ?? { x: o.positionX, y: o.positionY },
+    [dragPos],
+  );
+
+  // 付箋/メモもカードと同じ dragPos でドラッグ中位置を上書き（id はユニーク）
+  const posOfAnnotation = useCallback(
+    (a: DataObjectAnnotationDto): Point => dragPos[a.id] ?? { x: a.positionX, y: a.positionY },
     [dragPos],
   );
 
@@ -212,8 +303,10 @@ export function ObjectMapCanvas({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setConnectSourceId(null);
+      setConnectSourceHandle(null);
       setConnectMode(false);
       setEdgeEdit(null);
+      setEditingAnnotationId(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -265,19 +358,105 @@ export function ObjectMapCanvas({
       }
       if (connectMode) {
         if (!connectSourceId) {
+          // カード本体クリック = 自動アンカー（null）で接続元に
           setConnectSourceId(obj.id);
+          setConnectSourceHandle(null);
         } else if (connectSourceId === obj.id) {
           setConnectSourceId(null);
+          setConnectSourceHandle(null);
         } else {
-          void onCreateRelation(connectSourceId, obj.id);
+          void onCreateRelation(connectSourceId, obj.id, connectSourceHandle, null);
           setConnectSourceId(null);
+          setConnectSourceHandle(null);
         }
         return;
       }
       setEdgeEdit(null);
       onSelectObject(obj.id === selectedObjectId ? null : obj.id);
     },
-    [connectMode, connectSourceId, onCreateRelation, onSelectObject, selectedObjectId],
+    [connectMode, connectSourceId, connectSourceHandle, onCreateRelation, onSelectObject, selectedObjectId],
+  );
+
+  // ===== 接続ノブ（カード4辺の中点）クリック = その辺をアンカーに指定して接続 =====
+  const handleKnobClick = useCallback(
+    (e: ReactMouseEvent<SVGCircleElement>, obj: DataObjectDto, side: SideHandle) => {
+      e.stopPropagation();
+      if (!connectMode) return;
+      if (!connectSourceId) {
+        setConnectSourceId(obj.id);
+        setConnectSourceHandle(side);
+      } else if (connectSourceId === obj.id) {
+        // 同じカード内のノブ = 接続元の辺を選び直し
+        setConnectSourceHandle(side);
+      } else {
+        void onCreateRelation(connectSourceId, obj.id, connectSourceHandle, side);
+        setConnectSourceId(null);
+        setConnectSourceHandle(null);
+      }
+    },
+    [connectMode, connectSourceId, connectSourceHandle, onCreateRelation],
+  );
+
+  // ===== 付箋/メモのドラッグ（カードと同じポインタ系。接続・選択の対象外） =====
+  const handleAnnotationPointerDown = useCallback(
+    (e: ReactPointerEvent<SVGGElement>, a: DataObjectAnnotationDto) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      if (editingAnnotationId === a.id) return; // テキスト編集中はドラッグしない
+      const world = screenToWorld(e.clientX, e.clientY);
+      dragRef.current = { id: a.id, dx: world.x - a.positionX, dy: world.y - a.positionY, moved: false };
+
+      const onMove = (ev: PointerEvent) => {
+        const d = dragRef.current;
+        if (!d) return;
+        const w = screenToWorld(ev.clientX, ev.clientY);
+        d.moved = true;
+        setDragPos({ [d.id]: { x: Math.round(w.x - d.dx), y: Math.round(w.y - d.dy) } });
+      };
+      const onUp = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        const d = dragRef.current;
+        dragRef.current = null;
+        if (!d) return;
+        if (d.moved) {
+          const w = screenToWorld(ev.clientX, ev.clientY);
+          onAnnotationMoved(d.id, Math.round(w.x - d.dx), Math.round(w.y - d.dy));
+        }
+        setDragPos({});
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [editingAnnotationId, screenToWorld, onAnnotationMoved],
+  );
+
+  // ===== 付箋/メモのインライン編集（ダブルクリック開始 → blur で保存） =====
+  const startEditAnnotation = useCallback((a: DataObjectAnnotationDto) => {
+    setAnnotationDraft(a.text);
+    setEditingAnnotationId(a.id);
+  }, []);
+
+  const commitAnnotationText = useCallback(() => {
+    if (!editingAnnotationId) return;
+    const target = annotations.find((a) => a.id === editingAnnotationId);
+    setEditingAnnotationId(null);
+    if (!target) return;
+    if (annotationDraft === target.text) return;
+    void onUpdateAnnotationText(target.id, annotationDraft);
+  }, [editingAnnotationId, annotations, annotationDraft, onUpdateAnnotationText]);
+
+  // 付箋/メモの新規作成位置 = 現在のビュー中心付近（連続追加は少しずつずらす）
+  const addAnnotationAtCenter = useCallback(
+    (kind: DataObjectAnnotationKind) => {
+      const el = svgRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const c = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const jitter = (annotations.length % 4) * 16;
+      void onAddAnnotation(kind, Math.round(c.x - ANNOT_W / 2 + jitter), Math.round(c.y - ANNOT_H / 2 + jitter));
+    },
+    [annotations.length, screenToWorld, onAddAnnotation],
   );
 
   // ===== 背景パン / 背景クリックで選択解除 =====
@@ -301,10 +480,12 @@ export function ObjectMapCanvas({
         const p = panRef.current;
         panRef.current = null;
         if (p && !p.moved) {
-          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップを閉じる
+          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップ/注釈編集を閉じる
           onSelectObject(null);
           setConnectSourceId(null);
+          setConnectSourceHandle(null);
           setEdgeEdit(null);
+          setEditingAnnotationId(null);
         }
       };
       window.addEventListener('pointermove', onMove);
@@ -330,7 +511,7 @@ export function ObjectMapCanvas({
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const x = clamp(e.clientX - rect.left, 130, rect.width - 130);
-      const y = clamp(e.clientY - rect.top, 10, rect.height - 170);
+      const y = clamp(e.clientY - rect.top, 10, rect.height - 290);
       setEdgeLabelDraft(rel.label ?? '');
       setEdgeEdit({ id: rel.id, x, y });
     },
@@ -344,7 +525,7 @@ export function ObjectMapCanvas({
     void onUpdateRelation(editingRelation.id, { label: v === '' ? null : v });
   }, [editingRelation, edgeLabelDraft, onUpdateRelation]);
 
-  // ===== エッジ描画情報（同一ペア間の複数線は垂直方向にオフセット） =====
+  // ===== エッジ描画情報（pathStyle/辺アンカー対応。同一ペア間の複数線は垂直方向にオフセット） =====
   const edgeGeometries = useMemo(() => {
     const groups = new Map<string, ObjectRelationDto[]>();
     for (const r of relations) {
@@ -355,11 +536,15 @@ export function ObjectMapCanvas({
     }
     const result: Array<{
       rel: ObjectRelationDto;
-      a: Point;
-      b: Point;
+      /** 直線 or 3次ベジェの <path> d */
+      path: string;
+      /** 中央チップ/ラベル位置（ベジェは t=0.5 の点） */
       mid: Point;
-      dir: Point;
-      perp: Point;
+      srcMark: Point;
+      tgtMark: Point;
+      arrowTip: Point;
+      arrowL: Point;
+      arrowR: Point;
     }> = [];
     for (const group of Array.from(groups.values())) {
       group.forEach((rel, i) => {
@@ -368,28 +553,73 @@ export function ObjectMapCanvas({
         if (!src || !tgt || src.id === tgt.id) return;
         const sp = posOf(src);
         const tp = posOf(tgt);
-        let scx = sp.x + CARD_W / 2;
-        let scy = sp.y + CARD_H / 2;
-        let tcx = tp.x + CARD_W / 2;
-        let tcy = tp.y + CARD_H / 2;
+        const scx = sp.x + CARD_W / 2;
+        const scy = sp.y + CARD_H / 2;
+        const tcx = tp.x + CARD_W / 2;
+        const tcy = tp.y + CARD_H / 2;
         const len = Math.hypot(tcx - scx, tcy - scy) || 1;
-        const dir = { x: (tcx - scx) / len, y: (tcy - scy) / len };
-        const perp = { x: -dir.y, y: dir.x };
-        // 同一ペア間の複数エッジは中心線を垂直方向にずらす
+        const centerPerp = { x: -(tcy - scy) / len, y: (tcx - scx) / len };
+        // 同一ペア間の複数エッジは中心線を垂直方向にずらす（自動アンカー時のみ効く）
         const offset = (i - (group.length - 1) / 2) * 22;
-        scx += perp.x * offset;
-        scy += perp.y * offset;
-        tcx += perp.x * offset;
-        tcy += perp.y * offset;
-        const a = rectAnchor(sp.x + CARD_W / 2, sp.y + CARD_H / 2, tcx, tcy);
-        const b = rectAnchor(tp.x + CARD_W / 2, tp.y + CARD_H / 2, scx, scy);
+        const sh = asSide(rel.sourceHandle);
+        const th = asSide(rel.targetHandle);
+        // 端点: 辺指定があればその辺の中点、なければカード境界との交点（自動）
+        const a = sh
+          ? sideAnchor(sp.x, sp.y, sh)
+          : rectAnchor(scx, scy, tcx + centerPerp.x * offset, tcy + centerPerp.y * offset);
+        const b = th
+          ? sideAnchor(tp.x, tp.y, th)
+          : rectAnchor(tcx, tcy, scx + centerPerp.x * offset, scy + centerPerp.y * offset);
+        const abLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        const abDir = { x: (b.x - a.x) / abLen, y: (b.y - a.y) / abLen };
+
+        let path: string;
+        let mid: Point;
+        let srcMark: Point;
+        let tgtMark: Point;
+        let arrowDir: Point; // target 端点での進行方向（矢じりの向き）
+        if (rel.pathStyle === 'bezier') {
+          // 3次ベジェ。制御点は各端点から「接続辺の外向き法線」（自動アンカー時は端点間方向）へ dist*0.4
+          const ext = Math.max(abLen, 40) * 0.4;
+          const ns = sh ? SIDE_NORMALS[sh] : abDir;
+          const nt = th ? SIDE_NORMALS[th] : { x: -abDir.x, y: -abDir.y };
+          const c1 = { x: a.x + ns.x * ext, y: a.y + ns.y * ext };
+          const c2 = { x: b.x + nt.x * ext, y: b.y + nt.y * ext };
+          path = `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`;
+          // 中央チップ = t=0.5 の点 (P0 + 3P1 + 3P2 + P3) / 8
+          mid = {
+            x: (a.x + 3 * c1.x + 3 * c2.x + b.x) / 8,
+            y: (a.y + 3 * c1.y + 3 * c2.y + b.y) / 8,
+          };
+          // 1/N 表記は端点から制御点方向へ ~16px（垂直方向に 11px 浮かせる）
+          srcMark = { x: a.x + ns.x * 16 - ns.y * 11, y: a.y + ns.y * 16 + ns.x * 11 };
+          tgtMark = { x: b.x + nt.x * 16 - nt.y * 11, y: b.y + nt.y * 16 + nt.x * 11 };
+          arrowDir = { x: -nt.x, y: -nt.y };
+        } else {
+          // 直線（null / 'straight'）は現状ロジック
+          path = `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+          mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          const abPerp = { x: -abDir.y, y: abDir.x };
+          srcMark = { x: a.x + abDir.x * 18 + abPerp.x * 11, y: a.y + abDir.y * 18 + abPerp.y * 11 };
+          tgtMark = { x: b.x - abDir.x * 18 + abPerp.x * 11, y: b.y - abDir.y * 18 + abPerp.y * 11 };
+          arrowDir = abDir;
+        }
+        const arrowPerp = { x: -arrowDir.y, y: arrowDir.x };
         result.push({
           rel,
-          a,
-          b,
-          mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-          dir,
-          perp,
+          path,
+          mid,
+          srcMark,
+          tgtMark,
+          arrowTip: b,
+          arrowL: {
+            x: b.x - arrowDir.x * 10 + arrowPerp.x * 5,
+            y: b.y - arrowDir.y * 10 + arrowPerp.y * 5,
+          },
+          arrowR: {
+            x: b.x - arrowDir.x * 10 - arrowPerp.x * 5,
+            y: b.y - arrowDir.y * 10 - arrowPerp.y * 5,
+          },
         });
       });
     }
@@ -397,6 +627,14 @@ export function ObjectMapCanvas({
   }, [relations, objectById, posOf]);
 
   const connectSource = connectSourceId ? objectById.get(connectSourceId) ?? null : null;
+  // 接続プレビュー線の始点（辺ノブ指定があればその辺の中点）
+  let connectPreviewStart: Point | null = null;
+  if (connectSource) {
+    const sp = posOf(connectSource);
+    connectPreviewStart = connectSourceHandle
+      ? sideAnchor(sp.x, sp.y, connectSourceHandle)
+      : { x: sp.x + CARD_W / 2, y: sp.y + CARD_H / 2 };
+  }
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-slate-50">
@@ -424,33 +662,14 @@ export function ObjectMapCanvas({
 
         <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
           {/* ===== エッジ ===== */}
-          {edgeGeometries.map(({ rel, a, b, mid, dir, perp }) => {
+          {edgeGeometries.map(({ rel, path, mid, srcMark, tgtMark, arrowTip, arrowL, arrowR }) => {
             const style = CARDINALITY_STYLES[rel.cardinality];
             const editing = edgeEdit?.id === rel.id;
-            // 端点表記の位置（端から線に沿って 18px、線の垂直方向に 11px 浮かせる）
-            const srcMark = {
-              x: a.x + dir.x * 18 + perp.x * 11,
-              y: a.y + dir.y * 18 + perp.y * 11,
-            };
-            const tgtMark = {
-              x: b.x - dir.x * 18 + perp.x * 11,
-              y: b.y - dir.y * 18 + perp.y * 11,
-            };
-            // 矢じり（target 側）
-            const arrowTip = b;
-            const arrowL = {
-              x: b.x - dir.x * 10 + perp.x * 5,
-              y: b.y - dir.y * 10 + perp.y * 5,
-            };
-            const arrowR = {
-              x: b.x - dir.x * 10 - perp.x * 5,
-              y: b.y - dir.y * 10 - perp.y * 5,
-            };
             return (
               <g key={rel.id}>
                 {/* クリック判定用の太い透明パス */}
                 <path
-                  d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`}
+                  d={path}
                   stroke="transparent"
                   strokeWidth={14}
                   fill="none"
@@ -459,7 +678,7 @@ export function ObjectMapCanvas({
                   onPointerDown={(e) => e.stopPropagation()}
                 />
                 <path
-                  d={`M ${a.x} ${a.y} L ${b.x} ${b.y}`}
+                  d={path}
                   stroke={style.color}
                   strokeWidth={editing ? 2.5 : 1.5}
                   fill="none"
@@ -535,11 +754,11 @@ export function ObjectMapCanvas({
             );
           })}
 
-          {/* 接続プレビュー線（接続元 → カーソル） */}
-          {connectMode && connectSource && cursorWorld && (
+          {/* 接続プレビュー線（接続元（辺指定があればその辺の中点） → カーソル） */}
+          {connectMode && connectPreviewStart && cursorWorld && (
             <line
-              x1={posOf(connectSource).x + CARD_W / 2}
-              y1={posOf(connectSource).y + CARD_H / 2}
+              x1={connectPreviewStart.x}
+              y1={connectPreviewStart.y}
               x2={cursorWorld.x}
               y2={cursorWorld.y}
               stroke="#2563eb"
@@ -548,6 +767,79 @@ export function ObjectMapCanvas({
               pointerEvents="none"
             />
           )}
+
+          {/* ===== 付箋/メモ（接続モード・オブジェクト選択の対象外。カードの下層に描画） ===== */}
+          {annotations.map((a) => {
+            const p = posOfAnnotation(a);
+            const w = a.width ?? ANNOT_W;
+            const h = a.height ?? ANNOT_H;
+            const isSticky = a.kind === 'STICKY';
+            const isEditing = editingAnnotationId === a.id;
+            const hovered = hoveredAnnotationId === a.id;
+            return (
+              <g
+                key={a.id}
+                transform={`translate(${p.x},${p.y})`}
+                onPointerDown={(e) => handleAnnotationPointerDown(e, a)}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  // 編集中の textarea 内ダブルクリック（単語選択）で draft が保存済みテキストに巻き戻るのを防ぐ
+                  if (isEditing) return;
+                  startEditAnnotation(a);
+                }}
+                onPointerEnter={() => setHoveredAnnotationId(a.id)}
+                onPointerLeave={() => setHoveredAnnotationId(null)}
+                style={{ cursor: isEditing ? 'text' : 'grab' }}
+              >
+                <foreignObject width={w} height={h} pointerEvents={isEditing ? 'auto' : 'none'}>
+                  <div
+                    className={
+                      isSticky
+                        ? 'h-full w-full overflow-hidden rounded-lg border border-amber-200 p-2 shadow-md'
+                        : 'h-full w-full overflow-hidden rounded-lg rounded-bl-none border border-gray-300 bg-white p-2 shadow-sm'
+                    }
+                    style={isSticky ? { background: '#fef3c7' } : undefined}
+                  >
+                    {isEditing ? (
+                      <textarea
+                        autoFocus
+                        className="h-full w-full resize-none bg-transparent text-[11px] leading-snug text-slate-700 focus:outline-none"
+                        value={annotationDraft}
+                        onChange={(e) => setAnnotationDraft(e.target.value)}
+                        onBlur={commitAnnotationText}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      />
+                    ) : a.text ? (
+                      <p className="whitespace-pre-wrap break-words text-[11px] leading-snug text-slate-700">
+                        {a.text}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400">ダブルクリックで編集</p>
+                    )}
+                  </div>
+                </foreignObject>
+                {/* 非編集時のヒット領域（foreignObject の上に透明 rect） */}
+                {!isEditing && <rect width={w} height={h} rx={8} fill="transparent" />}
+                {/* hover 時の削除ボタン */}
+                {hovered && !isEditing && (
+                  <foreignObject x={w - 24} y={4} width={20} height={20}>
+                    <button
+                      type="button"
+                      className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-gray-400 shadow hover:text-red-600"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onDeleteAnnotation(a.id);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </foreignObject>
+                )}
+              </g>
+            );
+          })}
 
           {/* ===== オブジェクトカード ===== */}
           {objects.map((o) => {
@@ -614,6 +906,29 @@ export function ObjectMapCanvas({
                 </foreignObject>
                 {/* ヒット領域（foreignObject の上に透明 rect） */}
                 <rect width={CARD_W} height={CARD_H} rx={12} fill="transparent" />
+                {/* 接続モード中: 4辺中点の接続ノブ（click=その辺をアンカーに。カード本体click=自動） */}
+                {connectMode &&
+                  SIDES.map((side) => {
+                    const kp = SIDE_MIDPOINTS[side];
+                    const knobHovered = hoverKnob?.objId === o.id && hoverKnob.side === side;
+                    const knobActive = isConnectSource && connectSourceHandle === side;
+                    return (
+                      <circle
+                        key={side}
+                        cx={kp.x}
+                        cy={kp.y}
+                        r={knobHovered || knobActive ? 7 : 5}
+                        fill={knobActive ? '#2563eb' : knobHovered ? '#bfdbfe' : '#ffffff'}
+                        stroke="#2563eb"
+                        strokeWidth={1.5}
+                        style={{ cursor: 'pointer' }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => handleKnobClick(e, o, side)}
+                        onPointerEnter={() => setHoverKnob({ objId: o.id, side })}
+                        onPointerLeave={() => setHoverKnob(null)}
+                      />
+                    );
+                  })}
               </g>
             );
           })}
@@ -648,10 +963,30 @@ export function ObjectMapCanvas({
           onClick={() => {
             setConnectMode((m) => !m);
             setConnectSourceId(null);
+            setConnectSourceHandle(null);
           }}
         >
           <Spline className="h-4 w-4" />
           関係線を追加
+        </Button>
+        <div className="mx-0.5 h-5 w-px bg-gray-200" />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1.5 px-2 text-xs"
+          onClick={() => addAnnotationAtCenter('STICKY')}
+        >
+          <StickyNote className="h-4 w-4 text-amber-500" />
+          付箋
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1.5 px-2 text-xs"
+          onClick={() => addAnnotationAtCenter('COMMENT')}
+        >
+          <MessageSquare className="h-4 w-4 text-gray-500" />
+          メモ
         </Button>
       </div>
 
@@ -688,8 +1023,8 @@ export function ObjectMapCanvas({
       {connectMode && (
         <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs text-blue-700 shadow-sm">
           {connectSourceId
-            ? '接続先のオブジェクトをクリック（ESC で中断）'
-            : '接続元のオブジェクトをクリック（ESC で中断）'}
+            ? '接続先のオブジェクト（または辺のノブ）をクリック（ESC で中断）'
+            : '接続元のオブジェクト（または辺のノブ）をクリック（ESC で中断）'}
         </div>
       )}
 
@@ -734,6 +1069,65 @@ export function ObjectMapCanvas({
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-medium text-gray-500">線形</label>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={editingRelation.pathStyle === 'bezier' ? 'outline' : 'default'}
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => void onUpdateRelation(editingRelation.id, { pathStyle: null })}
+                >
+                  直線
+                </Button>
+                <Button
+                  size="sm"
+                  variant={editingRelation.pathStyle === 'bezier' ? 'default' : 'outline'}
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => void onUpdateRelation(editingRelation.id, { pathStyle: 'bezier' })}
+                >
+                  曲線
+                </Button>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="mb-1 block text-[11px] font-medium text-gray-500">始点辺</label>
+                <select
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  value={asSide(editingRelation.sourceHandle) ?? ''}
+                  onChange={(e) =>
+                    void onUpdateRelation(editingRelation.id, {
+                      sourceHandle: e.target.value === '' ? null : e.target.value,
+                    })
+                  }
+                >
+                  {HANDLE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="mb-1 block text-[11px] font-medium text-gray-500">終点辺</label>
+                <select
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  value={asSide(editingRelation.targetHandle) ?? ''}
+                  onChange={(e) =>
+                    void onUpdateRelation(editingRelation.id, {
+                      targetHandle: e.target.value === '' ? null : e.target.value,
+                    })
+                  }
+                >
+                  {HANDLE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-medium text-gray-500">ラベル</label>

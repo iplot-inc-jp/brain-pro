@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Put, Delete, Body, Param, HttpCode,
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, HttpCode, Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import {
@@ -20,10 +20,25 @@ import {
   LinkTableToObjectUseCase,
   SaveErPositionsUseCase,
 } from '../../application';
-import { RelationCardinalityValue } from '../../domain/entities/data-object-relation.entity';
+import { authorizeProject } from '../../application/use-cases/data-object/data-object-authz';
+import {
+  RelationCardinalityValue,
+  RelationHandleValue,
+  RelationPathStyleValue,
+} from '../../domain/entities/data-object-relation.entity';
+import {
+  EntityNotFoundError,
+  ORGANIZATION_REPOSITORY, OrganizationRepository,
+  PROJECT_REPOSITORY, ProjectRepository,
+} from '../../domain';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 
 const CARDINALITIES = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_MANY'];
+const PATH_STYLES = ['straight', 'bezier'];
+const HANDLES = ['top', 'right', 'bottom', 'left'];
+/** 関係性マップ上の付箋/メモは STICKY/COMMENT のみ（SCOPE/ICON はフロー専用） */
+const ANNOTATION_KINDS = ['STICKY', 'COMMENT'];
 
 class CreateDataObjectDto {
   @IsString() name!: string;
@@ -47,6 +62,11 @@ class CreateObjectRelationDto {
   @IsOptional() @IsIn(CARDINALITIES) cardinality?: RelationCardinalityValue;
   @IsOptional() @IsString() label?: string | null;
   @IsOptional() @IsString() description?: string | null;
+  /** 'straight'|'bezier'。null/省略=既定の直線 */
+  @IsOptional() @IsIn(PATH_STYLES) pathStyle?: RelationPathStyleValue | null;
+  /** 'top'|'right'|'bottom'|'left'。null/省略=自動アンカー */
+  @IsOptional() @IsIn(HANDLES) sourceHandle?: RelationHandleValue | null;
+  @IsOptional() @IsIn(HANDLES) targetHandle?: RelationHandleValue | null;
 }
 
 class UpdateObjectRelationDto {
@@ -55,6 +75,30 @@ class UpdateObjectRelationDto {
   @IsOptional() @IsIn(CARDINALITIES) cardinality?: RelationCardinalityValue;
   @IsOptional() @IsString() label?: string | null;
   @IsOptional() @IsString() description?: string | null;
+  /** undefined=変更なし / null=既定の直線へ戻す（@IsOptional は null も素通しする） */
+  @IsOptional() @IsIn(PATH_STYLES) pathStyle?: RelationPathStyleValue | null;
+  /** undefined=変更なし / null=自動アンカーへ戻す */
+  @IsOptional() @IsIn(HANDLES) sourceHandle?: RelationHandleValue | null;
+  @IsOptional() @IsIn(HANDLES) targetHandle?: RelationHandleValue | null;
+}
+
+class CreateAnnotationDto {
+  @IsOptional() @IsIn(ANNOTATION_KINDS) kind?: 'STICKY' | 'COMMENT';
+  @IsOptional() @IsString() text?: string;
+  @IsOptional() @IsNumber() positionX?: number;
+  @IsOptional() @IsNumber() positionY?: number;
+  @IsOptional() @IsString() color?: string | null;
+  @IsOptional() @IsNumber() order?: number;
+}
+
+class UpdateAnnotationDto {
+  @IsOptional() @IsString() text?: string;
+  @IsOptional() @IsNumber() positionX?: number;
+  @IsOptional() @IsNumber() positionY?: number;
+  @IsOptional() @IsNumber() width?: number | null;
+  @IsOptional() @IsNumber() height?: number | null;
+  @IsOptional() @IsString() color?: string | null;
+  @IsOptional() @IsNumber() order?: number;
 }
 
 class PositionItemDto {
@@ -90,7 +134,40 @@ export class DataObjectController {
     private readonly getErGraph: GetErGraphUseCase,
     private readonly linkTable: LinkTableToObjectUseCase,
     private readonly saveErPositions: SaveErPositionsUseCase,
+    private readonly prisma: PrismaService,
+    @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
+    @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
   ) {}
+
+  // ===== 付箋/メモ（DataObjectAnnotation）共通ヘルパー =====
+
+  private annotationToResponse(a: {
+    id: string; projectId: string; kind: string; text: string;
+    positionX: number; positionY: number; width: number | null; height: number | null;
+    color: string | null; order: number; createdAt: Date; updatedAt: Date;
+  }) {
+    return {
+      id: a.id,
+      projectId: a.projectId,
+      kind: a.kind,
+      text: a.text,
+      positionX: a.positionX,
+      positionY: a.positionY,
+      width: a.width,
+      height: a.height,
+      color: a.color,
+      order: a.order,
+      updatedAt: a.updatedAt.toISOString(),
+    };
+  }
+
+  /** 注釈IDから所属プロジェクトを引いてメンバー認可し、行を返す */
+  private async authorizeAnnotation(id: string, userId: string) {
+    const row = await this.prisma.dataObjectAnnotation.findUnique({ where: { id } });
+    if (!row) throw new EntityNotFoundError('DataObjectAnnotation', id);
+    await authorizeProject(this.projectRepo, this.orgRepo, row.projectId, userId);
+    return row;
+  }
 
   // ========== オブジェクト関係性マップ ==========
 
@@ -205,5 +282,74 @@ export class DataObjectController {
     @Body() dto: LinkTableDto,
   ) {
     await this.linkTable.execute({ userId: user.id, tableId, dataObjectId: dto.dataObjectId ?? null });
+  }
+
+  // ========== 付箋/メモ（関係性マップ上の注釈。FlowAnnotation/DfdAnnotation と同型） ==========
+
+  @Get('projects/:projectId/data-object-annotations')
+  @ApiOperation({ summary: '関係性マップの付箋/メモ一覧' })
+  async getAnnotations(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id);
+    const rows = await this.prisma.dataObjectAnnotation.findMany({
+      where: { projectId },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+    return rows.map((a) => this.annotationToResponse(a));
+  }
+
+  @Post('projects/:projectId/data-object-annotations')
+  @ApiOperation({ summary: '関係性マップに付箋/メモを追加（kind=STICKY|COMMENT）' })
+  async createAnnotation(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateAnnotationDto,
+  ) {
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id);
+    const row = await this.prisma.dataObjectAnnotation.create({
+      data: {
+        projectId,
+        kind: dto.kind ?? 'STICKY',
+        text: dto.text ?? '',
+        positionX: dto.positionX ?? 0,
+        positionY: dto.positionY ?? 0,
+        color: dto.color ?? null,
+        order: dto.order ?? 0,
+      },
+    });
+    return this.annotationToResponse(row);
+  }
+
+  @Patch('data-object-annotations/:id')
+  @ApiOperation({ summary: '付箋/メモ更新（text/position/width/height/color/order）' })
+  async patchAnnotation(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateAnnotationDto,
+  ) {
+    await this.authorizeAnnotation(id, user.id);
+    const row = await this.prisma.dataObjectAnnotation.update({
+      where: { id },
+      data: {
+        ...(dto.text !== undefined ? { text: dto.text } : {}),
+        ...(dto.positionX !== undefined ? { positionX: dto.positionX } : {}),
+        ...(dto.positionY !== undefined ? { positionY: dto.positionY } : {}),
+        ...(dto.width !== undefined ? { width: dto.width } : {}),
+        ...(dto.height !== undefined ? { height: dto.height } : {}),
+        ...(dto.color !== undefined ? { color: dto.color } : {}),
+        ...(dto.order !== undefined ? { order: dto.order } : {}),
+      },
+    });
+    return this.annotationToResponse(row);
+  }
+
+  @Delete('data-object-annotations/:id')
+  @HttpCode(204)
+  @ApiOperation({ summary: '付箋/メモ削除' })
+  async removeAnnotation(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
+    await this.authorizeAnnotation(id, user.id);
+    await this.prisma.dataObjectAnnotation.delete({ where: { id } });
   }
 }

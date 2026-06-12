@@ -23,6 +23,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { tablesApi, type Table } from '@/lib/api';
 import {
   dataObjectApi,
+  dataObjectAnnotationApi,
+  type DataObjectAnnotationDto,
+  type DataObjectAnnotationKind,
   type ObjectGraphDto,
   type PositionItem,
   type RelationCardinality,
@@ -40,6 +43,7 @@ export default function ObjectMapPage() {
 
   const [graph, setGraph] = useState<ObjectGraphDto | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
+  const [annotations, setAnnotations] = useState<DataObjectAnnotationDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -61,12 +65,14 @@ export default function ObjectMapPage() {
       if (withSpinner) setLoading(true);
       setError(null);
       try {
-        const [g, t] = await Promise.all([
+        const [g, t, a] = await Promise.all([
           dataObjectApi.getGraph(projectId),
           tablesApi.list(projectId).catch(() => [] as Table[]),
+          dataObjectAnnotationApi.list(projectId).catch(() => [] as DataObjectAnnotationDto[]),
         ]);
         setGraph(g);
         setTables(t);
+        setAnnotations(a);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -184,7 +190,14 @@ export default function ObjectMapPage() {
 
   // ===== リレーション =====
   const handleCreateRelation = useCallback(
-    async (sourceObjectId: string, targetObjectId: string, cardinality?: RelationCardinality, label?: string | null) => {
+    async (
+      sourceObjectId: string,
+      targetObjectId: string,
+      cardinality?: RelationCardinality,
+      label?: string | null,
+      sourceHandle?: string | null,
+      targetHandle?: string | null,
+    ) => {
       if (sourceObjectId === targetObjectId) return;
       // 同方向の重複は作らない
       const exists = graph?.relations.some(
@@ -200,6 +213,8 @@ export default function ObjectMapPage() {
           targetObjectId,
           cardinality: cardinality ?? 'ONE_TO_MANY',
           label: label ?? null,
+          sourceHandle: sourceHandle ?? null,
+          targetHandle: targetHandle ?? null,
         });
         await refresh();
       } catch (err) {
@@ -217,6 +232,9 @@ export default function ObjectMapPage() {
         targetObjectId?: string;
         cardinality?: RelationCardinality;
         label?: string | null;
+        pathStyle?: string | null;
+        sourceHandle?: string | null;
+        targetHandle?: string | null;
       },
     ) => {
       try {
@@ -239,6 +257,83 @@ export default function ObjectMapPage() {
       }
     },
     [refresh, showError],
+  );
+
+  // ===== 付箋/メモ =====
+  const handleAddAnnotation = useCallback(
+    async (kind: DataObjectAnnotationKind, x: number, y: number) => {
+      try {
+        const created = await dataObjectAnnotationApi.create(projectId, {
+          kind,
+          text: '',
+          positionX: Math.round(x),
+          positionY: Math.round(y),
+          order: annotations.length,
+        });
+        setAnnotations((list) => [...list, created]);
+      } catch (err) {
+        showError(err, '付箋/メモの作成に失敗しました');
+      }
+    },
+    [projectId, annotations.length, showError],
+  );
+
+  // 付箋/メモ位置のデバウンス保存（オブジェクト位置と同じパターン）
+  const pendingAnnotationPos = useRef(new Map<string, PositionItem>());
+  const annotationPosTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (annotationPosTimer.current) clearTimeout(annotationPosTimer.current);
+    };
+  }, []);
+
+  const handleAnnotationMoved = useCallback(
+    (id: string, x: number, y: number) => {
+      // 楽観更新（再取得しない）
+      setAnnotations((list) =>
+        list.map((a) => (a.id === id ? { ...a, positionX: x, positionY: y } : a)),
+      );
+      pendingAnnotationPos.current.set(id, { id, positionX: x, positionY: y });
+      if (annotationPosTimer.current) clearTimeout(annotationPosTimer.current);
+      annotationPosTimer.current = setTimeout(() => {
+        const items = Array.from(pendingAnnotationPos.current.values());
+        pendingAnnotationPos.current.clear();
+        if (items.length === 0) return;
+        void Promise.all(
+          items.map((it) =>
+            dataObjectAnnotationApi.update(it.id, { positionX: it.positionX, positionY: it.positionY }),
+          ),
+        ).catch((err) => showError(err, '付箋/メモの位置の保存に失敗しました'));
+      }, 600);
+    },
+    [showError],
+  );
+
+  const handleUpdateAnnotationText = useCallback(
+    async (id: string, text: string) => {
+      // 楽観更新してから保存（失敗時は再取得で巻き戻す）
+      setAnnotations((list) => list.map((a) => (a.id === id ? { ...a, text } : a)));
+      try {
+        await dataObjectAnnotationApi.update(id, { text });
+      } catch (err) {
+        showError(err, '付箋/メモの更新に失敗しました');
+        await refresh();
+      }
+    },
+    [showError, refresh],
+  );
+
+  const handleDeleteAnnotation = useCallback(
+    async (id: string) => {
+      try {
+        await dataObjectAnnotationApi.remove(id);
+        setAnnotations((list) => list.filter((a) => a.id !== id));
+      } catch (err) {
+        showError(err, '付箋/メモの削除に失敗しました');
+      }
+    },
+    [showError],
   );
 
   // ===== テーブル紐づけ =====
@@ -350,15 +445,22 @@ export default function ObjectMapPage() {
               <ObjectMapCanvas
                 objects={objects}
                 relations={relations}
+                annotations={annotations}
                 selectedObjectId={selectedObjectId}
                 onSelectObject={setSelectedObjectId}
                 onObjectMoved={handleObjectMoved}
-                onCreateRelation={(s, t) => handleCreateRelation(s, t)}
+                onCreateRelation={(s, t, sh, th) =>
+                  handleCreateRelation(s, t, undefined, undefined, sh, th)
+                }
                 onUpdateRelation={handleUpdateRelation}
                 onDeleteRelation={handleDeleteRelation}
                 onAddObject={() => void handleAddObject()}
                 onImportFromDfd={() => void handleImportFromDfd()}
                 importing={importing}
+                onAddAnnotation={handleAddAnnotation}
+                onAnnotationMoved={handleAnnotationMoved}
+                onUpdateAnnotationText={handleUpdateAnnotationText}
+                onDeleteAnnotation={handleDeleteAnnotation}
               />
             </div>
             {selectedObject && (

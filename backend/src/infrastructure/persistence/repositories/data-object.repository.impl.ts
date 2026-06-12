@@ -15,6 +15,8 @@ import { DataObject } from '../../../domain/entities/data-object.entity';
 import {
   DataObjectRelation,
   RelationCardinalityValue,
+  RelationHandleValue,
+  RelationPathStyleValue,
 } from '../../../domain/entities/data-object-relation.entity';
 
 interface ObjectRow {
@@ -38,6 +40,9 @@ interface RelationRow {
   cardinality: string;
   label: string | null;
   description: string | null;
+  pathStyle: string | null;
+  sourceHandle: string | null;
+  targetHandle: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +75,9 @@ export class DataObjectRepositoryImpl implements IDataObjectRepository {
       cardinality: r.cardinality as RelationCardinalityValue,
       label: r.label,
       description: r.description,
+      pathStyle: r.pathStyle as RelationPathStyleValue | null,
+      sourceHandle: r.sourceHandle as RelationHandleValue | null,
+      targetHandle: r.targetHandle as RelationHandleValue | null,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     });
@@ -219,6 +227,9 @@ export class DataObjectRepositoryImpl implements IDataObjectRepository {
       cardinality: r.cardinality,
       label: r.label,
       description: r.description,
+      pathStyle: r.pathStyle,
+      sourceHandle: r.sourceHandle,
+      targetHandle: r.targetHandle,
     };
     await this.prisma.dataObjectRelation.upsert({
       where: { id: r.id },

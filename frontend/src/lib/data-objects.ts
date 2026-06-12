@@ -53,6 +53,30 @@ export interface ObjectRelationDto {
   cardinality: RelationCardinality;
   label: string | null;
   description: string | null;
+  /** 線形（'straight' | 'bezier'）。null は既定（直線） */
+  pathStyle: string | null;
+  /** 始点アンカー辺（'top' | 'right' | 'bottom' | 'left'）。null は自動 */
+  sourceHandle: string | null;
+  /** 終点アンカー辺（'top' | 'right' | 'bottom' | 'left'）。null は自動 */
+  targetHandle: string | null;
+}
+
+/** 付箋/メモの種別（STICKY=付箋, COMMENT=メモ） */
+export type DataObjectAnnotationKind = 'STICKY' | 'COMMENT';
+
+/** オブジェクト関係性マップ上の付箋/メモ（FlowAnnotation / DfdAnnotation と同型） */
+export interface DataObjectAnnotationDto {
+  id: string;
+  projectId: string;
+  kind: DataObjectAnnotationKind;
+  text: string;
+  positionX: number;
+  positionY: number;
+  width: number | null;
+  height: number | null;
+  color: string | null;
+  order: number;
+  updatedAt: string;
 }
 
 /** オブジェクト関係性マップのグラフ */
@@ -182,6 +206,9 @@ export const dataObjectApi = {
       cardinality?: RelationCardinality;
       label?: string | null;
       description?: string | null;
+      pathStyle?: string | null;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
     },
   ): Promise<ObjectRelationDto> {
     const res = await fetch(`${API_URL}/api/projects/${projectId}/data-object-relations`, {
@@ -200,6 +227,10 @@ export const dataObjectApi = {
       cardinality?: RelationCardinality;
       label?: string | null;
       description?: string | null;
+      /** undefined=変更なし / null=既定（直線・自動アンカー）へ戻す */
+      pathStyle?: string | null;
+      sourceHandle?: string | null;
+      targetHandle?: string | null;
     },
   ): Promise<ObjectRelationDto> {
     const res = await fetch(`${API_URL}/api/data-object-relations/${id}`, {
@@ -253,5 +284,60 @@ export const dataObjectApi = {
       method: 'PUT', headers: headers(), body: JSON.stringify({ dataObjectId }),
     });
     if (!res.ok) throw new Error('テーブルの紐づけに失敗しました');
+  },
+};
+
+/** オブジェクト関係性マップ上の付箋/メモ API */
+export const dataObjectAnnotationApi = {
+  /** 付箋/メモ一覧。GET /api/projects/:projectId/data-object-annotations */
+  async list(projectId: string): Promise<DataObjectAnnotationDto[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/data-object-annotations`, { headers: headers() });
+    if (!res.ok) throw new Error('付箋/メモの取得に失敗しました');
+    return res.json();
+  },
+
+  /** 付箋/メモ作成。POST /api/projects/:projectId/data-object-annotations */
+  async create(
+    projectId: string,
+    body: {
+      kind: DataObjectAnnotationKind;
+      text: string;
+      positionX: number;
+      positionY: number;
+      color?: string | null;
+      order?: number;
+    },
+  ): Promise<DataObjectAnnotationDto> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/data-object-annotations`, {
+      method: 'POST', headers: headers(), body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error('付箋/メモの作成に失敗しました');
+    return res.json();
+  },
+
+  /** 付箋/メモ更新。PATCH /api/data-object-annotations/:id */
+  async update(
+    id: string,
+    patch: {
+      text?: string;
+      positionX?: number;
+      positionY?: number;
+      width?: number | null;
+      height?: number | null;
+      color?: string | null;
+      order?: number;
+    },
+  ): Promise<DataObjectAnnotationDto> {
+    const res = await fetch(`${API_URL}/api/data-object-annotations/${id}`, {
+      method: 'PATCH', headers: headers(), body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error('付箋/メモの更新に失敗しました');
+    return res.json();
+  },
+
+  /** 付箋/メモ削除。DELETE /api/data-object-annotations/:id */
+  async remove(id: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/data-object-annotations/${id}`, { method: 'DELETE', headers: headers() });
+    if (!res.ok) throw new Error('付箋/メモの削除に失敗しました');
   },
 };
