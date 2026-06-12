@@ -15,6 +15,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -22,6 +23,8 @@ import type { DataObjectDto, ErTableDto } from '@/lib/data-objects';
 import { objectColor } from './er-layout';
 
 const NONE_VALUE = '__none__';
+/** select 内の「＋ 新規オブジェクトを作成…」用センチネル（値としては保存しない） */
+const CREATE_VALUE = '__create__';
 
 interface TableListPanelProps {
   projectId: string;
@@ -30,6 +33,8 @@ interface TableListPanelProps {
   /** 紐づけ保存中のテーブルID（select を一時的に無効化） */
   savingLinkTableId: string | null;
   onLinkChange: (tableId: string, dataObjectId: string | null) => void;
+  /** select の「＋ 新規オブジェクトを作成…」選択時。作成後にこのテーブルへ紐づける */
+  onCreateForTable: (tableId: string) => void;
 }
 
 export function TableListPanel({
@@ -38,6 +43,7 @@ export function TableListPanel({
   tables,
   savingLinkTableId,
   onLinkChange,
+  onCreateForTable,
 }: TableListPanelProps) {
   const sortedObjects = [...objects].sort(
     (a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ja'),
@@ -90,7 +96,15 @@ export function TableListPanel({
           <div className="w-48">
             <Select
               value={table.dataObjectId && objectIds.has(table.dataObjectId) ? table.dataObjectId : NONE_VALUE}
-              onValueChange={(value) => onLinkChange(table.id, value === NONE_VALUE ? null : value)}
+              onValueChange={(value) => {
+                // 「＋ 新規作成」は紐づけ変更ではなく作成ダイアログを開く。
+                // controlled（value=現在の所属）なので表示値は変わらない。
+                if (value === CREATE_VALUE) {
+                  onCreateForTable(table.id);
+                  return;
+                }
+                onLinkChange(table.id, value === NONE_VALUE ? null : value);
+              }}
               disabled={saving}
             >
               <SelectTrigger className="h-8 bg-white border-gray-300 text-xs text-gray-700">
@@ -116,6 +130,11 @@ export function TableListPanel({
                     </span>
                   </SelectItem>
                 ))}
+                {/* 区切りの下に新規作成導線（選んでも値は変わらず、ダイアログが開く） */}
+                <SelectSeparator />
+                <SelectItem value={CREATE_VALUE} className="text-blue-600">
+                  ＋ 新規オブジェクトを作成…
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

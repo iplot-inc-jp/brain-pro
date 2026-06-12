@@ -16,15 +16,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Boxes, Database, DownloadCloud, Loader2, Share2 } from 'lucide-react';
+import { Boxes, Database, DownloadCloud, Loader2, Plus, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { dataObjectApi, type ErGraphDto } from '@/lib/data-objects';
+import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from '../object-map/_components/object-map-shared';
 import { ErCanvas } from './_components/ErCanvas';
 import { TableListPanel } from './_components/TableListPanel';
+import { CreateObjectDialog } from './_components/CreateObjectDialog';
 import { computeAutoArrange, type ErDisplayMode, type Point } from './_components/er-layout';
 
 /** ドラッグ後の位置保存デバウンス（ms） */
@@ -54,6 +56,11 @@ export default function ErDiagramPage() {
   const [savingLinkTableId, setSavingLinkTableId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
+  // オブジェクト作成ダイアログ。一覧パネルの select「＋新規作成」起点のときは
+  // pendingLinkTableId に紐づけ先テーブルIDを保持し、作成後にそのテーブルへ紐づける。
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [pendingLinkTableId, setPendingLinkTableId] = useState<string | null>(null);
+
   // ===== 取得 =====
 
   const load = useCallback(async () => {
@@ -75,8 +82,18 @@ export default function ErDiagramPage() {
           init[id] = p;
         });
       }
+      // 未保存（dirty）のドラッグ位置はローカル値を優先し、サーバ値で巻き戻さない。
+      // dirty のままにしておけば、保留中のデバウンス保存／次回の flush で保存される。
+      for (const id of Array.from(dirtyIdsRef.current)) {
+        if (!(id in init)) {
+          // テーブル自体が消えていたら保存対象がないので破棄
+          dirtyIdsRef.current.delete(id);
+          continue;
+        }
+        const p = positionsRef.current[id];
+        if (p) init[id] = p;
+      }
       setPositions(init);
-      dirtyIdsRef.current.clear();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ER図の取得に失敗しました');
     } finally {
@@ -198,6 +215,50 @@ export default function ErDiagramPage() {
     [graph],
   );
 
+  // ===== オブジェクト新規作成（ダイアログ → 共通マスタとして作成） =====
+
+  /** ダイアログを開く。fromTableId 指定時は作成後にそのテーブルへ紐づける */
+  const openCreateDialog = useCallback((fromTableId: string | null = null) => {
+    setPendingLinkTableId(fromTableId);
+    setCreateDialogOpen(true);
+  }, []);
+
+  const handleCreateDialogOpenChange = useCallback((open: boolean) => {
+    setCreateDialogOpen(open);
+    // 閉じたら（キャンセル含む）紐づけ予約はクリア
+    if (!open) setPendingLinkTableId(null);
+  }, []);
+
+  const handleCreateObject = useCallback(
+    async (name: string, description: string) => {
+      // object-map ページの handleAddObject と同じ既定値（色・グリッド座標・order）。
+      // 関係性マップ上にも整然と現れるようにする。
+      const count = graph?.objects.length ?? 0;
+      // 作成失敗はそのまま throw し、ダイアログ側で表示する（開いたまま・入力保持）
+      const created = await dataObjectApi.createObject(projectId, {
+        name,
+        description: description || undefined,
+        color: OBJECT_COLORS[count % OBJECT_COLORS.length] ?? DEFAULT_OBJECT_COLOR,
+        positionX: 80 + (count % 4) * 240,
+        positionY: 80 + Math.floor(count / 4) * 150,
+        order: count,
+      });
+      // select の「＋新規作成」起点なら、作成と同時にそのテーブルを紐づける。
+      // 紐づけだけ失敗してもオブジェクトは作成済みなので、バナー表示に留めて
+      // load() は必ず実行する（作成結果を ER 図・一覧へ反映し、再試行での重複作成を防ぐ）。
+      try {
+        if (pendingLinkTableId) {
+          await dataObjectApi.linkTableToObject(pendingLinkTableId, created.id);
+        }
+        setActionError(null);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'テーブルの紐づけに失敗しました');
+      }
+      await load();
+    },
+    [graph, projectId, pendingLinkTableId, load],
+  );
+
   // ===== DFDから取り込み（オブジェクト0件のときの導線） =====
 
   const handleImportFromDfd = useCallback(async () => {
@@ -231,6 +292,10 @@ export default function ErDiagramPage() {
         backLabel="プロジェクトへ戻る"
         actions={
           <>
+            <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => openCreateDialog()}>
+              <Plus className="mr-2 h-4 w-4" />
+              オブジェクト追加
+            </Button>
             <HowToPanel
               title="ER図の使い方"
               steps={[
@@ -238,6 +303,7 @@ export default function ErDiagramPage() {
                 'ツールバーで「全カラム / キーのみ / テーブル名のみ」の表示を切り替えられます。FKエッジはカードの高さに追従します。',
                 '「自動整列」でオブジェクトごとにテーブルをグリッド配置します（オブジェクトは横並び、未分類は右端）。',
                 'キャンバス下の一覧パネルで各テーブルの「所属オブジェクト」を変更すると即時保存され、囲みに反映されます。',
+                '「オブジェクト追加」でデータオブジェクトを新規作成できます。一覧パネルの所属 select の「＋ 新規オブジェクトを作成…」なら、作成と同時にそのテーブルが紐づきます。',
                 'カラムのFK（参照先テーブル）はデータカタログの各テーブル詳細で編集できます。',
               ]}
             />
@@ -310,6 +376,15 @@ export default function ErDiagramPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-amber-300 text-amber-700 hover:bg-amber-100"
+                  onClick={() => openCreateDialog()}
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  オブジェクトを追加
+                </Button>
                 <Link href={`/dashboard/projects/${projectId}/object-map`}>
                   <Button variant="outline" size="sm" className="border-amber-300 text-amber-700 hover:bg-amber-100">
                     <Boxes className="mr-1.5 h-4 w-4" />
@@ -358,10 +433,18 @@ export default function ErDiagramPage() {
               tables={graph.tables}
               savingLinkTableId={savingLinkTableId}
               onLinkChange={(tableId, dataObjectId) => void handleLinkChange(tableId, dataObjectId)}
+              onCreateForTable={(tableId) => openCreateDialog(tableId)}
             />
           )}
         </>
       )}
+
+      {/* オブジェクト作成ダイアログ（共通マスタとして作成。select 起点なら作成後に紐づけ） */}
+      <CreateObjectDialog
+        open={createDialogOpen}
+        onOpenChange={handleCreateDialogOpenChange}
+        onSubmit={handleCreateObject}
+      />
     </div>
   );
 }
