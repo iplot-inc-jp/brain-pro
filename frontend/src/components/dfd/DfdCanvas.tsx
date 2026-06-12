@@ -191,6 +191,8 @@ type DfdNodeData = {
   dataObjectName: string | null;
   /** オブジェクトバッジのリンク先（オブジェクトマップ）。projectId 不明時は null。 */
   objectMapHref: string | null;
+  /** ノード内インライン改名（ダブルクリック→input→blur/Enter保存）。DATA_STORE はマスタ rename になる。 */
+  onRename?: (label: string) => void;
 };
 
 // 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
@@ -276,8 +278,17 @@ function ExternalNode({ data, selected }: { data: DfdNodeData; selected?: boolea
   );
 }
 
-/** DATA_STORE = 開いた四角「=」（上下に線, emerald）。 */
+/** DATA_STORE = 開いた四角「=」（上下に線, emerald）。ノード＝オブジェクト（共通マスタ）。 */
 function DataStoreNode({ data, selected }: { data: DfdNodeData; selected?: boolean }) {
+  // ダブルクリック → インライン改名（保存はオブジェクトマスタの rename になる）
+  const [editing, setEditing] = useState(false);
+
+  const commit = (value: string) => {
+    setEditing(false);
+    const v = value.trim();
+    if (v && v !== data.label) data.onRename?.(v);
+  };
+
   return (
     <div
       className="group/node w-full h-full flex items-center justify-center text-center px-3 transition-all"
@@ -288,30 +299,41 @@ function DataStoreNode({ data, selected }: { data: DfdNodeData; selected?: boole
         color: '#065f46',
         boxShadow: selected ? `0 0 0 3px ${BLUE}55` : 'none',
       }}
+      onDoubleClick={(e) => {
+        if (!data.onRename) return;
+        e.stopPropagation();
+        setEditing(true);
+      }}
+      title="ダブルクリックで名前を変更（オブジェクトマスタにも反映）"
     >
       <SideHandles color="#34d399" />
-      {/* 紐づくオブジェクト（共通マスタ）名の小バッジ。クリックでオブジェクトマップへ。 */}
-      {data.dataObjectName &&
-        (data.objectMapHref ? (
-          <Link
-            href={data.objectMapHref}
-            onClick={(e) => e.stopPropagation()}
-            className="nodrag nopan absolute -top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center gap-0.5 max-w-[150px] px-1.5 rounded-full border border-violet-300 bg-violet-50 text-violet-700 text-[9px] leading-4 shadow-sm hover:bg-violet-100 hover:border-violet-400"
-            title={`オブジェクト: ${data.dataObjectName}（クリックでオブジェクトマップへ）`}
-          >
-            <Boxes className="w-2.5 h-2.5 shrink-0" />
-            <span className="truncate">{data.dataObjectName}</span>
-          </Link>
-        ) : (
-          <span
-            className="absolute -top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center gap-0.5 max-w-[150px] px-1.5 rounded-full border border-violet-300 bg-violet-50 text-violet-700 text-[9px] leading-4 shadow-sm"
-            title={`オブジェクト: ${data.dataObjectName}`}
-          >
-            <Boxes className="w-2.5 h-2.5 shrink-0" />
-            <span className="truncate">{data.dataObjectName}</span>
-          </span>
-        ))}
-      <div className="font-medium text-[13px] leading-tight line-clamp-2">{data.label}</div>
+      {/* ノード名＝オブジェクト名（統合済み）なので名前バッジは出さず、
+          マップへのリンクはアイコンだけの小バッジにする。 */}
+      {data.dataObjectName && data.objectMapHref && (
+        <Link
+          href={data.objectMapHref}
+          onClick={(e) => e.stopPropagation()}
+          className="nodrag nopan absolute -top-2.5 left-1/2 -translate-x-1/2 inline-flex items-center px-1 rounded-full border border-violet-300 bg-violet-50 text-violet-700 leading-4 shadow-sm hover:bg-violet-100 hover:border-violet-400"
+          title={`オブジェクト: ${data.dataObjectName}（クリックでオブジェクトマップへ）`}
+        >
+          <Boxes className="w-2.5 h-2.5 shrink-0" />
+        </Link>
+      )}
+      {editing ? (
+        <input
+          autoFocus
+          defaultValue={data.label}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit((e.target as HTMLInputElement).value);
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="nodrag nopan w-full bg-white border border-emerald-300 rounded px-1 py-0.5 text-[13px] text-center text-gray-900 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        />
+      ) : (
+        <div className="font-medium text-[13px] leading-tight line-clamp-2">{data.label}</div>
+      )}
     </div>
   );
 }
@@ -900,6 +922,11 @@ function DfdCanvasInner(props: DfdCanvasProps) {
         dataObjectName: n.dataObjectId ? (dataObjectById.get(n.dataObjectId)?.name ?? null) : null,
         // オブジェクトバッジ → オブジェクトマップへのリンク（projectId 不明時は無効）。
         objectMapHref: projectId ? `/dashboard/projects/${projectId}/object-map` : null,
+        // DATA_STORE はノード内ダブルクリックで改名（＝オブジェクトマスタの rename）
+        onRename:
+          n.kind === 'DATA_STORE' && props.onUpdateNode
+            ? (label: string) => void props.onUpdateNode?.(n.id, { label })
+            : undefined,
       } as DfdNodeData,
       width: NODE_W,
       height: NODE_H,
@@ -908,7 +935,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
       zIndex: 1,
     } as Node));
     return boundaryNode ? [boundaryNode, ...content] : content;
-  }, [numberedNodes, boundaryNode, dataObjectById, projectId]);
+  }, [numberedNodes, boundaryNode, dataObjectById, projectId, props.onUpdateNode]);
 
   // 注釈ノード（付箋・メモ）。diagram.nodes とは別系統で append する。
   // id は注釈の uuid をそのまま使う（DFDノード id とは UUID 空間が別なので衝突しない）。
@@ -1444,23 +1471,23 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                 <Trash2 className="w-3.5 h-3.5" />削除
               </button>
             </div>
-            <input
-              defaultValue={selectedNode.label}
-              key={selectedNode.id + selectedNode.label}
-              onBlur={(e) => {
-                const v = e.target.value.trim();
-                if (v && v !== selectedNode.label) void props.onUpdateNode?.(selectedNode.id, { label: v });
-              }}
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-            {/* DATA_STORE: ノード＝オブジェクト（共通マスタ）。名前変更はマスタの rename、
-                select は別オブジェクトへの付替えのみ（「未設定」＝分離は廃止。
-                外そうとしても backend がラベル同名オブジェクトへ自動再リンクする） */}
+            {/* DATA_STORE はノード＝オブジェクトなので名前入力は出さない
+                （改名はノードのダブルクリックで＝マスタ rename） */}
+            {selectedNode.kind !== 'DATA_STORE' && (
+              <input
+                defaultValue={selectedNode.label}
+                key={selectedNode.id + selectedNode.label}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== selectedNode.label) void props.onUpdateNode?.(selectedNode.id, { label: v });
+                }}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            )}
+            {/* DATA_STORE: ノード＝オブジェクト（共通マスタ）。コントロールはこの select 一つ。
+                選び替え＝別オブジェクトへの差し替え（backend がノード名も同期する）。 */}
             {selectedNode.kind === 'DATA_STORE' && props.dataObjects && (
               <div>
-                <label className="block text-[10px] text-gray-400 mb-0.5">
-                  別のオブジェクトに付替え
-                </label>
                 <Select
                   value={selectedNode.dataObjectId ?? ''}
                   onValueChange={(value) =>
@@ -1480,7 +1507,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                   </SelectContent>
                 </Select>
                 <p className="mt-1 text-[10px] text-gray-400">
-                  名前の変更はオブジェクトマスタ（関係性マップ/ER図）にも反映されます
+                  名前はノードをダブルクリックで変更（関係性マップ/ER図のマスタにも反映）
                 </p>
               </div>
             )}

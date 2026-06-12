@@ -154,6 +154,13 @@ export class UpdateDfdNodeUseCase {
         node.updateDataObjectId(object.id);
       }
     }
+
+    // 統合の不変条件②: 別オブジェクトへの差し替え（dataObjectId 明示指定）時は
+    // ノード名もそのオブジェクト名に同期する（ノード名＝オブジェクト名を維持）。
+    if (typeof input.dataObjectId === 'string' && node.kind === 'DATA_STORE') {
+      const target = await this.dataObjectRepo.findById(input.dataObjectId);
+      if (target && node.label !== target.name) node.updateLabel(target.name);
+    }
     if (input.positionX !== undefined || input.positionY !== undefined) {
       node.updatePosition(
         input.positionX ?? node.positionX,
