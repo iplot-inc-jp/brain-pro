@@ -4,12 +4,12 @@
  * リスクマネジメント ボード（PMBOK準拠）。
  *
  * - 上部: 確率×影響 5×5 ヒートマップ（脅威のみ集計・セルクリックで絞り込み）。
- * - 一覧: 主要列に絞った見やすいテーブル。従来項目（区分・原因区分・対応策・
- *   期限・担当）を色付きバッジで目立たせる：
+ * - 一覧: 主要列に絞った見やすいテーブル。
  *   区分(リスク=rose/ボトルネック=amber)・事象内容・種別(RBS)・原因区分(小バッジ)・
- *   スコア(P×I)・期限(超過=赤/7日以内=amber)・担当(名前バッジ)・対応策(truncate)・
- *   ライフサイクル。
- *   残りの項目（領域・オーナー・戦略・対応MTG・ステータス・備考など）は
+ *   スコア(P×I)・期限(超過=赤/7日以内=amber)・
+ *   担当(名前バッジ。リスクオーナー優先・旧担当フォールバック)・
+ *   対応策(truncate。対応計画優先・旧対応策フォールバック)・ライフサイクル。
+ *   残りの項目（領域・オーナー・戦略・対応MTG・備考など）は
  *   行クリックの全項目編集モーダルで扱う。
  * - 行クリック → 全項目編集モーダル（RiskCategory/SubProject/Stakeholder/Meeting の
  *   各 select、確率・影響 1-5、脅威/好機トグルで戦略選択肢切替、対応タスク作成）。
@@ -38,7 +38,6 @@ import {
   RISK_TYPES,
   CAUSE_CATEGORIES,
   NEEDS_MTG_OPTIONS,
-  STATUS_OPTIONS,
   countByPriority,
   suggestPriority,
   listRisks,
@@ -192,19 +191,19 @@ function draftToInput(d: Draft): RiskInput {
 }
 
 // 従来項目（編集モーダルの従来項目セクションに表示する）。
-type FieldKind = 'text' | 'multiline' | 'type' | 'cause' | 'level' | 'mtg' | 'status';
+// PMBOK 側に等価がある旧フィールドは入力UIを撤去した:
+//   旧 確率/影響(高/中/低) → 確率×影響スコア(1-5) / 旧 ステータス → ライフサイクル /
+//   旧 担当(自由記入) → リスクオーナー / 旧 対応策 → 対応計画(responsePlan)。
+// データ移行はしない（DB列・値は残置。Draft にも保持し保存時はそのまま送る）。
+// 旧値があり PMBOK 側が未設定のものはモーダルに読み取り専用で表示する。
+type FieldKind = 'text' | 'multiline' | 'type' | 'cause' | 'level' | 'mtg';
 const LEGACY_FIELDS: { key: keyof Draft; label: string; kind: FieldKind }[] = [
   { key: 'type', label: '区分（リスク/ボトルネック）', kind: 'type' },
   { key: 'causeCategory', label: '原因区分', kind: 'cause' },
-  { key: 'probability', label: '発生確率（旧・高/中/低）', kind: 'level' },
-  { key: 'impact', label: '影響度（旧・高/中/低）', kind: 'level' },
   { key: 'priority', label: '優先度', kind: 'level' },
-  { key: 'countermeasure', label: '対応策（予防・軽減）', kind: 'multiline' },
   { key: 'needsMtg', label: '対応MTG', kind: 'mtg' },
   { key: 'mtgDate', label: 'MTG設定日', kind: 'text' },
   { key: 'deadline', label: '期限', kind: 'text' },
-  { key: 'owner', label: '担当（自由記入）', kind: 'text' },
-  { key: 'status', label: 'ステータス', kind: 'status' },
   { key: 'note', label: '備考', kind: 'multiline' },
 ];
 
@@ -507,9 +506,21 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
       return next;
     });
 
-  // 発生確率（旧・高/中/低）×影響度から優先度を自動入力する（従来機能）。
+  // 優先度の提案: 旧（高/中/低）の確率×影響があればそれを優先し、
+  // 無ければ PMBOK の P×I スコア帯（高=15+/中=5+/低）から導出する。
+  const suggestFromDraft = (): string => {
+    const legacy = suggestPriority(draft.probability, draft.impact);
+    if (legacy) return legacy;
+    const score = riskScore(
+      draft.probabilityScore ? Number.parseInt(draft.probabilityScore, 10) : null,
+      draft.impactScore ? Number.parseInt(draft.impactScore, 10) : null,
+    );
+    if (score == null) return '';
+    const band = scoreBand(score);
+    return band === 'high' ? '高' : band === 'mid' ? '中' : '低';
+  };
   const applySuggestedPriority = () => {
-    const suggestion = suggestPriority(draft.probability, draft.impact);
+    const suggestion = suggestFromDraft();
     if (suggestion) setDraftField('priority', suggestion);
   };
 
@@ -696,7 +707,39 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
     draft.probabilityScore ? Number.parseInt(draft.probabilityScore, 10) : null,
     draft.impactScore ? Number.parseInt(draft.impactScore, 10) : null,
   );
-  const suggested = suggestPriority(draft.probability, draft.impact);
+  const suggested = suggestFromDraft();
+  // 旧フィールド（入力UIは撤去済み）の読み取り専用表示。
+  // 旧値があり、かつ PMBOK 側の等価項目が未設定のものだけ出す（データ移行はしない）。
+  // ライフサイクルは UI 上 IDENTIFIED に既定化されるため、元レコードの生値で判定する。
+  const editingRisk = editId ? (byId.get(editId) ?? null) : null;
+  const legacyReadonlyRows: { label: string; value: string }[] = [];
+  if (draft.probability.trim() && !draft.probabilityScore) {
+    legacyReadonlyRows.push({
+      label: '発生確率（旧・高/中/低）',
+      value: draft.probability,
+    });
+  }
+  if (draft.impact.trim() && !draft.impactScore) {
+    legacyReadonlyRows.push({
+      label: '影響度（旧・高/中/低）',
+      value: draft.impact,
+    });
+  }
+  if (draft.status.trim() && !(editingRisk?.lifecycle ?? '').trim()) {
+    legacyReadonlyRows.push({ label: 'ステータス（旧）', value: draft.status });
+  }
+  if (draft.owner.trim() && !draft.ownerStakeholderId) {
+    legacyReadonlyRows.push({
+      label: '担当（旧・自由記入）',
+      value: draft.owner,
+    });
+  }
+  if (draft.countermeasure.trim() && !draft.responsePlan.trim()) {
+    legacyReadonlyRows.push({
+      label: '対応策（旧）',
+      value: draft.countermeasure,
+    });
+  }
   const strategyOptions = (() => {
     const base = [...strategiesForRiskType(draft.riskType)];
     if (draft.strategy && !base.includes(draft.strategy)) {
@@ -858,9 +901,15 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                   const isOpportunity =
                     normalizeRiskType(r.riskType) === 'OPPORTUNITY';
                   const legacyType = (r.type ?? '').trim();
-                  // 担当: 従来の自由記入を優先し、未記入なら PMBOK のリスクオーナー名。
+                  // 担当: PMBOK のリスクオーナー（ステークホルダー）を優先し、
+                  // 未設定なら旧・自由記入の担当にフォールバック。
                   const legacyOwner = (r.owner ?? '').trim();
-                  const ownerLabel = legacyOwner || ownerSh?.name || '';
+                  const ownerLabel = ownerSh?.name || legacyOwner;
+                  // 対応策: PMBOK の対応計画（responsePlan）を優先し、
+                  // 未設定なら旧・対応策にフォールバック（モーダルで編集できるのは対応計画）。
+                  const responseText =
+                    (r.responsePlan ?? '').trim() ||
+                    (r.countermeasure ?? '').trim();
                   return (
                     <tr
                       key={r.id}
@@ -944,7 +993,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                             className="inline-flex max-w-[140px] rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800"
                             title={
                               ownerSh && legacyOwner && ownerSh.name !== legacyOwner
-                                ? `担当: ${legacyOwner} / リスクオーナー: ${ownerSh.name}`
+                                ? `リスクオーナー: ${ownerSh.name} / 旧担当: ${legacyOwner}`
                                 : ownerLabel
                             }
                           >
@@ -954,11 +1003,11 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                           <Dash />
                         )}
                       </td>
-                      {/* 対応策（truncate＋title） */}
+                      {/* 対応策（対応計画優先・旧対応策フォールバック。truncate＋title） */}
                       <td className="max-w-[260px] px-3 py-2 align-middle text-gray-700">
-                        {r.countermeasure ? (
-                          <span className="block truncate" title={r.countermeasure}>
-                            {r.countermeasure}
+                        {responseText ? (
+                          <span className="block truncate" title={responseText}>
+                            {responseText}
                           </span>
                         ) : (
                           <Dash />
@@ -1005,8 +1054,8 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
             </table>
           </div>
           <p className="border-t border-gray-100 px-4 py-2 text-[11px] text-gray-400">
-            行クリックで全項目（領域・オーナー・戦略・発生確率/影響度（旧）・優先度・
-            対応MTG・ステータス・備考など）を表示・編集できます。
+            行クリックで全項目（領域・オーナー・戦略・対応計画・優先度・
+            対応MTG・備考など）を表示・編集できます。
           </p>
         </CardContent>
       </Card>
@@ -1364,7 +1413,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                 className="rounded-lg border border-gray-200 p-3"
               >
                 <summary className="cursor-pointer text-xs font-semibold text-gray-700">
-                  従来項目（区分・原因区分・対応策・期限・担当など）
+                  従来項目（区分・原因区分・期限・対応MTGなど）
                 </summary>
                 <div className="mt-3 space-y-3">
                   {LEGACY_FIELDS.map((f) => {
@@ -1378,9 +1427,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                             ? LEVELS
                             : f.kind === 'mtg'
                               ? NEEDS_MTG_OPTIONS
-                              : f.kind === 'status'
-                                ? STATUS_OPTIONS
-                                : null;
+                              : null;
 
                     return (
                       <Field
@@ -1433,6 +1480,28 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                       </Field>
                     );
                   })}
+                  {/* 旧フィールド（PMBOK側に等価あり）の読み取り専用フォールバック表示 */}
+                  {legacyReadonlyRows.length > 0 && (
+                    <div className="space-y-1 rounded-md border border-dashed border-gray-300 bg-gray-50/60 p-2.5">
+                      <p className="text-[10px] font-semibold text-gray-500">
+                        旧データ（読み取り専用）
+                      </p>
+                      {legacyReadonlyRows.map((row) => (
+                        <p
+                          key={row.label}
+                          className="whitespace-pre-wrap break-words text-xs text-gray-600"
+                        >
+                          <span className="text-gray-400">{row.label}: </span>
+                          {row.value}
+                        </p>
+                      ))}
+                      <p className="text-[10px] text-gray-400">
+                        これらの旧項目はここでは編集できません。上の PMBOK 項目
+                        （発生確率・影響度 1-5 / ライフサイクル / リスクオーナー /
+                        対応計画）に入力すると、そちらが優先して表示されます。
+                      </p>
+                    </div>
+                  )}
                 </div>
               </details>
 
