@@ -9,7 +9,7 @@
  *   - 破線楕円のシステム境界（背景レイヤ）＋凡例パネル＋帳票ヘッダ/フッタ。
  *   - ノードドラッグ → onSavePositions（左上座標を positionX/Y で保存）。
  *   - onConnect → onAddFlow（dataItem は仮入力 → 後で編集）。
- *   - ツールバー: 外部実体追加 / オブジェクト（データストア）追加 / 付箋・メモ / 再生成 / PNG出力(toPng)。
+ *   - ツールバー: 外部実体追加 / オブジェクト追加 / 付箋・メモ / 再生成 / PNG出力(toPng)。
  *   - 注釈（付箋・メモ）: DfdAnnotation API で永続化される別系統ノード。
  *     SwimlaneCanvas の注釈実装を踏襲（ドラッグ移動・インライン編集・色・✕削除・リサイズ）。
  *     diagram.nodes/flows とは独立しているため、DFDの再生成・整形の影響を受けない。
@@ -814,7 +814,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   // 全画面トグル（fixed inset-0 z-50 オーバーレイ）。Esc で解除。
   const [isFullscreen, setIsFullscreen] = useState(false);
-  // オブジェクト（データストア）追加ピッカー（既存オブジェクト選択 or 新規名入力）。
+  // オブジェクト追加ピッカー（既存オブジェクト選択 or 新規名入力）。
   const [dataStorePickerOpen, setDataStorePickerOpen] = useState(false);
   const [newDataStoreName, setNewDataStoreName] = useState('');
 
@@ -1131,7 +1131,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     void props.onAddNode?.({ kind: 'EXTERNAL_ENTITY', label: '外部実体', positionX: 40, positionY: 40 });
   }, [props]);
 
-  // オブジェクト（データストア）追加: 既存オブジェクト選択（label=オブジェクト名・dataObjectId 送信）。
+  // オブジェクト追加: 既存オブジェクト選択（label=オブジェクト名・dataObjectId 送信）。
   const handleAddDataStoreFromObject = useCallback(
     (objectId: string) => {
       const obj = (props.dataObjects ?? []).find((o) => o.id === objectId);
@@ -1148,7 +1148,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     [props],
   );
 
-  // オブジェクト（データストア）追加: 新規名入力（backend が同名オブジェクトを get-or-create して自動リンク）。
+  // オブジェクト追加: 新規名入力（backend が同名オブジェクトを get-or-create して自動リンク）。
   const handleAddDataStoreByName = useCallback(() => {
     const name = newDataStoreName.trim();
     if (!name) return;
@@ -1303,7 +1303,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               <Button variant="outline" size="sm" onClick={handleAddExternal} disabled={!props.onAddNode} className="text-gray-700" title="外部実体（四角）を追加">
                 <Square className="w-4 h-4 mr-1" />外部実体
               </Button>
-              {/* オブジェクト（データストア）追加: 既存オブジェクトから選択 or 新規名入力。
+              {/* オブジェクト追加: 既存オブジェクトから選択 or 新規名入力。
                   新規名は backend が同名オブジェクト（共通マスタ）を get-or-create して自動リンクする。 */}
               <div className="relative">
                 <Button
@@ -1312,9 +1312,9 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                   onClick={() => setDataStorePickerOpen((v) => !v)}
                   disabled={!props.onAddNode}
                   className="text-gray-700"
-                  title="オブジェクト（データストア）を追加。既存オブジェクトから選ぶか、新しい名前で作成"
+                  title="オブジェクトを追加。既存オブジェクトから選ぶか、新しい名前で作成"
                 >
-                  <Database className="w-4 h-4 mr-1" />オブジェクト（データストア）
+                  <Database className="w-4 h-4 mr-1" />オブジェクト
                 </Button>
                 {dataStorePickerOpen && (
                   <>
@@ -1421,7 +1421,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               </div>
               <div className="flex items-center gap-1.5">
                 <Database className="w-3.5 h-3.5" style={{ color: EMERALD }} />
-                <span>オブジェクト（データストア）</span>
+                <span>オブジェクト</span>
               </div>
             </div>
           </Panel>
@@ -1432,7 +1432,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           <div className="absolute top-3 left-3 z-20 bg-white border border-gray-200 rounded-lg shadow-md p-3 w-64 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-gray-500">
-                {selectedNode.kind === 'FUNCTION' ? '処理' : selectedNode.kind === 'EXTERNAL_ENTITY' ? '外部実体' : 'オブジェクト（データストア）'}
+                {selectedNode.kind === 'FUNCTION' ? '処理' : selectedNode.kind === 'EXTERNAL_ENTITY' ? '外部実体' : 'オブジェクト'}
               </span>
               <button
                 type="button"
@@ -1453,24 +1453,25 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               }}
               className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
-            {/* DATA_STORE: オブジェクト（共通マスタ）紐づけ（dataObjects を渡す画面のみ表示） */}
+            {/* DATA_STORE: ノード＝オブジェクト（共通マスタ）。名前変更はマスタの rename、
+                select は別オブジェクトへの付替えのみ（「未設定」＝分離は廃止。
+                外そうとしても backend がラベル同名オブジェクトへ自動再リンクする） */}
             {selectedNode.kind === 'DATA_STORE' && props.dataObjects && (
               <div>
-                <label className="block text-[10px] text-gray-400 mb-0.5">オブジェクト</label>
+                <label className="block text-[10px] text-gray-400 mb-0.5">
+                  別のオブジェクトに付替え
+                </label>
                 <Select
-                  value={selectedNode.dataObjectId ?? '__none__'}
+                  value={selectedNode.dataObjectId ?? ''}
                   onValueChange={(value) =>
-                    void props.onUpdateNode?.(selectedNode.id, {
-                      dataObjectId: value === '__none__' ? null : value,
-                    })
+                    void props.onUpdateNode?.(selectedNode.id, { dataObjectId: value })
                   }
                   disabled={!props.onUpdateNode}
                 >
                   <SelectTrigger className="h-8 w-full bg-white border-gray-300 text-gray-900 text-sm">
-                    <SelectValue placeholder="— 未設定 —" />
+                    <SelectValue placeholder="オブジェクトを選択" />
                   </SelectTrigger>
                   <SelectContent className="bg-white">
-                    <SelectItem value="__none__">— 未設定 —</SelectItem>
                     {dataObjects.map((obj) => (
                       <SelectItem key={obj.id} value={obj.id}>
                         {obj.name}
@@ -1478,6 +1479,9 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="mt-1 text-[10px] text-gray-400">
+                  名前の変更はオブジェクトマスタ（関係性マップ/ER図）にも反映されます
+                </p>
               </div>
             )}
             {selectedNode.kind === 'FUNCTION' && selectedNode.refFlowId && props.onFunctionOpen && (
@@ -1577,7 +1581,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
 
       {/* 帳票フッタ */}
       <div className="border-t-2 px-4 py-1 flex items-center justify-between text-[10px] text-gray-400" style={{ borderColor: NAVY }}>
-        <span>処理 {numberedNodes.filter((n) => n.kind === 'FUNCTION').length} ／ 外部実体 {numberedNodes.filter((n) => n.kind === 'EXTERNAL_ENTITY').length} ／ オブジェクト（データストア） {numberedNodes.filter((n) => n.kind === 'DATA_STORE').length} ／ データフロー {diagram.flows.length}</span>
+        <span>処理 {numberedNodes.filter((n) => n.kind === 'FUNCTION').length} ／ 外部実体 {numberedNodes.filter((n) => n.kind === 'EXTERNAL_ENTITY').length} ／ オブジェクト {numberedNodes.filter((n) => n.kind === 'DATA_STORE').length} ／ データフロー {diagram.flows.length}</span>
         <span>ノードはドラッグで配置（位置は保存されます）｜ 4辺のハンドルから接続でデータフロー追加 ｜ 矢印の端点をドラッグでノードへ付け替え／何もない所で削除 ｜ ラベル・情報チップはドラッグで矢印に沿って移動 ｜ 矢印をWクリックでデータ項目編集 ｜ 付箋・メモはドラッグで移動／選択でリサイズ・✕削除</span>
       </div>
     </div>
