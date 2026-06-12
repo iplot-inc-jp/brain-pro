@@ -8,7 +8,7 @@
  * informationTypeId でこの種別を参照する（DfdCanvas / DataFlowTable）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   FileText,
   Plus,
@@ -24,6 +24,7 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
   informationTypeApi,
   INFORMATION_CATEGORY_LABELS,
@@ -187,8 +188,8 @@ function InformationTypeRow({
   const [attachments, setAttachments] = useState<InformationTypeAttachment[]>([]);
   const [attLoading, setAttLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadAttachments = useCallback(async () => {
     setAttLoading(true);
@@ -242,19 +243,25 @@ function InformationTypeRow({
   }, [informationType.id, informationType.name, onChanged]);
 
   const handleUpload = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        e.target.value = '';
-        setUploading(true);
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      setUploading(true);
+      setUploadError(null);
+      const failed: string[] = [];
+      // 逐次アップロード。失敗したものはまとめてインライン表示。
+      for (const file of files) {
         try {
           await informationTypeApi.upload(informationType.id, file);
-          await loadAttachments();
-          await onChanged();
-        } finally {
-          setUploading(false);
+        } catch {
+          failed.push(file.name);
         }
       }
+      await loadAttachments();
+      await onChanged();
+      if (failed.length > 0) {
+        setUploadError(`アップロードに失敗しました: ${failed.join('、')}`);
+      }
+      setUploading(false);
     },
     [informationType.id, loadAttachments, onChanged],
   );
@@ -359,23 +366,19 @@ function InformationTypeRow({
 
       {expanded && (
         <div className="mt-2 ml-6 space-y-2">
-          <div className="flex items-center gap-2">
-            <input ref={fileRef} type="file" className="hidden" onChange={handleUpload} />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="text-gray-700"
-            >
-              {uploading ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="mr-1 h-4 w-4" />
-              )}
-              具体帳票をアップロード
-            </Button>
-          </div>
+          {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
+          <FileDropZone
+            onFiles={(files) => void handleUpload(files)}
+            busy={uploading}
+            className="py-2.5"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Upload className="h-3.5 w-3.5 text-gray-400" />
+              具体帳票をドラッグ＆ドロップ、またはクリックして選択
+            </span>
+          </FileDropZone>
+
+          {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
 
           {attLoading ? (
             <div className="py-2">

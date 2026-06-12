@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
   Loader2,
   Pencil,
@@ -108,7 +109,6 @@ export default function TaskDetailPage() {
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // -------------------------------------------------------------------------
   // データ取得
@@ -389,19 +389,24 @@ export default function TaskDetailPage() {
   // -------------------------------------------------------------------------
   // 添付操作
   // -------------------------------------------------------------------------
-  const handleUpload = async (file: File | null) => {
-    if (!file) return;
+  const handleUpload = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploading(true);
     setUploadError(null);
-    try {
-      await attachmentsApi.upload(taskId, file);
-      await fetchAttachments();
-    } catch (err: any) {
-      setUploadError(err?.message || 'アップロードに失敗しました');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    const failed: string[] = [];
+    // 逐次アップロード。失敗したものはまとめてインライン表示。
+    for (const file of files) {
+      try {
+        await attachmentsApi.upload(taskId, file);
+      } catch {
+        failed.push(file.name);
+      }
     }
+    await fetchAttachments();
+    if (failed.length > 0) {
+      setUploadError(`アップロードに失敗しました: ${failed.join('、')}`);
+    }
+    setUploading(false);
   };
 
   const deleteAttachment = async (id: string) => {
@@ -1065,28 +1070,15 @@ export default function TaskDetailPage() {
                 ({attachments.length})
               </span>
             </div>
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                onChange={(e) => handleUpload(e.target.files?.[0] ?? null)}
-              />
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="gap-1.5"
-              >
-                {uploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="h-4 w-4" />
-                )}
-                ファイルを追加
-              </Button>
-            </div>
           </div>
+
+          {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
+          <FileDropZone onFiles={(files) => void handleUpload(files)} busy={uploading}>
+            <span className="inline-flex items-center gap-1.5 text-sm">
+              <Upload className="h-4 w-4 text-gray-400" />
+              ファイルをドラッグ＆ドロップ、またはクリックして選択
+            </span>
+          </FileDropZone>
 
           {uploadError && (
             <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">

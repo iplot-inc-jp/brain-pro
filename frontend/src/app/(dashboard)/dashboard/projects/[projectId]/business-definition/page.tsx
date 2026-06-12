@@ -17,6 +17,7 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { FileDropZone } from '@/components/ui/file-drop-zone';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -593,7 +594,7 @@ export default function BusinessDefinitionPage() {
         // 一覧再取得の失敗は無視（次回モーダルを開いた時に取得される）
       }
       if (failed.length > 0) {
-        setAttachmentError(`アップロードに失敗しました: ${failed.join(', ')}`);
+        setAttachmentError(`アップロードに失敗しました: ${failed.join('、')}`);
       }
       setAttachmentUploading(false);
     },
@@ -997,31 +998,20 @@ export default function BusinessDefinitionPage() {
                       <Paperclip className="h-3.5 w-3.5" />
                       添付（写真・スクショ）
                     </label>
-                    <label
-                      className={`inline-flex cursor-pointer items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 ${
-                        attachmentUploading ? 'pointer-events-none opacity-50' : ''
-                      }`}
-                    >
-                      {attachmentUploading ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Paperclip className="h-3 w-3" />
-                      )}
-                      ファイルを追加
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        multiple
-                        className="hidden"
-                        disabled={attachmentUploading}
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files ?? []);
-                          if (files.length > 0) void uploadAttachments(files);
-                          e.target.value = '';
-                        }}
-                      />
-                    </label>
                   </div>
+
+                  {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
+                  <FileDropZone
+                    onFiles={(files) => void uploadAttachments(files)}
+                    accept="image/*,.pdf"
+                    busy={attachmentUploading}
+                    className="py-2.5"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Paperclip className="h-3.5 w-3.5 text-gray-400" />
+                      写真・スクショ・PDFをドラッグ＆ドロップ、またはクリックして選択
+                    </span>
+                  </FileDropZone>
 
                   {attachmentError && (
                     <p className="flex items-center gap-1 text-xs text-red-600">

@@ -9,7 +9,7 @@
  * 紐づけられる（紐付け操作はカタログ側で行う。ここでは読み取り表示）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Loader2,
@@ -26,6 +26,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { FileDropZone } from '@/components/ui/file-drop-zone';
 import {
   informationTypeApi,
   INFORMATION_CATEGORY_LABELS,
@@ -264,7 +265,6 @@ function IoTypeRow({
   const [attError, setAttError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [attachmentCount, setAttachmentCount] = useState(ioType.attachmentCount);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   // 親から最新値が来たら表示を同期（再読込後など）
   useEffect(() => {
@@ -299,9 +299,7 @@ function IoTypeRow({
   }, [expanded, attLoaded, loadAttachments]);
 
   const handleUpload = useCallback(
-    async (e: ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      e.target.value = '';
+    async (files: File[]) => {
       if (files.length === 0) return;
       setUploading(true);
       setAttError(null);
@@ -514,29 +512,20 @@ function IoTypeRow({
               <Paperclip className="h-3 w-3" />
               具体データ（PDF・画像など）
             </span>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*,.pdf"
-              multiple
-              className="hidden"
-              onChange={(e) => void handleUpload(e)}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="ml-auto text-gray-700"
-            >
-              {uploading ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-1 h-4 w-4" />
-              )}
-              ファイルを追加
-            </Button>
           </div>
+
+          {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
+          <FileDropZone
+            onFiles={(files) => void handleUpload(files)}
+            accept="image/*,.pdf"
+            busy={uploading}
+            className="py-2.5"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Plus className="h-3.5 w-3.5 text-gray-400" />
+              PDF・画像をドラッグ＆ドロップ、またはクリックして選択
+            </span>
+          </FileDropZone>
 
           {attError && <p className="text-[11px] text-red-600">{attError}</p>}
 
