@@ -142,6 +142,18 @@ export class UpdateDfdNodeUseCase {
     if (input.kind !== undefined) node.updateKind(input.kind);
     if (input.dataObjectId !== undefined) node.updateDataObjectId(input.dataObjectId);
     else if (relinkObjectId !== undefined) node.updateDataObjectId(relinkObjectId);
+
+    // データストア＝オブジェクト統合の不変条件: DATA_STORE は必ずオブジェクトに
+    // リンクされる。明示的な null（旧UIの「未設定」）や kind 変更で外れた場合は
+    // ラベルと同名のオブジェクトを get-or-create して再リンクする。
+    if (node.kind === 'DATA_STORE' && node.dataObjectId == null) {
+      const name = node.label.trim();
+      if (name) {
+        const order = await this.dataObjectRepo.nextOrder(diagram.projectId);
+        const { object } = await this.dataObjectRepo.getOrCreateByName(diagram.projectId, name, order);
+        node.updateDataObjectId(object.id);
+      }
+    }
     if (input.positionX !== undefined || input.positionY !== undefined) {
       node.updatePosition(
         input.positionX ?? node.positionX,
