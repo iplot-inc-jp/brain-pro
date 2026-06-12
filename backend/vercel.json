@@ -6,6 +6,6 @@
       "maxDuration": 30
     }
   },
-  "buildCommand": "npx prisma generate && npx prisma db push && npx nest build",
+  "buildCommand": "npx prisma generate && DATABASE_URL=${DATABASE_URL_UNPOOLED:-$DATABASE_URL} npx prisma db push && npx nest build",
   "installCommand": "npm install"
 }
