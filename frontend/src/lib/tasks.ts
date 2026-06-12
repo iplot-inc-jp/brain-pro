@@ -456,6 +456,79 @@ export function computeWbsNumbers(tree: TaskTreeNode[]): Map<string, string> {
   return map;
 }
 
+// ---------------------------------------------------------------------------
+// 一覧のカラムソート
+// ---------------------------------------------------------------------------
+
+export type TaskSortKey =
+  | 'status'
+  | 'priority'
+  | 'title'
+  | 'assignee'
+  | 'dueDate'
+  | 'progress';
+
+export type TaskSortDir = 'asc' | 'desc';
+
+/**
+ * ツリーの**兄弟ノード間**を指定キーでソートした新しいツリーを返す（非破壊）。
+ * 階層（インデント）は保ったまま、各階層内の並びだけが変わる。
+ * null/未設定値（期限なし・担当なし）は方向に関わらず末尾に寄せる。
+ */
+export function sortTaskTree(
+  tree: TaskTreeNode[],
+  key: TaskSortKey,
+  dir: TaskSortDir
+): TaskTreeNode[] {
+  const statusRank = new Map(TASK_STATUSES.map((s, i) => [s, i]));
+  const priorityRank = new Map(TASK_PRIORITIES.map((p, i) => [p, i]));
+  const sign = dir === 'asc' ? 1 : -1;
+
+  const cmp = (a: TaskTreeNode, b: TaskTreeNode): number => {
+    switch (key) {
+      case 'status':
+        return (
+          sign *
+          ((statusRank.get(a.status) ?? 0) - (statusRank.get(b.status) ?? 0))
+        );
+      case 'priority':
+        return (
+          sign *
+          ((priorityRank.get(a.priority) ?? 0) -
+            (priorityRank.get(b.priority) ?? 0))
+        );
+      case 'title':
+        return sign * a.title.localeCompare(b.title, 'ja');
+      case 'assignee': {
+        const av = a.assigneeName ?? '';
+        const bv = b.assigneeName ?? '';
+        if (!av && !bv) return 0;
+        if (!av) return 1; // 未設定は末尾
+        if (!bv) return -1;
+        return sign * av.localeCompare(bv, 'ja');
+      }
+      case 'dueDate': {
+        const av = a.dueDate ?? '';
+        const bv = b.dueDate ?? '';
+        if (!av && !bv) return 0;
+        if (!av) return 1; // 期限なしは末尾
+        if (!bv) return -1;
+        return sign * av.localeCompare(bv);
+      }
+      case 'progress':
+        return sign * (a.progress - b.progress);
+    }
+  };
+
+  const walk = (nodes: TaskTreeNode[]): TaskTreeNode[] =>
+    nodes
+      .slice()
+      .sort(cmp)
+      .map((n) => ({ ...n, children: walk(n.children) }));
+
+  return walk(tree);
+}
+
 /** ツリーを深さ優先でフラット化（描画用：順序＋depth を保持） */
 export function flattenTaskTree(tree: TaskTreeNode[]): TaskTreeNode[] {
   const out: TaskTreeNode[] = [];

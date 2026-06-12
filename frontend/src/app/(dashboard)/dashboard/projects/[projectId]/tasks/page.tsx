@@ -48,12 +48,16 @@ import {
   User,
   CalendarDays,
   GitBranch,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import {
   tasksApi,
   buildTaskTree,
   computeWbsNumbers,
   flattenTaskTree,
+  sortTaskTree,
   collectDescendantIds,
   taskStatusLabels,
   taskPriorityLabels,
@@ -68,6 +72,8 @@ import {
   type TaskRole,
   type TaskTreeNode,
   type IssueNodeRef,
+  type TaskSortKey,
+  type TaskSortDir,
 } from '@/lib/tasks';
 
 type FormState = {
@@ -130,6 +136,9 @@ export default function TasksPage() {
   const [filterMilestone, setFilterMilestone] = useState<string>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [query, setQuery] = useState('');
+  // 一覧のカラムソート（null = 手動順 order のまま）
+  const [sortKey, setSortKey] = useState<TaskSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<TaskSortDir>('asc');
 
   // ダイアログ
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -167,8 +176,27 @@ export default function TasksPage() {
   // 派生データ
   // ---------------------------------------------------------------------
   const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
+  // WBS 番号は手動順（order）ベースで採番し、ソート中も番号が変わらないようにする
   const wbs = useMemo(() => computeWbsNumbers(tree), [tree]);
-  const orderedNodes = useMemo(() => flattenTaskTree(tree), [tree]);
+  // ソート指定があれば兄弟間を並べ替えた表示用ツリーを使う（階層は保持）
+  const displayTree = useMemo(
+    () => (sortKey ? sortTaskTree(tree, sortKey, sortDir) : tree),
+    [tree, sortKey, sortDir]
+  );
+  const orderedNodes = useMemo(() => flattenTaskTree(displayTree), [displayTree]);
+
+  // ヘッダクリック: 昇順 → 降順 → 解除 のトグル
+  const toggleSort = (key: TaskSortKey) => {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir('asc');
+    } else if (sortDir === 'asc') {
+      setSortDir('desc');
+    } else {
+      setSortKey(null);
+      setSortDir('asc');
+    }
+  };
 
   const roleNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -693,12 +721,42 @@ export default function TasksPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500">
-                  <th className="px-3 py-2 w-[120px]">状態</th>
-                  <th className="px-3 py-2 w-[90px]">種別/優先</th>
-                  <th className="px-3 py-2">タイトル</th>
-                  <th className="px-3 py-2 w-[150px]">担当</th>
-                  <th className="px-3 py-2 w-[110px]">期限</th>
-                  <th className="px-3 py-2 w-[140px]">進捗</th>
+                  {(
+                    [
+                      { key: 'status', label: '状態', cls: 'w-[120px]' },
+                      { key: 'priority', label: '種別/優先', cls: 'w-[90px]' },
+                      { key: 'title', label: 'タイトル', cls: '' },
+                      { key: 'assignee', label: '担当', cls: 'w-[150px]' },
+                      { key: 'dueDate', label: '期限', cls: 'w-[110px]' },
+                      { key: 'progress', label: '進捗', cls: 'w-[140px]' },
+                    ] as { key: TaskSortKey; label: string; cls: string }[]
+                  ).map((col) => (
+                    <th key={col.key} className={`px-3 py-2 ${col.cls}`}>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(col.key)}
+                        className="inline-flex items-center gap-1 hover:text-gray-800"
+                        title={
+                          sortKey === col.key
+                            ? sortDir === 'asc'
+                              ? '降順に切り替え'
+                              : 'ソート解除（手動順に戻す）'
+                            : `${col.label}で昇順ソート`
+                        }
+                      >
+                        {col.label}
+                        {sortKey === col.key ? (
+                          sortDir === 'asc' ? (
+                            <ArrowUp className="h-3 w-3 text-blue-600" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-blue-600" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 opacity-40" />
+                        )}
+                      </button>
+                    </th>
+                  ))}
                   <th className="px-3 py-2 w-[100px] text-right">操作</th>
                 </tr>
               </thead>
