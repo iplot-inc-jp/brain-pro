@@ -11,6 +11,8 @@
  *   対応策(truncate。対応計画優先・旧対応策フォールバック)・ライフサイクル。
  *   残りの項目（領域・オーナー・戦略・対応MTG・備考など）は
  *   行クリックの全項目編集モーダルで扱う。
+ *   ヘッダークリックで列ソート（昇順→降順→解除。解除で手動順に戻る。
+ *   useTableSort + SortableTh の共有基盤）。# と操作列は対象外。
  * - 行クリック → 全項目編集モーダル（RiskCategory/SubProject/Stakeholder/Meeting の
  *   各 select、確率・影響 1-5、脅威/好機トグルで戦略選択肢切替、対応タスク作成）。
  * - 下部: 種別管理（RBSカテゴリの追加・改名・削除。RoadmapPhase 編集UIの作法）。
@@ -19,6 +21,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
+import { SortableTh } from '@/components/ui/sortable-th';
+import { useTableSort } from '@/lib/use-table-sort';
 import {
   Loader2,
   Trash2,
@@ -216,6 +220,11 @@ const LEGACY_FIELDS: { key: keyof Draft; label: string; kind: FieldKind }[] = [
 // + 操作列。列を増減したらここも更新する。
 const TABLE_COLUMN_COUNT = 11;
 
+// ソート可能ヘッダ（SortableTh）に渡す共通スタイル。
+// 旧 Th ヘルパーの見た目を踏襲（SortableTh 側が px-3 py-2 を持つ）。
+const TH_CLASS =
+  'min-w-[100px] whitespace-nowrap text-left text-xs font-semibold text-gray-600';
+
 /** 区分（従来: リスク/ボトルネック）バッジの色。リスク=rose / ボトルネック=amber。 */
 function legacyTypeBadgeClasses(raw: string | null): string {
   switch ((raw ?? '').trim()) {
@@ -287,6 +296,21 @@ function deadlineUrgency(
   if (diffDays < 0) return 'overdue';
   if (diffDays <= 7) return 'soon';
   return 'normal';
+}
+
+/**
+ * 期限（自由記入）のソート用文字列。日付として解釈できれば YYYY-MM-DD
+ * （ゼロ埋めで文字列比較＝日付順になる）、できなければ生テキストのまま。
+ * 全値を文字列に揃えることで比較順序の一貫性を保つ。
+ */
+function deadlineSortValue(raw: string | null | undefined): string {
+  const s = (raw ?? '').trim();
+  if (!s) return '';
+  const d = parseDeadline(s);
+  if (!d) return s;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /** 脅威/好機バッジの色。 */
@@ -462,6 +486,44 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
         pickScore(r.impactScore) === cellFilter.i,
     );
   }, [filtered, cellFilter]);
+
+  // ヘッダークリックソート（表示用の派生値で比較。解除時は手動順＝API の並びに戻る）。
+  // 担当・対応策はセル表示と同じフォールバック
+  // （リスクオーナー優先→旧担当 / 対応計画優先→旧対応策）で比較する。
+  const sortAccessors = useMemo(
+    () => ({
+      type: (r: Risk) => (r.type ?? '').trim(),
+      event: (r: Risk) => (r.event ?? '').trim(),
+      category: (r: Risk) =>
+        r.categoryId ? (categoryById.get(r.categoryId)?.name ?? '') : '',
+      causeCategory: (r: Risk) => (r.causeCategory ?? '').trim(),
+      // 未評価（null）は方向に関わらず末尾に寄る（useTableSort の仕様）。
+      score: (r: Risk) => riskScore(r.probabilityScore, r.impactScore),
+      deadline: (r: Risk) => deadlineSortValue(r.deadline),
+      owner: (r: Risk) => {
+        const sh = r.ownerStakeholderId
+          ? stakeholderById.get(r.ownerStakeholderId)
+          : undefined;
+        return sh?.name || (r.owner ?? '').trim();
+      },
+      response: (r: Risk) =>
+        (r.responsePlan ?? '').trim() || (r.countermeasure ?? '').trim(),
+      // ライフサイクルは状態遷移順（特定→…→終結）。未知値は末尾。
+      lifecycle: (r: Risk) => {
+        const idx = (RISK_LIFECYCLES as readonly string[]).indexOf(
+          r.lifecycle ?? 'IDENTIFIED',
+        );
+        return idx >= 0 ? idx : RISK_LIFECYCLES.length;
+      },
+    }),
+    [categoryById, stakeholderById],
+  );
+  const {
+    sorted: sortedRisks,
+    sortKey,
+    sortDir,
+    toggleSort,
+  } = useTableSort(visibleRisks, sortAccessors);
 
   const hasFilter =
     !!filterType ||
@@ -898,20 +960,83 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                   <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                     #
                   </th>
-                  <Th>区分</Th>
-                  <Th className="min-w-[240px]">事象内容</Th>
-                  <Th>種別</Th>
-                  <Th>原因区分</Th>
-                  <Th>スコア(P×I)</Th>
-                  <Th>期限</Th>
-                  <Th>担当</Th>
-                  <Th className="min-w-[180px]">対応策</Th>
-                  <Th>ライフサイクル</Th>
+                  <SortableTh
+                    label="区分"
+                    sortKey="type"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="事象内容"
+                    sortKey="event"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={`${TH_CLASS} min-w-[240px]`}
+                  />
+                  <SortableTh
+                    label="種別"
+                    sortKey="category"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="原因区分"
+                    sortKey="causeCategory"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="スコア(P×I)"
+                    sortKey="score"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="期限"
+                    sortKey="deadline"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="担当"
+                    sortKey="owner"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
+                  <SortableTh
+                    label="対応策"
+                    sortKey="response"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={`${TH_CLASS} min-w-[180px]`}
+                  />
+                  <SortableTh
+                    label="ライフサイクル"
+                    sortKey="lifecycle"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className={TH_CLASS}
+                  />
                   <th className="w-12 px-2 py-2" aria-label="操作" />
                 </tr>
               </thead>
               <tbody>
-                {visibleRisks.map((r, idx) => {
+                {sortedRisks.map((r, idx) => {
                   const cat = r.categoryId ? categoryById.get(r.categoryId) : undefined;
                   const ownerSh = r.ownerStakeholderId
                     ? stakeholderById.get(r.ownerStakeholderId)
@@ -1058,7 +1183,7 @@ export function RiskTableBoard({ projectId }: { projectId: string }) {
                     </tr>
                   );
                 })}
-                {visibleRisks.length === 0 && (
+                {sortedRisks.length === 0 && (
                   <tr>
                     <td
                       colSpan={TABLE_COLUMN_COUNT}
@@ -1676,22 +1801,6 @@ function LegendChip({ className, label }: { className: string; label: string }) 
 // ---------------------------------------------------------------------------
 // 小物コンポーネント
 // ---------------------------------------------------------------------------
-
-function Th({
-  children,
-  className = '',
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <th
-      className={`min-w-[100px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600 ${className}`}
-    >
-      {children}
-    </th>
-  );
-}
 
 function Dash() {
   return <span className="text-gray-300">—</span>;

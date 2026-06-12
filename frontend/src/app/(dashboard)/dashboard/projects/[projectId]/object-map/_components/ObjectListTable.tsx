@@ -5,11 +5,14 @@
  *
  * 名前/説明はインライン編集（blur/Enterで保存）、色はスウォッチクリックで保存。
  * 紐づくテーブル・DFDデータストアはチップ表示（title に名称一覧）。行クリックで選択。
+ * 名前/説明/紐づき（件数）はヘッダークリックでソート（昇順 → 降順 → 解除で元の並び）。
  */
 
 import { useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { DataObjectDto } from '@/lib/data-objects';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 import { OBJECT_COLORS, objectColor } from './object-map-shared';
 
 export interface ObjectListTableProps {
@@ -22,6 +25,14 @@ export interface ObjectListTableProps {
   ) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
 }
+
+// ヘッダーソート用 accessor（色・操作列はソート対象外）。
+// 紐づきは件数基準（テーブル数 + DFD数）で比較する。
+const SORT_ACCESSORS: Record<string, (o: DataObjectDto) => string | number | null | undefined> = {
+  name: (o) => o.name,
+  description: (o) => o.description ?? '',
+  links: (o) => o.tables.length + o.dfdNodes.length,
+};
 
 const cellInput =
   'h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-sm text-gray-800 hover:border-gray-200 focus:border-blue-400 focus:bg-white focus:outline-none';
@@ -160,6 +171,8 @@ export function ObjectListTable({
   onUpdate,
   onDelete,
 }: ObjectListTableProps) {
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(objects, SORT_ACCESSORS);
+
   if (objects.length === 0) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white py-10 text-center text-sm text-gray-400">
@@ -173,15 +186,35 @@ export function ObjectListTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
-            <th className="w-48 px-3 py-2">名前</th>
-            <th className="px-3 py-2">説明</th>
+            <SortableTh
+              label="名前"
+              sortKey="name"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className="w-48"
+            />
+            <SortableTh
+              label="説明"
+              sortKey="description"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+            />
             <th className="w-48 px-3 py-2">色</th>
-            <th className="w-44 px-3 py-2">紐づき</th>
+            <SortableTh
+              label="紐づき"
+              sortKey="links"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className="w-44"
+            />
             <th className="w-12 px-3 py-2" />
           </tr>
         </thead>
         <tbody>
-          {objects.map((o) => (
+          {sorted.map((o) => (
             <ObjectRow
               key={o.id}
               obj={o}

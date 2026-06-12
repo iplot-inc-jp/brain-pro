@@ -33,6 +33,8 @@ import {
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 import {
   type Meeting,
   type MeetingInput,
@@ -251,6 +253,33 @@ export default function MeetingsPage() {
     return m;
   }, [risks]);
 
+  // ヘッダークリックソート用 accessor（表示用の派生値で比較）。
+  // 対象ステークホルダー・対象領域・レビュー対象リスクはチップの複数値列のため非ソート。
+  // ソート解除時（sortKey=null）は従来の並び（meetings の取得順）に戻る。
+  const sortAccessors = useMemo(
+    () => ({
+      name: (m: Meeting) => m.name,
+      purposeGoal: (m: Meeting) => m.purpose || m.goal,
+      frequency: (m: Meeting) => m.frequency,
+      dayTime: (m: Meeting) => m.dayTime,
+      duration: (m: Meeting) => m.durationMinutes,
+      format: (m: Meeting) => m.format,
+      owner: (m: Meeting) =>
+        m.ownerStakeholderId
+          ? (stakeholderById.get(m.ownerStakeholderId)?.name ?? '')
+          : '',
+      status: (m: Meeting) => (isActive(m.status) ? '開催中' : '休止'),
+    }),
+    [stakeholderById],
+  );
+
+  const {
+    sorted: sortedMeetings,
+    sortKey,
+    sortDir,
+    toggleSort,
+  } = useTableSort(meetings, sortAccessors);
+
   const openCreate = () => {
     setEditId(null);
     setDraft(meetingToDraft(null));
@@ -409,30 +438,70 @@ export default function MeetingsPage() {
                     <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                       #
                     </th>
-                    <th className="min-w-[150px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      会議名
-                    </th>
-                    <th className="min-w-[180px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      目的・ゴール
-                    </th>
-                    <th className="min-w-[90px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      頻度
-                    </th>
-                    <th className="min-w-[100px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      曜日・時間
-                    </th>
-                    <th className="min-w-[70px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      所要
-                    </th>
-                    <th className="min-w-[90px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      形式
-                    </th>
-                    <th className="min-w-[120px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      主催
-                    </th>
-                    <th className="min-w-[100px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      ステータス
-                    </th>
+                    <SortableTh
+                      label="会議名"
+                      sortKey="name"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[150px] text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="目的・ゴール"
+                      sortKey="purposeGoal"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[180px] text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="頻度"
+                      sortKey="frequency"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[90px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="曜日・時間"
+                      sortKey="dayTime"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[100px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="所要"
+                      sortKey="duration"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[70px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="形式"
+                      sortKey="format"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[90px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="主催"
+                      sortKey="owner"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[120px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="ステータス"
+                      sortKey="status"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[100px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
                     <th className="min-w-[200px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
                       対象ステークホルダー
                     </th>
@@ -446,7 +515,7 @@ export default function MeetingsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {meetings.map((m, i) => {
+                  {sortedMeetings.map((m, i) => {
                     const owner = m.ownerStakeholderId
                       ? stakeholderById.get(m.ownerStakeholderId)
                       : undefined;

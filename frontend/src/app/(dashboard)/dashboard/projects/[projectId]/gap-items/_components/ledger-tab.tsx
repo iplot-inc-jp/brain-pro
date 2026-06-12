@@ -11,7 +11,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { SortableTh } from '@/components/ui/sortable-th';
 import { Check, X, Loader2, ClipboardList } from 'lucide-react';
+import { useTableSort } from '@/lib/use-table-sort';
 import { gapLedgerApi } from '@/lib/gap-ledger';
 import {
   roadmapPhaseApi,
@@ -74,6 +76,38 @@ type ScoreRow = {
   difficulty: string; // LOW/MID/HIGH
   phase: string; // GapLedger.phase の生値（フェーズの legacyKey ?? name。未割当は NONE）
   toComplete: string; // 補完すべきこと
+};
+
+// 台帳テーブルの1行（GAP item + メタ + 完備チェックの導出値）
+type LedgerRow = {
+  item: LedgerGapItem;
+  meta: ScoreRow;
+  seq: number;
+  asisOk: boolean;
+  tobeOk: boolean;
+  gapOk: boolean;
+  allThree: boolean;
+  score: number | null;
+  coef: number;
+};
+
+// ヘッダーソート用: 優先度は 低 < 中 < 高 の順位で比較
+const PRIORITY_RANK: Record<Priority, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+
+// 台帳テーブル（課題一覧/対応表）のヘッダークリックソート accessor。
+// 表示用の派生値で比較する。ID（連番）と補完すべきこと（入力欄）は対象外。
+// ※ 優先度スコア表はスコア降順に自動整列済みの計算結果表のためソートUI対象外。
+const ledgerSortAccessors: Record<
+  string,
+  (r: LedgerRow) => string | number | null
+> = {
+  businessArea: (r) => r.item.businessArea,
+  asis: (r) => (filled(r.item.asisDescription) ? r.item.asisDescription : null),
+  tobe: (r) => (filled(r.item.tobeDescription) ? r.item.tobeDescription : null),
+  gap: (r) => (filled(r.item.gapDescription) ? r.item.gapDescription : null),
+  priority: (r) => PRIORITY_RANK[r.item.priority],
+  // 対応表: 埋まっている要素数（0〜3。3=揃）。昇順なら要補完の行が先頭に来る
+  check: (r) => (r.asisOk ? 1 : 0) + (r.tobeOk ? 1 : 0) + (r.gapOk ? 1 : 0),
 };
 
 /**
@@ -215,7 +249,7 @@ export function LedgerTab({
   };
 
   // 各 GAP item の完備状態とスコアを導出
-  const rows = useMemo(() => {
+  const rows = useMemo<LedgerRow[]>(() => {
     return items.map((it, i) => {
       const m = metaFor(it.id);
       const asisOk = filled(it.asisDescription);
@@ -256,7 +290,14 @@ export function LedgerTab({
     [rows],
   );
 
-  const visible = onlyIncomplete ? rows.filter((r) => !r.allThree) : rows;
+  // 台帳テーブルのヘッダークリックソート（解除時は元の連番順に戻る）。
+  // 優先度スコア表は scoreSorted（スコア降順固定）のままで対象外。
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(
+    rows,
+    ledgerSortAccessors,
+  );
+
+  const visible = onlyIncomplete ? sorted.filter((r) => !r.allThree) : sorted;
 
   const CheckChip = ({ ok }: { ok: boolean }) =>
     ok ? (
@@ -339,27 +380,56 @@ export function LedgerTab({
                       <th className="px-2 py-2 font-medium border-b border-gray-200 w-[40px]">
                         ID
                       </th>
-                      <th className="px-3 py-2 font-medium border-b border-gray-200 w-[130px]">
-                        業務・領域
-                      </th>
-                      <th className="px-3 py-2 font-medium border-b border-gray-200">
-                        ASIS
-                      </th>
-                      <th className="px-3 py-2 font-medium border-b border-gray-200">
-                        TOBE
-                      </th>
-                      <th className="px-3 py-2 font-medium border-b border-gray-200 bg-amber-50/50">
-                        GAP
-                      </th>
-                      <th className="px-2 py-2 font-medium border-b border-gray-200 w-[70px]">
-                        優先度
-                      </th>
-                      <th className="px-2 py-2 font-medium border-b border-gray-200 text-center w-[150px]">
-                        <span className="inline-flex items-center gap-1">
-                          対応表（A/T/G・揃）
-                          <HelpTooltip text="ASIS/TOBE/GAPの各セルが埋まっているか（✓/✗）と、3つ揃ったか。1つでも✗なら補完すべきことを記入。" />
-                        </span>
-                      </th>
+                      <SortableTh
+                        label="業務・領域"
+                        sortKey="businessArea"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="font-medium border-b border-gray-200 w-[130px]"
+                      />
+                      <SortableTh
+                        label="ASIS"
+                        sortKey="asis"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="font-medium border-b border-gray-200"
+                      />
+                      <SortableTh
+                        label="TOBE"
+                        sortKey="tobe"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="font-medium border-b border-gray-200"
+                      />
+                      <SortableTh
+                        label="GAP"
+                        sortKey="gap"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="font-medium border-b border-gray-200 bg-amber-50/50"
+                      />
+                      <SortableTh
+                        label="優先度"
+                        sortKey="priority"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="px-2 font-medium border-b border-gray-200 w-[70px]"
+                      />
+                      <SortableTh
+                        label="対応表（A/T/G・揃）"
+                        sortKey="check"
+                        current={sortKey}
+                        dir={sortDir}
+                        onToggle={toggleSort}
+                        className="px-2 font-medium border-b border-gray-200 text-center w-[150px]"
+                      >
+                        <HelpTooltip text="ASIS/TOBE/GAPの各セルが埋まっているか（✓/✗）と、3つ揃ったか。1つでも✗なら補完すべきことを記入。" />
+                      </SortableTh>
                       <th className="px-3 py-2 font-medium border-b border-gray-200 w-[200px]">
                         補完すべきこと
                       </th>

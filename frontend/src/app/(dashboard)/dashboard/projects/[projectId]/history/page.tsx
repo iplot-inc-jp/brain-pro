@@ -8,6 +8,7 @@
  * - 列: 時刻 / 操作者(email) / 対象（entity の和名）/ アクションバッジ / 内容(summary)
  * - 失敗（4xx/5xx）の行はグレー・打消し気味に表示する
  * - フィルタ: 対象種別 select ＋ アクション select。「更新」で再取得。
+ * - ヘッダークリックで列ソート（昇順 → 降順 → 解除で新しい順に戻る）。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,6 +18,8 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -149,6 +152,22 @@ function isFailed(statusCode: number | null): boolean {
   return statusCode != null && statusCode >= 400;
 }
 
+// ヘッダーソート用 accessor（表示値ベースで比較。未設定値は末尾）。
+// ソート解除時は従来の並び（サーバー返却の新しい順）に戻る。
+const SORT_ACCESSORS: Record<
+  string,
+  (log: ChangeLogRow) => string | number | null | undefined
+> = {
+  createdAt: (log) => {
+    const t = new Date(log.createdAt).getTime();
+    return Number.isNaN(t) ? null : t;
+  },
+  userEmail: (log) => log.userEmail ?? null,
+  entity: (log) => (log.entity ? entityLabel(log.entity) : null),
+  action: (log) => (log.action ? (ACTION_META[log.action]?.label ?? log.action) : null),
+  summary: (log) => log.summary ?? null,
+};
+
 export default function HistoryPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -210,6 +229,9 @@ export default function HistoryPage() {
       ),
     [logs, entityFilter, actionFilter],
   );
+
+  // ヘッダークリックソート（昇順 → 降順 → 解除で新しい順に戻る）
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(filtered, SORT_ACCESSORS);
 
   return (
     <div className="space-y-6">
@@ -310,25 +332,50 @@ export default function HistoryPage() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="w-36 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      時刻
-                    </th>
-                    <th className="min-w-[160px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      操作者
-                    </th>
-                    <th className="w-36 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      対象
-                    </th>
-                    <th className="w-20 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      アクション
-                    </th>
-                    <th className="min-w-[200px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      内容
-                    </th>
+                    <SortableTh
+                      label="時刻"
+                      sortKey="createdAt"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-36 text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="操作者"
+                      sortKey="userEmail"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[160px] text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="対象"
+                      sortKey="entity"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-36 text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="アクション"
+                      sortKey="action"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-20 text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="内容"
+                      sortKey="summary"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[200px] text-left text-xs font-semibold text-gray-600"
+                    />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((log) => {
+                  {sorted.map((log) => {
                     const failed = isFailed(log.statusCode);
                     const meta = log.action ? ACTION_META[log.action] : undefined;
                     return (

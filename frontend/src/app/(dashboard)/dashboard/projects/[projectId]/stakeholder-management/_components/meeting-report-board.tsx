@@ -26,6 +26,8 @@ import {
   listStakeholders,
   reportCalendarsApi,
 } from '@/lib/stakeholders';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 
 // 会議体の編集列（テーブル直接編集 + blur で PATCH）。
 const MEETING_FIELDS: {
@@ -41,6 +43,21 @@ const MEETING_FIELDS: {
   { key: 'minutesOwner', label: '議事録担当' },
   { key: 'note', label: '備考', multiline: true },
 ];
+
+// 会議体一覧のヘッダーソート用 accessor（編集列はすべて文字列で比較）。
+// 対象ステークホルダー（チップ + ピッカー）・#（連番）・操作列はソート対象外。
+const MEETING_SORT_ACCESSORS: Record<
+  string,
+  (m: Meeting) => string | number | null | undefined
+> = {
+  name: (m) => m.name,
+  purpose: (m) => m.purpose,
+  frequency: (m) => m.frequency,
+  dayTime: (m) => m.dayTime,
+  decisionMaker: (m) => m.decisionMaker,
+  minutesOwner: (m) => m.minutesOwner,
+  note: (m) => m.note,
+};
 
 // 報告・連絡カレンダーのフリーテキスト列（報告対象=Stakeholder SELECT,
 // 関連会議=Meeting SELECT は別途専用セルで描画）。
@@ -108,7 +125,50 @@ export function MeetingReportBoard({ projectId }: { projectId: string }) {
     () => new Map(stakeholders.map((s) => [s.id, s])),
     [stakeholders],
   );
+  const meetingById = useMemo(
+    () => new Map(meetings.map((m) => [m.id, m])),
+    [meetings],
+  );
   const hasStakeholders = stakeholders.length > 0;
+
+  // ヘッダークリックでソート（昇順 → 降順 → 解除で手動順=order に戻る）。
+  const {
+    sorted: sortedMeetings,
+    sortKey: meetingSortKey,
+    sortDir: meetingSortDir,
+    toggleSort: toggleMeetingSort,
+  } = useTableSort(meetings, MEETING_SORT_ACCESSORS);
+
+  // 報告・連絡カレンダーのヘッダーソート用 accessor（表示用の派生値で比較）。
+  // 報告対象は選択中ステークホルダー名（未選択時はフリーテキスト reportTo）、
+  // 関連会議は選択中の会議名で比較。#（連番）・操作列はソート対象外。
+  const reportSortAccessors = useMemo(
+    () => ({
+      stakeholder: (r: ReportCalendar) =>
+        r.stakeholderId
+          ? (stakeholderById.get(r.stakeholderId)?.name ?? '')
+          : r.reportTo,
+      meeting: (r: ReportCalendar) =>
+        r.meetingId ? (meetingById.get(r.meetingId)?.name ?? '') : null,
+      reportContent: (r: ReportCalendar) => r.reportContent,
+      frequency: (r: ReportCalendar) => r.frequency,
+      dayTime: (r: ReportCalendar) => r.dayTime,
+      format: (r: ReportCalendar) => r.format,
+      medium: (r: ReportCalendar) => r.medium,
+      drafter: (r: ReportCalendar) => r.drafter,
+      approver: (r: ReportCalendar) => r.approver,
+      templateRef: (r: ReportCalendar) => r.templateRef,
+      note: (r: ReportCalendar) => r.note,
+    }),
+    [stakeholderById, meetingById],
+  );
+
+  const {
+    sorted: sortedReports,
+    sortKey: reportSortKey,
+    sortDir: reportSortDir,
+    toggleSort: toggleReportSort,
+  } = useTableSort(reports, reportSortAccessors);
 
   const handleAdd = async () => {
     setError(null);
@@ -306,12 +366,15 @@ export function MeetingReportBoard({ projectId }: { projectId: string }) {
                       #
                     </th>
                     {MEETING_FIELDS.map((f) => (
-                      <th
+                      <SortableTh
                         key={f.key as string}
-                        className="min-w-[140px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600"
-                      >
-                        {f.label}
-                      </th>
+                        label={f.label}
+                        sortKey={f.key as string}
+                        current={meetingSortKey}
+                        dir={meetingSortDir}
+                        onToggle={toggleMeetingSort}
+                        className="min-w-[140px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                      />
                     ))}
                     <th className="min-w-[230px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
                       対象ステークホルダー
@@ -320,7 +383,7 @@ export function MeetingReportBoard({ projectId }: { projectId: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {meetings.map((m, i) => (
+                  {sortedMeetings.map((m, i) => (
                     <tr
                       key={m.id}
                       className="border-b border-gray-100 align-top hover:bg-gray-50/50"
@@ -524,25 +587,38 @@ export function MeetingReportBoard({ projectId }: { projectId: string }) {
                     <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                       #
                     </th>
-                    <th className="min-w-[180px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
-                      報告対象（誰に）
-                    </th>
-                    <th className="min-w-[160px] bg-blue-50 px-3 py-2 text-left text-xs font-semibold text-blue-700">
-                      関連会議
-                    </th>
+                    <SortableTh
+                      label="報告対象（誰に）"
+                      sortKey="stakeholder"
+                      current={reportSortKey}
+                      dir={reportSortDir}
+                      onToggle={toggleReportSort}
+                      className="min-w-[180px] bg-blue-50 text-left text-xs font-semibold text-blue-700"
+                    />
+                    <SortableTh
+                      label="関連会議"
+                      sortKey="meeting"
+                      current={reportSortKey}
+                      dir={reportSortDir}
+                      onToggle={toggleReportSort}
+                      className="min-w-[160px] bg-blue-50 text-left text-xs font-semibold text-blue-700"
+                    />
                     {REPORT_FIELDS.map((f) => (
-                      <th
+                      <SortableTh
                         key={f.key as string}
-                        className="min-w-[140px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600"
-                      >
-                        {f.label}
-                      </th>
+                        label={f.label}
+                        sortKey={f.key as string}
+                        current={reportSortKey}
+                        dir={reportSortDir}
+                        onToggle={toggleReportSort}
+                        className="min-w-[140px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                      />
                     ))}
                     <th className="w-12 px-2 py-2" aria-label="操作" />
                   </tr>
                 </thead>
                 <tbody>
-                  {reports.map((r, i) => (
+                  {sortedReports.map((r, i) => (
                     <tr
                       key={r.id}
                       className="border-b border-gray-100 align-top hover:bg-gray-50/50"

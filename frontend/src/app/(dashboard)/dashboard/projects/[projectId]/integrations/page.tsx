@@ -26,6 +26,8 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -133,6 +135,143 @@ function Toggle({
         }`}
       />
     </button>
+  );
+}
+
+// ---- 実行履歴テーブル ----
+// 日時文字列をソート用の数値（エポックms）に変換する。未設定・不正値は null（末尾送り）。
+function dateSortValue(value: string | null): number | null {
+  if (!value) return null;
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+// ヘッダーソート用 accessor（表示用の派生値で比較する）。
+// 操作列は無いため全列をソート対象にできる。モジュール定数なのでレンダー毎に再生成されない。
+const RUN_SORT_ACCESSORS: Record<string, (run: SyncRun) => string | number | null | undefined> = {
+  status: (run) => (statusMeta[run.status] ?? statusMeta.PENDING).label,
+  trigger: (run) => (triggerMeta[run.trigger] ?? triggerMeta.MANUAL).label,
+  commit: (run) => (run.commitSha ? shortSha(run.commitSha) : null),
+  summary: (run) => {
+    // 表示と同じく FAILED 時はエラー文言、それ以外は抽出サマリ文字列で比較
+    const text = run.status === 'FAILED' && run.error ? run.error : summaryText(run.summary);
+    return text === '—' ? null : text;
+  },
+  startedAt: (run) => dateSortValue(run.startedAt),
+  finishedAt: (run) => dateSortValue(run.finishedAt),
+};
+
+// 同期実行履歴の小テーブル。連携カードごとに描画されるため、
+// ソート状態（useTableSort）をカード単位で持てるよう子コンポーネントに切り出している。
+// ソート解除時は API が返した従来の並びに戻る。
+function SyncRunsTable({ runs }: { runs: SyncRun[] }) {
+  const { sorted, sortKey, sortDir, toggleSort } = useTableSort(runs, RUN_SORT_ACCESSORS);
+  const thClass = 'font-medium border-b border-gray-200';
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="bg-gray-50 text-left text-gray-600">
+            <SortableTh
+              label="状態"
+              sortKey="status"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={`${thClass} w-[110px]`}
+            >
+              <HelpTooltip text="同期実行の状態。PENDING（待機）→RUNNING（実行中）→SUCCESS（成功）またはFAILED（失敗）。FAILED時は抽出結果欄にエラー内容が表示されます。" />
+            </SortableTh>
+            <SortableTh
+              label="トリガー"
+              sortKey="trigger"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={`${thClass} w-[100px]`}
+            />
+            <SortableTh
+              label="コミット"
+              sortKey="commit"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={`${thClass} w-[100px]`}
+            />
+            <SortableTh
+              label="抽出結果"
+              sortKey="summary"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={thClass}
+            />
+            <SortableTh
+              label="開始"
+              sortKey="startedAt"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={`${thClass} w-[150px]`}
+            />
+            <SortableTh
+              label="完了"
+              sortKey="finishedAt"
+              current={sortKey}
+              dir={sortDir}
+              onToggle={toggleSort}
+              className={`${thClass} w-[150px]`}
+            />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((run) => {
+            const sm = statusMeta[run.status] ?? statusMeta.PENDING;
+            const tm = triggerMeta[run.trigger] ?? triggerMeta.MANUAL;
+            return (
+              <tr
+                key={run.id}
+                className="border-b border-gray-100 hover:bg-gray-50/60 align-top"
+              >
+                <td className="px-3 py-2">
+                  <span
+                    className={`inline-block text-xs px-2 py-0.5 rounded border font-medium ${sm.badge}`}
+                  >
+                    {sm.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={`inline-block text-xs px-2 py-0.5 rounded border ${tm.badge}`}
+                  >
+                    {tm.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2 font-mono text-gray-700">
+                  {shortSha(run.commitSha)}
+                </td>
+                <td className="px-3 py-2 text-gray-700">
+                  {run.status === 'FAILED' && run.error ? (
+                    <span className="inline-flex items-start gap-1 text-red-600">
+                      <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                      <span className="break-all">{run.error}</span>
+                    </span>
+                  ) : (
+                    summaryText(run.summary)
+                  )}
+                </td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                  {formatDateTime(run.startedAt)}
+                </td>
+                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                  {formatDateTime(run.finishedAt)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -732,81 +871,7 @@ export default function IntegrationsPage() {
                           実行履歴はまだありません。
                         </p>
                       ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full border-collapse text-sm">
-                            <thead>
-                              <tr className="bg-gray-50 text-left text-gray-600">
-                                <th className="px-3 py-2 font-medium border-b border-gray-200 w-[110px]">
-                                  <span className="inline-flex items-center gap-1">
-                                    状態
-                                    <HelpTooltip text="同期実行の状態。PENDING（待機）→RUNNING（実行中）→SUCCESS（成功）またはFAILED（失敗）。FAILED時は抽出結果欄にエラー内容が表示されます。" />
-                                  </span>
-                                </th>
-                                <th className="px-3 py-2 font-medium border-b border-gray-200 w-[100px]">
-                                  トリガー
-                                </th>
-                                <th className="px-3 py-2 font-medium border-b border-gray-200 w-[100px]">
-                                  コミット
-                                </th>
-                                <th className="px-3 py-2 font-medium border-b border-gray-200">
-                                  抽出結果
-                                </th>
-                                <th className="px-3 py-2 font-medium border-b border-gray-200 w-[150px]">
-                                  開始
-                                </th>
-                                <th className="px-3 py-2 font-medium border-b border-gray-200 w-[150px]">
-                                  完了
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {connRuns.map((run) => {
-                                const sm = statusMeta[run.status] ?? statusMeta.PENDING;
-                                const tm = triggerMeta[run.trigger] ?? triggerMeta.MANUAL;
-                                return (
-                                  <tr
-                                    key={run.id}
-                                    className="border-b border-gray-100 hover:bg-gray-50/60 align-top"
-                                  >
-                                    <td className="px-3 py-2">
-                                      <span
-                                        className={`inline-block text-xs px-2 py-0.5 rounded border font-medium ${sm.badge}`}
-                                      >
-                                        {sm.label}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <span
-                                        className={`inline-block text-xs px-2 py-0.5 rounded border ${tm.badge}`}
-                                      >
-                                        {tm.label}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 font-mono text-gray-700">
-                                      {shortSha(run.commitSha)}
-                                    </td>
-                                    <td className="px-3 py-2 text-gray-700">
-                                      {run.status === 'FAILED' && run.error ? (
-                                        <span className="inline-flex items-start gap-1 text-red-600">
-                                          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                                          <span className="break-all">{run.error}</span>
-                                        </span>
-                                      ) : (
-                                        summaryText(run.summary)
-                                      )}
-                                    </td>
-                                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                                      {formatDateTime(run.startedAt)}
-                                    </td>
-                                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                                      {formatDateTime(run.finishedAt)}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
+                        <SyncRunsTable runs={connRuns} />
                       )}
                     </div>
                   )}

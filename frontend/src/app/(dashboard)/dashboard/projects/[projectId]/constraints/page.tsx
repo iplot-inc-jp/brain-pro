@@ -6,17 +6,19 @@
  * ASIS/TOBE 共通の制約条件（守るべき条件）と前提条件（成り立つと仮定する条件）を
  * kind（CONSTRAINT/ASSUMPTION）で区別して CRUD する。既存データ（kind 未設定）は制約扱い。
  * 各制約は領域（SubProject）に紐づけられる（任意）。
- * 一覧（kind フィルタタブ付き）+ 作成フォーム + 各行インライン編集（onBlur 保存）+ 削除。
+ * 一覧（kind フィルタタブ付き・ヘッダークリックソート）+ 作成フォーム + 各行インライン編集（onBlur 保存）+ 削除。
  * 作法は InformationTypeRegistry / stakeholder-management の各ボードに合わせる。
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Loader2, Plus, Trash2, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { SortableTh } from '@/components/ui/sortable-th';
+import { useTableSort } from '@/lib/use-table-sort';
 import {
   constraintApi,
   subProjectApi,
@@ -97,10 +99,30 @@ export default function ConstraintsPage() {
   }, [newTitle, newCategory, newKind, projectId, load]);
 
   // フィルタ適用後の一覧（既存データ＝kind 未設定は制約扱い）。
-  const visibleConstraints =
-    kindFilter === 'ALL'
-      ? constraints
-      : constraints.filter((c) => normalizeConstraintKind(c.kind) === kindFilter);
+  const visibleConstraints = useMemo(
+    () =>
+      kindFilter === 'ALL'
+        ? constraints
+        : constraints.filter((c) => normalizeConstraintKind(c.kind) === kindFilter),
+    [constraints, kindFilter],
+  );
+
+  // ヘッダークリックソート（表示用の派生値で比較。解除時は手動順＝API の並びに戻る）。
+  const sortAccessors = useMemo(() => {
+    const subProjectNameById = new Map(subProjects.map((sp) => [sp.id, sp.name]));
+    return {
+      kind: (c: ConstraintMaster) => constraintKindMeta[normalizeConstraintKind(c.kind)].label,
+      title: (c: ConstraintMaster) => c.title,
+      category: (c: ConstraintMaster) => c.category,
+      description: (c: ConstraintMaster) => c.description,
+      subProject: (c: ConstraintMaster) =>
+        c.subProjectId ? (subProjectNameById.get(c.subProjectId) ?? '') : '',
+    };
+  }, [subProjects]);
+  const { sorted: sortedConstraints, sortKey, sortDir, toggleSort } = useTableSort(
+    visibleConstraints,
+    sortAccessors,
+  );
 
   return (
     <div className="space-y-6">
@@ -245,26 +267,51 @@ export default function ConstraintsPage() {
                     <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                       #
                     </th>
-                    <th className="w-28 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      種別
-                    </th>
-                    <th className="min-w-[200px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      タイトル
-                    </th>
-                    <th className="w-40 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      カテゴリ
-                    </th>
-                    <th className="min-w-[200px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      説明
-                    </th>
-                    <th className="w-44 px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      領域
-                    </th>
+                    <SortableTh
+                      label="種別"
+                      sortKey="kind"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-28 text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="タイトル"
+                      sortKey="title"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[200px] text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="カテゴリ"
+                      sortKey="category"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-40 text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="説明"
+                      sortKey="description"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[200px] text-left text-xs font-semibold text-gray-600"
+                    />
+                    <SortableTh
+                      label="領域"
+                      sortKey="subProject"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="w-44 text-left text-xs font-semibold text-gray-600"
+                    />
                     <th className="w-12 px-2 py-2" aria-label="操作" />
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleConstraints.map((c, i) => (
+                  {sortedConstraints.map((c, i) => (
                     <ConstraintRow
                       key={c.id}
                       index={i + 1}

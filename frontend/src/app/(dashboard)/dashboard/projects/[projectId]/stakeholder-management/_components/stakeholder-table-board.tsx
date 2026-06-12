@@ -56,6 +56,8 @@ import {
 } from '@/lib/stakeholders';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import { listRisks, type Risk } from '@/lib/risks';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 import { RaciMatrix } from './raci-matrix';
 import { StakeholderDetailPanel } from './stakeholder-detail-panel';
 
@@ -94,6 +96,29 @@ const TABLE_COLS: { key: keyof Stakeholder; label: string }[] = [
   { key: 'owner', label: '主担当' },
   { key: 'reportFrequency', label: '報告頻度' },
 ];
+
+// 一覧ヘッダークリックソート用 accessor（キーは TABLE_COLS の key と一致）。
+// 影響度・支持度はレベル定義順（高→中→低 / 支持→中立→反対）で数値比較し、
+// 未設定・区分外は null（useTableSort の仕様で方向に関わらず末尾）。
+// 他の列は表示と同じ文字列で localeCompare('ja') 比較。
+const SORT_ACCESSORS: Record<
+  string,
+  (s: Stakeholder) => string | number | null
+> = {
+  name: (s) => (s.name ?? '').trim(),
+  affiliation: (s) => (s.affiliation ?? '').trim(),
+  role: (s) => (s.role ?? '').trim(),
+  influence: (s) => {
+    const lv = pickLevel(s.influence, INFLUENCE_LEVELS);
+    return lv === '' ? null : INFLUENCE_LEVELS.indexOf(lv);
+  },
+  support: (s) => {
+    const lv = pickLevel(s.support, SUPPORT_LEVELS);
+    return lv === '' ? null : SUPPORT_LEVELS.indexOf(lv);
+  },
+  owner: (s) => (s.owner ?? '').trim(),
+  reportFrequency: (s) => (s.reportFrequency ?? '').trim(),
+};
 
 const ROLE_DETAIL_FIELDS: {
   key: 'responsibility' | 'decisionScope' | 'kpi';
@@ -249,14 +274,26 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
     [domainTreeRows],
   );
 
+  // ヘッダークリックソート（昇順→降順→解除。解除時は従来の手動順＝API の並びに戻る）。
+  // 全体を安定ソートしてから外部/内部に分けるため、並び替えは各セクション内に閉じる
+  // （セクション見出し行をまたいで行が混ざることはない）。
+  const {
+    sorted: sortedStakeholders,
+    sortKey,
+    sortDir,
+    toggleSort,
+  } = useTableSort(stakeholders, SORT_ACCESSORS);
+
   // 一覧テーブルの2セクション（外部 → 内部）
   const sections = useMemo(
     () =>
       (['EXTERNAL', 'INTERNAL'] as Side[]).map((side) => ({
         side,
-        members: stakeholders.filter((s) => normalizeSide(s.side) === side),
+        members: sortedStakeholders.filter(
+          (s) => normalizeSide(s.side) === side,
+        ),
       })),
-    [stakeholders],
+    [sortedStakeholders],
   );
 
   const draftFromAssignments = (
@@ -517,12 +554,15 @@ export function StakeholderTableBoard({ projectId }: { projectId: string }) {
                     #
                   </th>
                   {TABLE_COLS.map((col) => (
-                    <th
+                    <SortableTh
                       key={col.key as string}
-                      className="min-w-[120px] whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-600"
-                    >
-                      {col.label}
-                    </th>
+                      label={col.label}
+                      sortKey={col.key as string}
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="min-w-[120px] whitespace-nowrap text-left text-xs font-semibold text-gray-600"
+                    />
                   ))}
                   <th className="min-w-[160px] whitespace-nowrap bg-indigo-50 px-3 py-2 text-left text-xs font-semibold text-indigo-700">
                     担当領域（RACI）

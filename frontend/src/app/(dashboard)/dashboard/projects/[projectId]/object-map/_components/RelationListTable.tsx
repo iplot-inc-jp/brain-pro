@@ -7,7 +7,7 @@
  * 最下行は追加行（source・target を選んで「追加」）。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -16,7 +16,17 @@ import {
   type ObjectRelationDto,
   type RelationCardinality,
 } from '@/lib/data-objects';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 import { CARDINALITY_STYLES } from './object-map-shared';
+
+/** カーディナリティ列のソート用表示文字列（例: 「1対多（1:多）」） */
+const CARDINALITY_SORT_LABELS: Record<RelationCardinality, string> = Object.fromEntries(
+  RELATION_CARDINALITY_OPTIONS.map((opt) => [
+    opt.value,
+    `${opt.label}（${CARDINALITY_STYLES[opt.value].short}）`,
+  ]),
+) as Record<RelationCardinality, string>;
 
 export interface RelationListTableProps {
   objects: DataObjectDto[];
@@ -162,6 +172,25 @@ export function RelationListTable({
   const [newCardinality, setNewCardinality] = useState<RelationCardinality>('ONE_TO_MANY');
   const [newLabel, setNewLabel] = useState('');
 
+  // ヘッダークリックソート（表示名で比較。解除時は従来の並びに戻る）
+  const objectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const o of objects) map.set(o.id, o.name);
+    return map;
+  }, [objects]);
+
+  const accessors = useMemo(
+    () => ({
+      source: (rel: ObjectRelationDto) => objectNameById.get(rel.sourceObjectId) ?? '',
+      target: (rel: ObjectRelationDto) => objectNameById.get(rel.targetObjectId) ?? '',
+      cardinality: (rel: ObjectRelationDto) => CARDINALITY_SORT_LABELS[rel.cardinality],
+      label: (rel: ObjectRelationDto) => rel.label ?? '',
+    }),
+    [objectNameById],
+  );
+
+  const { sorted: sortedRelations, sortKey, sortDir, toggleSort } = useTableSort(relations, accessors);
+
   const canAdd = newSourceId !== '' && newTargetId !== '' && newSourceId !== newTargetId;
 
   const handleAdd = () => {
@@ -183,11 +212,11 @@ export function RelationListTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600">
-            <th className="w-48 px-3 py-2">source</th>
+            <SortableTh label="source" sortKey="source" current={sortKey} dir={sortDir} onToggle={toggleSort} className="w-48" />
             <th className="w-8 px-1 py-2" />
-            <th className="w-48 px-3 py-2">target</th>
-            <th className="w-44 px-3 py-2">カーディナリティ</th>
-            <th className="px-3 py-2">ラベル</th>
+            <SortableTh label="target" sortKey="target" current={sortKey} dir={sortDir} onToggle={toggleSort} className="w-48" />
+            <SortableTh label="カーディナリティ" sortKey="cardinality" current={sortKey} dir={sortDir} onToggle={toggleSort} className="w-44" />
+            <SortableTh label="ラベル" sortKey="label" current={sortKey} dir={sortDir} onToggle={toggleSort} />
             <th className="w-12 px-3 py-2" />
           </tr>
         </thead>
@@ -199,7 +228,7 @@ export function RelationListTable({
               </td>
             </tr>
           )}
-          {relations.map((rel) => (
+          {sortedRelations.map((rel) => (
             <RelationRow
               key={rel.id}
               rel={rel}

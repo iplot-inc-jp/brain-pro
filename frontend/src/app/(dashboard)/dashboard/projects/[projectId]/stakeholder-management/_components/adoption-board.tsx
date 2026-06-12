@@ -8,10 +8,14 @@
 //   段階（色付き select）/最終接触日/阻害要因/次アクション を
 //   onBlur・変更で即 upsert（楽観更新、失敗時は reload）。
 // - フィルタ: 段階（ファネルカード）・側（内部/外部）。
+// - ソート: ヘッダクリックで 昇順 → 降順 → 解除（解除で元の並びに戻る）。
+//   段階はファネル順、最終接触日は日付文字列、テキストは表示値で比較。
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Rocket, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { SortableTh } from '@/components/ui/sortable-th';
+import { useTableSort } from '@/lib/use-table-sort';
 import {
   ADOPTION_STAGES,
   adoptionApi,
@@ -44,6 +48,11 @@ function adoptionKey(stakeholderId: string, systemId: string | null): string {
 function toDateInput(iso: string | null | undefined): string {
   return iso ? iso.slice(0, 10) : '';
 }
+
+/** 段階 → ファネル順の序数（段階列のソートはこの順で比較する）。 */
+const stageOrder = new Map<AdoptionStage, number>(
+  ADOPTION_STAGES.map((s, i) => [s.key, i]),
+);
 
 /** 行ごとの upsert パッチ（stakeholderId / systemId は親が付与）。 */
 type RowPatch = Omit<AdoptionStatusInput, 'stakeholderId' | 'systemId'>;
@@ -163,6 +172,24 @@ export function AdoptionBoard({ projectId }: { projectId: string }) {
   const rows = useMemo(
     () => sideFiltered.filter((s) => !stageFilter || stageOf(s.id) === stageFilter),
     [sideFiltered, stageFilter, stageOf],
+  );
+
+  // ヘッダクリックソート（表示値で比較。解除時は元の並びに戻る）
+  const sortAccessors = useMemo(() => {
+    const adoptionOf = (stakeholderId: string) =>
+      adoptionByKey.get(adoptionKey(stakeholderId, currentSystemId));
+    return {
+      name: (s: Stakeholder) => s.name,
+      stage: (s: Stakeholder) => stageOrder.get(stageOf(s.id)) ?? 0,
+      lastContactAt: (s: Stakeholder) =>
+        toDateInput(adoptionOf(s.id)?.lastContactAt),
+      blockers: (s: Stakeholder) => adoptionOf(s.id)?.blockers ?? '',
+      nextAction: (s: Stakeholder) => adoptionOf(s.id)?.nextAction ?? '',
+    };
+  }, [adoptionByKey, currentSystemId, stageOf]);
+  const { sorted: sortedRows, sortKey, sortDir, toggleSort } = useTableSort(
+    rows,
+    sortAccessors,
   );
 
   // upsert 保存（楽観更新・失敗時は reload）
@@ -344,25 +371,50 @@ export function AdoptionBoard({ projectId }: { projectId: string }) {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="min-w-[160px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                    名前
-                  </th>
-                  <th className="min-w-[140px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                    段階
-                  </th>
-                  <th className="min-w-[130px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                    最終接触日
-                  </th>
-                  <th className="min-w-[180px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                    阻害要因
-                  </th>
-                  <th className="min-w-[180px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                    次アクション
-                  </th>
+                  <SortableTh
+                    label="名前"
+                    sortKey="name"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="min-w-[160px] text-left text-xs font-semibold text-gray-600"
+                  />
+                  <SortableTh
+                    label="段階"
+                    sortKey="stage"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="min-w-[140px] text-left text-xs font-semibold text-gray-600"
+                  />
+                  <SortableTh
+                    label="最終接触日"
+                    sortKey="lastContactAt"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="min-w-[130px] text-left text-xs font-semibold text-gray-600"
+                  />
+                  <SortableTh
+                    label="阻害要因"
+                    sortKey="blockers"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="min-w-[180px] text-left text-xs font-semibold text-gray-600"
+                  />
+                  <SortableTh
+                    label="次アクション"
+                    sortKey="nextAction"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="min-w-[180px] text-left text-xs font-semibold text-gray-600"
+                  />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((s) => (
+                {sortedRows.map((s) => (
                   <AdoptionRow
                     // システム切替でドラフトをリセットするため key に含める
                     key={adoptionKey(s.id, currentSystemId)}
@@ -374,7 +426,7 @@ export function AdoptionBoard({ projectId }: { projectId: string }) {
                     onSave={(patch) => void save(s.id, patch)}
                   />
                 ))}
-                {rows.length === 0 && (
+                {sortedRows.length === 0 && (
                   <tr>
                     <td
                       colSpan={5}

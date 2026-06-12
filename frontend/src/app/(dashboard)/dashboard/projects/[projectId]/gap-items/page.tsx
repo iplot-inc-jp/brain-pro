@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,8 @@ import {
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { SortableTh } from '@/components/ui/sortable-th';
+import { useTableSort } from '@/lib/use-table-sort';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
@@ -95,6 +97,9 @@ const statusMeta: Record<GapStatus, { label: string; badge: string }> = {
   OPEN: { label: 'OPEN', badge: 'text-blue-700 bg-blue-50 border-blue-200' },
   RESOLVED: { label: 'RESOLVED', badge: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
 };
+
+// 優先度ソート用の序列（昇順 = HIGH → MEDIUM → LOW）
+const priorityRank: Record<Priority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 
 type EditableField =
   | 'businessArea'
@@ -485,10 +490,32 @@ export default function GapItemsPage() {
   const outOfScopeCount = items.filter((it) => it.outOfScope).length;
 
   // スコープフィルタ適用後の表示行（GAP一覧タブのみ。分析・台帳タブは全件のまま）
-  const visibleItems =
-    scopeFilter === 'ALL'
-      ? items
-      : items.filter((it) => (scopeFilter === 'OUT' ? it.outOfScope : !it.outOfScope));
+  const visibleItems = useMemo(
+    () =>
+      scopeFilter === 'ALL'
+        ? items
+        : items.filter((it) => (scopeFilter === 'OUT' ? it.outOfScope : !it.outOfScope)),
+    [items, scopeFilter],
+  );
+
+  // ヘッダークリックソート（表示用の派生値で比較。解除時は手動順＝order 昇順に戻る）。
+  // ASIS / TOBE セルはフロー選択 Select のため、選択中のフロー名で比較する。
+  const sortAccessors = useMemo(() => {
+    const flowNameById = new Map(flows.map((f) => [f.id, f.name]));
+    return {
+      businessArea: (it: GapItem) => it.businessArea,
+      asis: (it: GapItem) => (it.asisFlowId ? (flowNameById.get(it.asisFlowId) ?? '') : ''),
+      tobe: (it: GapItem) => (it.tobeFlowId ? (flowNameById.get(it.tobeFlowId) ?? '') : ''),
+      gap: (it: GapItem) => it.gapDescription,
+      priority: (it: GapItem) => priorityRank[it.priority] ?? priorityRank.MEDIUM,
+      owner: (it: GapItem) => it.ownerName,
+      status: (it: GapItem) => statusMeta[it.status]?.label ?? it.status,
+    };
+  }, [flows]);
+  const { sorted: sortedItems, sortKey, sortDir, toggleSort } = useTableSort(
+    visibleItems,
+    sortAccessors,
+  );
 
   return (
     <div className="space-y-6">
@@ -691,36 +718,68 @@ export default function GapItemsPage() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50 text-left text-gray-600">
-                    <th className="px-3 py-2 font-medium w-[140px] border-b border-gray-200">
-                      業務領域
-                    </th>
-                    <th className="px-3 py-2 font-medium border-b border-gray-200">
-                      <span className="inline-flex items-center gap-1">
-                        ASIS（現状・数値込み）
-                        <HelpTooltip text="ASIS＝現状。今どうなっているかを、できるだけ数値（件数・時間・コスト等）込みで事実ベースに記述します。" />
-                      </span>
-                    </th>
-                    <th className="px-3 py-2 font-medium border-b border-gray-200">
-                      <span className="inline-flex items-center gap-1">
-                        TOBE（あるべき姿）
-                        <HelpTooltip text="TOBE＝あるべき姿。施策後に実現したい理想の状態を、これも数値目標込みで記述します。" />
-                      </span>
-                    </th>
-                    <th className="px-3 py-2 font-medium border-b border-gray-200 bg-amber-50/50">
-                      <span className="inline-flex items-center gap-1">
-                        GAP（差分＝本当の課題）
-                        <HelpTooltip text="GAP＝TOBE − ASIS。理想と現状の差分が、実際に解決すべき本当の課題です。この行を起点に打ち手を検討します。" />
-                      </span>
-                    </th>
-                    <th className="px-3 py-2 font-medium w-[120px] border-b border-gray-200">
-                      優先度
-                    </th>
-                    <th className="px-3 py-2 font-medium w-[120px] border-b border-gray-200">
-                      担当
-                    </th>
-                    <th className="px-3 py-2 font-medium w-[110px] border-b border-gray-200">
-                      状態
-                    </th>
+                    <SortableTh
+                      label="業務領域"
+                      sortKey="businessArea"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium w-[140px] border-b border-gray-200"
+                    />
+                    <SortableTh
+                      label="ASIS（現状・数値込み）"
+                      sortKey="asis"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium border-b border-gray-200"
+                    >
+                      <HelpTooltip text="ASIS＝現状。今どうなっているかを、できるだけ数値（件数・時間・コスト等）込みで事実ベースに記述します。" />
+                    </SortableTh>
+                    <SortableTh
+                      label="TOBE（あるべき姿）"
+                      sortKey="tobe"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium border-b border-gray-200"
+                    >
+                      <HelpTooltip text="TOBE＝あるべき姿。施策後に実現したい理想の状態を、これも数値目標込みで記述します。" />
+                    </SortableTh>
+                    <SortableTh
+                      label="GAP（差分＝本当の課題）"
+                      sortKey="gap"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium border-b border-gray-200 bg-amber-50/50"
+                    >
+                      <HelpTooltip text="GAP＝TOBE − ASIS。理想と現状の差分が、実際に解決すべき本当の課題です。この行を起点に打ち手を検討します。" />
+                    </SortableTh>
+                    <SortableTh
+                      label="優先度"
+                      sortKey="priority"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium w-[120px] border-b border-gray-200"
+                    />
+                    <SortableTh
+                      label="担当"
+                      sortKey="owner"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium w-[120px] border-b border-gray-200"
+                    />
+                    <SortableTh
+                      label="状態"
+                      sortKey="status"
+                      current={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                      className="font-medium w-[110px] border-b border-gray-200"
+                    />
                     <th className="px-3 py-2 font-medium w-[160px] border-b border-gray-200">
                       <span className="inline-flex items-center gap-1">
                         課題ツリー
@@ -733,7 +792,7 @@ export default function GapItemsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleItems.map((item) => {
+                  {sortedItems.map((item) => {
                     const pm = priorityMeta[item.priority] ?? priorityMeta.MEDIUM;
                     const sm = statusMeta[item.status] ?? statusMeta.OPEN;
                     const resolved = item.status === 'RESOLVED';

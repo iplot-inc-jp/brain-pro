@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -45,6 +45,8 @@ import {
   type FlowDefinition,
 } from '@/lib/flow-definition';
 import { flowAttachmentApi, type FlowAttachment } from '@/lib/flow-attachments';
+import { useTableSort } from '@/lib/use-table-sort';
+import { SortableTh } from '@/components/ui/sortable-th';
 import { informationTypeApi, type InformationType } from '@/lib/dfd';
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { systemApi, type SystemMaster } from '@/lib/masters';
@@ -183,6 +185,17 @@ function toTreeOrder(rows: FlowDefinitionRow[]): FlowDefinitionRow[] {
 
   return ordered;
 }
+
+// ヘッダクリックソート用の列アクセサ（表示値で比較。空値はフック側で末尾へ）。
+// INPUT/OUTPUT は情報リンク集計のチップ列、DO は要約列のためソート対象外（操作列も対象外）。
+// レンダーごとに作り直さないようモジュール定数にする。
+const SORT_ACCESSORS: Record<string, (row: FlowDefinitionRow) => string | null> = {
+  flowName: (r) => r.flowName,
+  purpose: (r) => r.definition.purpose,
+  owner: (r) => r.definition.owner,
+  frequency: (r) => r.definition.frequency,
+  system: (r) => r.definition.system,
+};
 
 /** フォームと元定義を比較し、変わったフィールドだけの patch を作る */
 function buildPatch(def: FlowDefinition, form: ModalForm): Partial<FlowDefinition> {
@@ -652,7 +665,12 @@ export default function BusinessDefinitionPage() {
     '全業務フローの業務定義を1行ずつ俯瞰します。目的・担当・頻度・システムはこの表で直接編集（フォーカスを外すと自動保存）できます。INPUT/OUTPUT は各フローのノードに紐づけた情報リンク（情報種別）から自動集計してチップ表示します（業務フロー側で編集）。「編集」ボタンからは目的・関係者・DO手順・例外処理などをモーダルでまとめて編集できます。担当・次工程はロール、システムはシステムマスタ、INPUT/OUTPUT 補足は情報種別から選択でき（＋で新規追加）、写真・スクショの添付もモーダルから行えます。';
 
   // 親子階層（parentId）で DFS 順に並べ替えた表示用の行
-  const treeRows = toTreeOrder(rows);
+  const treeRows = useMemo(() => toTreeOrder(rows), [rows]);
+
+  // ヘッダクリックソート（昇順 → 降順 → 解除）。解除時は treeRows（親子ツリー順）に戻る。
+  const { sorted: displayRows, sortKey, sortDir, toggleSort } = useTableSort(treeRows, SORT_ACCESSORS);
+  // ソート中は親子の隣接関係が崩れるため、ツリー表示（インデント・└─）はフラットにする
+  const treeVisible = sortKey === null;
 
   return (
     <div className="space-y-5">
@@ -727,29 +745,65 @@ export default function BusinessDefinitionPage() {
             <table className="w-full min-w-[1080px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-500">
-                  <th className="px-3 py-2.5">業務フロー名</th>
-                  <th className="px-3 py-2.5">目的</th>
-                  <th className="px-3 py-2.5">担当</th>
+                  <SortableTh
+                    label="業務フロー名"
+                    sortKey="flowName"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="py-2.5"
+                  />
+                  <SortableTh
+                    label="目的"
+                    sortKey="purpose"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="py-2.5"
+                  />
+                  <SortableTh
+                    label="担当"
+                    sortKey="owner"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="py-2.5"
+                  />
                   <th className="px-3 py-2.5">INPUT</th>
                   <th className="px-3 py-2.5">DO</th>
                   <th className="px-3 py-2.5">OUTPUT</th>
-                  <th className="px-3 py-2.5">頻度</th>
-                  <th className="px-3 py-2.5">システム</th>
+                  <SortableTh
+                    label="頻度"
+                    sortKey="frequency"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="py-2.5"
+                  />
+                  <SortableTh
+                    label="システム"
+                    sortKey="system"
+                    current={sortKey}
+                    dir={sortDir}
+                    onToggle={toggleSort}
+                    className="py-2.5"
+                  />
                   <th className="px-3 py-2.5 text-right">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {treeRows.map((row) => {
+                {displayRows.map((row) => {
                   const view = definitionToRow(row.definition);
                   const flowHref = `/dashboard/projects/${projectId}/flows/${row.flowId}`;
-                  const isChild = row.depth > 0;
+                  // ソート中は親子の隣接が崩れるためインデント・└─を出さない（フラット表示）
+                  const isChild = treeVisible && row.depth > 0;
                   return (
                     <tr key={row.flowId} className="border-b border-gray-100 align-top">
                       {/* 業務フロー名: 親子インデント + ツリーインジケータ + 左側「業務フローへ」導線 + 名前リンク */}
                       <td className="whitespace-nowrap px-3 py-2.5">
                         <div
                           className="flex items-center gap-1.5"
-                          style={{ paddingLeft: row.depth * 20 }}
+                          style={{ paddingLeft: treeVisible ? row.depth * 20 : 0 }}
                         >
                           {/* 子行はツリーらしい階層インジケータ（└─）と淡い縦ボーダー */}
                           {isChild && (
