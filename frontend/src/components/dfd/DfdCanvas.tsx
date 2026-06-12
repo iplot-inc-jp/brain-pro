@@ -1509,6 +1509,15 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                 <p className="mt-1 text-[10px] text-gray-400">
                   名前はノードをダブルクリックで変更（関係性マップ/ER図のマスタにも反映）
                 </p>
+                {projectId && (
+                  <Link
+                    href={`/dashboard/projects/${projectId}/object-map`}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline"
+                  >
+                    <Boxes className="w-3 h-3" />
+                    オブジェクト関係性マップで見る
+                  </Link>
+                )}
               </div>
             )}
             {selectedNode.kind === 'FUNCTION' && selectedNode.refFlowId && props.onFunctionOpen && (

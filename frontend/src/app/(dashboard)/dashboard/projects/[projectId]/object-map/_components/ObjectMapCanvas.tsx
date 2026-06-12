@@ -6,12 +6,15 @@
  * React Flow を使わず、viewBox 変換（translate+scale）だけで
  * ズーム（ホイール）/ パン（背景ドラッグ）/ ノードドラッグを実装する。
  *  - オブジェクト = 角丸カード（色帯＋名前＋テーブル数/DFDバッジ）。foreignObject で描画。
- *  - リレーション = 直線（既定）または3次ベジェ曲線エッジ（pathStyle='bezier'）。
+ *  - リレーション = 3次ベジェ曲線（既定。pathStyle=null/'bezier'）または直線（pathStyle='straight'）。
  *    両端に 1/N 表記、中央に 1:1/1:多/多:多 チップ＋ラベル。
  *    カーディナリティごとに線色を変える（1:1=青, 1:多=緑, 多:多=橙）。
  *    端点は自動（カード境界との交点）または上下左右の辺中点（sourceHandle/targetHandle）。
- *  - エッジ追加 = 「2クリック接続」モード（ガントの依存編集と同じUX。ESCで中断）。
- *    接続モード中はカード4辺の中点に丸ノブが出て、ノブclickでその辺をアンカーに指定できる。
+ *  - エッジ追加 = 2通り:
+ *    (a) カード hover で4辺中点に出る丸ノブを pointerdown→ドラッグ→別カード（またはそのノブ）で
+ *        pointerup（業務フローと同じUX。空白ドロップ/ESCで中断、ドラッグなしのノブclickは何もしない）。
+ *    (b) 「2クリック接続」モード（ガントの依存編集と同じUX。ESCで中断）。
+ *        接続モード中はノブclickでその辺をアンカーに指定できる。
  *  - エッジクリック → その場に編集ポップ（カーディナリティ/線形/始点辺・終点辺/ラベル/削除）。
  *  - 付箋（STICKY）/メモ（COMMENT）= foreignObject の注釈。ドラッグ移動・ダブルクリックで編集・hoverで削除。
  *  - ノードドラッグ終了 → onObjectMoved（親がデバウンスして SaveObjectPositions）。
@@ -122,6 +125,21 @@ const HANDLE_OPTIONS: ReadonlyArray<{ value: '' | SideHandle; label: string }> =
 const ANNOT_W = 170;
 const ANNOT_H = 100;
 
+/** ノブドラッグ接続の進行状態（ノブ pointerdown→ドラッグ→別カードで pointerup） */
+interface LinkDragState {
+  sourceId: string;
+  sourceHandle: SideHandle;
+  /** プレビュー線の先端（ワールド座標） */
+  cursor: Point;
+  /** ドロップ先候補（side=null はカード本体=自動アンカー） */
+  target: { id: string; side: SideHandle | null } | null;
+  /** pointermove したか（ドラッグなしのノブclickでは何も作らない） */
+  moved: boolean;
+}
+
+/** ノブドラッグ中、辺中点ノブへのスナップ判定半径（ワールド座標） */
+const KNOB_SNAP_RADIUS = 14;
+
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
@@ -203,6 +221,15 @@ export function ObjectMapCanvas({
   const [cursorWorld, setCursorWorld] = useState<Point | null>(null);
   // 接続ノブの hover（r拡大・色強調用）
   const [hoverKnob, setHoverKnob] = useState<{ objId: string; side: SideHandle } | null>(null);
+  // カード hover（接続モード外でも辺ノブを出す）
+  const [hoverObjectId, setHoverObjectId] = useState<string | null>(null);
+
+  // ノブドラッグ接続（接続モード不要。ノブ pointerdown→ドラッグ→別カードで pointerup）
+  const [linkDrag, setLinkDrag] = useState<LinkDragState | null>(null);
+  const linkDragRef = useRef<LinkDragState | null>(null);
+  // アンマウント時に window リスナを確実に外す（リーク防止）
+  const linkDragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => linkDragCleanupRef.current?.(), []);
 
   // エッジ編集ポップ（コンテナ相対のスクリーン座標）
   const [edgeEdit, setEdgeEdit] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -397,6 +424,101 @@ export function ObjectMapCanvas({
     [connectMode, connectSourceId, connectSourceHandle, onCreateRelation],
   );
 
+  // ===== ノブドラッグ接続: ドロップ先判定（ワールド座標。辺ノブ優先 → カード矩形） =====
+  const hitTestDropTarget = useCallback(
+    (w: Point, excludeId: string): { id: string; side: SideHandle | null } | null => {
+      // 辺中点ノブへのスナップを優先（targetHandle=その辺）
+      for (const o of objects) {
+        if (o.id === excludeId) continue;
+        const p = posOf(o);
+        for (const side of SIDES) {
+          const m = SIDE_MIDPOINTS[side];
+          if (Math.hypot(w.x - (p.x + m.x), w.y - (p.y + m.y)) <= KNOB_SNAP_RADIUS) {
+            return { id: o.id, side };
+          }
+        }
+      }
+      // カード本体（targetHandle=null=自動アンカー）
+      for (const o of objects) {
+        if (o.id === excludeId) continue;
+        const p = posOf(o);
+        if (w.x >= p.x && w.x <= p.x + CARD_W && w.y >= p.y && w.y <= p.y + CARD_H) {
+          return { id: o.id, side: null };
+        }
+      }
+      return null;
+    },
+    [objects, posOf],
+  );
+
+  // ===== ノブ pointerdown → ドラッグでプレビュー線 → 別カード上で pointerup = 関係線作成 =====
+  // カードドラッグ/背景パンには伝播させない。空白ドロップ・ESC・ドラッグなしの up はキャンセル。
+  const handleKnobPointerDown = useCallback(
+    (e: ReactPointerEvent<SVGCircleElement>, obj: DataObjectDto, side: SideHandle) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      if (connectMode) return; // 接続モード中は既存の2クリック接続（ノブclick）に任せる
+      // 既存ドラッグが残っていれば先に破棄（2本目の指での再入時にリスナを残留させない）
+      linkDragCleanupRef.current?.();
+      const pointerId = e.pointerId;
+      const init: LinkDragState = {
+        sourceId: obj.id,
+        sourceHandle: side,
+        cursor: screenToWorld(e.clientX, e.clientY),
+        target: null,
+        moved: false,
+      };
+      linkDragRef.current = init;
+      setLinkDrag(init);
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return; // 別ポインタ（2本目の指等）は無視
+        const d = linkDragRef.current;
+        if (!d) return;
+        const w = screenToWorld(ev.clientX, ev.clientY);
+        const next: LinkDragState = {
+          ...d,
+          cursor: w,
+          target: hitTestDropTarget(w, d.sourceId),
+          moved: true,
+        };
+        linkDragRef.current = next;
+        setLinkDrag(next);
+      };
+      const cleanup = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('keydown', onKey);
+        linkDragCleanupRef.current = null;
+        linkDragRef.current = null;
+        setLinkDrag(null);
+      };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return; // 別ポインタの up では確定しない
+        const d = linkDragRef.current;
+        cleanup();
+        if (!d?.moved) return; // ドラッグせず up = 何もしない（誤作成防止）
+        if (d.target && d.target.id !== d.sourceId) {
+          void onCreateRelation(d.sourceId, d.target.id, d.sourceHandle, d.target.side);
+        }
+      };
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        cleanup(); // システム割り込み等で中断 = 作成しない・リスナを残さない
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === 'Escape') cleanup(); // ESC で中断（pointerup しても作成されない）
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('keydown', onKey);
+      linkDragCleanupRef.current = cleanup;
+    },
+    [connectMode, screenToWorld, hitTestDropTarget, onCreateRelation],
+  );
+
   // ===== 付箋/メモのドラッグ（カードと同じポインタ系。接続・選択の対象外） =====
   const handleAnnotationPointerDown = useCallback(
     (e: ReactPointerEvent<SVGGElement>, a: DataObjectAnnotationDto) => {
@@ -578,8 +700,8 @@ export function ObjectMapCanvas({
         let srcMark: Point;
         let tgtMark: Point;
         let arrowDir: Point; // target 端点での進行方向（矢じりの向き）
-        if (rel.pathStyle === 'bezier') {
-          // 3次ベジェ。制御点は各端点から「接続辺の外向き法線」（自動アンカー時は端点間方向）へ dist*0.4
+        if (rel.pathStyle !== 'straight') {
+          // 3次ベジェ（既定: null / 'bezier'）。制御点は各端点から「接続辺の外向き法線」（自動アンカー時は端点間方向）へ dist*0.4
           const ext = Math.max(abLen, 40) * 0.4;
           const ns = sh ? SIDE_NORMALS[sh] : abDir;
           const nt = th ? SIDE_NORMALS[th] : { x: -abDir.x, y: -abDir.y };
@@ -596,7 +718,7 @@ export function ObjectMapCanvas({
           tgtMark = { x: b.x + nt.x * 16 - nt.y * 11, y: b.y + nt.y * 16 + nt.x * 11 };
           arrowDir = { x: -nt.x, y: -nt.y };
         } else {
-          // 直線（null / 'straight'）は現状ロジック
+          // 直線（pathStyle='straight' のときのみ）
           path = `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
           mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
           const abPerp = { x: -abDir.y, y: abDir.x };
@@ -634,6 +756,34 @@ export function ObjectMapCanvas({
     connectPreviewStart = connectSourceHandle
       ? sideAnchor(sp.x, sp.y, connectSourceHandle)
       : { x: sp.x + CARD_W / 2, y: sp.y + CARD_H / 2 };
+  }
+
+  // ノブドラッグ接続のプレビュー線（既定ベジェと同じ形状・半透明。ドロップ先にはスナップ）
+  let linkDragPath: string | null = null;
+  if (linkDrag) {
+    const src = objectById.get(linkDrag.sourceId);
+    if (src) {
+      const sp = posOf(src);
+      const a = sideAnchor(sp.x, sp.y, linkDrag.sourceHandle);
+      const tgtObj = linkDrag.target ? objectById.get(linkDrag.target.id) ?? null : null;
+      let b = linkDrag.cursor;
+      let tSide: SideHandle | null = null;
+      if (tgtObj && linkDrag.target) {
+        const tp = posOf(tgtObj);
+        tSide = linkDrag.target.side;
+        b = tSide
+          ? sideAnchor(tp.x, tp.y, tSide)
+          : rectAnchor(tp.x + CARD_W / 2, tp.y + CARD_H / 2, a.x, a.y);
+      }
+      const abLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const abDir = { x: (b.x - a.x) / abLen, y: (b.y - a.y) / abLen };
+      const ext = Math.max(abLen, 40) * 0.4;
+      const ns = SIDE_NORMALS[linkDrag.sourceHandle];
+      const nt = tSide ? SIDE_NORMALS[tSide] : { x: -abDir.x, y: -abDir.y };
+      const c1 = { x: a.x + ns.x * ext, y: a.y + ns.y * ext };
+      const c2 = { x: b.x + nt.x * ext, y: b.y + nt.y * ext };
+      linkDragPath = `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`;
+    }
   }
 
   return (
@@ -768,6 +918,19 @@ export function ObjectMapCanvas({
             />
           )}
 
+          {/* ノブドラッグ接続のプレビュー線（半透明ベジェ。指先/ドロップ先に追従） */}
+          {linkDragPath && (
+            <path
+              d={linkDragPath}
+              stroke="#2563eb"
+              strokeWidth={1.5}
+              strokeDasharray="6 4"
+              opacity={0.55}
+              fill="none"
+              pointerEvents="none"
+            />
+          )}
+
           {/* ===== 付箋/メモ（接続モード・オブジェクト選択の対象外。カードの下層に描画） ===== */}
           {annotations.map((a) => {
             const p = posOfAnnotation(a);
@@ -847,16 +1010,20 @@ export function ObjectMapCanvas({
             const color = objectColor(o.color);
             const selected = o.id === selectedObjectId;
             const isConnectSource = o.id === connectSourceId;
+            const isLinkSource = linkDrag?.sourceId === o.id;
+            const isLinkTarget = linkDrag?.target?.id === o.id;
             return (
               <g
                 key={o.id}
                 transform={`translate(${p.x},${p.y})`}
                 onPointerDown={(e) => handleNodePointerDown(e, o)}
                 onClick={(e) => handleNodeClick(e, o)}
+                onPointerEnter={() => setHoverObjectId(o.id)}
+                onPointerLeave={() => setHoverObjectId(null)}
                 style={{ cursor: connectMode ? 'crosshair' : 'grab' }}
               >
-                {/* 選択/接続元リング */}
-                {(selected || isConnectSource) && (
+                {/* 選択/接続元/ドロップ先候補リング */}
+                {(selected || isConnectSource || isLinkTarget) && (
                   <rect
                     x={-5}
                     y={-5}
@@ -864,8 +1031,8 @@ export function ObjectMapCanvas({
                     height={CARD_H + 10}
                     rx={16}
                     fill="none"
-                    stroke={isConnectSource ? '#2563eb' : '#3b82f6'}
-                    strokeWidth={2}
+                    stroke={isLinkTarget || isConnectSource ? '#2563eb' : '#3b82f6'}
+                    strokeWidth={isLinkTarget ? 2.5 : 2}
                     strokeDasharray={isConnectSource ? '6 4' : undefined}
                   />
                 )}
@@ -906,12 +1073,17 @@ export function ObjectMapCanvas({
                 </foreignObject>
                 {/* ヒット領域（foreignObject の上に透明 rect） */}
                 <rect width={CARD_W} height={CARD_H} rx={12} fill="transparent" />
-                {/* 接続モード中: 4辺中点の接続ノブ（click=その辺をアンカーに。カード本体click=自動） */}
-                {connectMode &&
+                {/* 4辺中点の接続ノブ。
+                    接続モード中: click=その辺をアンカーに（カード本体click=自動）。
+                    接続モード外: カード hover で表示し、pointerdown→ドラッグで関係線を生やす。 */}
+                {(connectMode || hoverObjectId === o.id || isLinkSource || isLinkTarget) &&
                   SIDES.map((side) => {
                     const kp = SIDE_MIDPOINTS[side];
                     const knobHovered = hoverKnob?.objId === o.id && hoverKnob.side === side;
-                    const knobActive = isConnectSource && connectSourceHandle === side;
+                    const knobActive =
+                      (isConnectSource && connectSourceHandle === side) ||
+                      (isLinkSource && linkDrag?.sourceHandle === side) ||
+                      (isLinkTarget && linkDrag?.target?.side === side);
                     return (
                       <circle
                         key={side}
@@ -921,8 +1093,8 @@ export function ObjectMapCanvas({
                         fill={knobActive ? '#2563eb' : knobHovered ? '#bfdbfe' : '#ffffff'}
                         stroke="#2563eb"
                         strokeWidth={1.5}
-                        style={{ cursor: 'pointer' }}
-                        onPointerDown={(e) => e.stopPropagation()}
+                        style={{ cursor: connectMode ? 'pointer' : 'crosshair' }}
+                        onPointerDown={(e) => handleKnobPointerDown(e, o, side)}
                         onClick={(e) => handleKnobClick(e, o, side)}
                         onPointerEnter={() => setHoverKnob({ objId: o.id, side })}
                         onPointerLeave={() => setHoverKnob(null)}
@@ -1075,19 +1247,19 @@ export function ObjectMapCanvas({
               <div className="flex gap-1">
                 <Button
                   size="sm"
-                  variant={editingRelation.pathStyle === 'bezier' ? 'outline' : 'default'}
+                  variant={editingRelation.pathStyle === 'straight' ? 'outline' : 'default'}
                   className="h-7 flex-1 text-xs"
                   onClick={() => void onUpdateRelation(editingRelation.id, { pathStyle: null })}
                 >
-                  直線
+                  曲線（既定）
                 </Button>
                 <Button
                   size="sm"
-                  variant={editingRelation.pathStyle === 'bezier' ? 'default' : 'outline'}
+                  variant={editingRelation.pathStyle === 'straight' ? 'default' : 'outline'}
                   className="h-7 flex-1 text-xs"
-                  onClick={() => void onUpdateRelation(editingRelation.id, { pathStyle: 'bezier' })}
+                  onClick={() => void onUpdateRelation(editingRelation.id, { pathStyle: 'straight' })}
                 >
-                  曲線
+                  直線
                 </Button>
               </div>
             </div>
