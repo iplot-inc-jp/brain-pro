@@ -123,6 +123,9 @@ model Project {
   analysisLeakRows        AnalysisLeakRow[]
   gapLedgers              GapLedger[]
   roadmapPhases           RoadmapPhase[]
+  charter                 ProjectCharter?
+  changeRequests          ChangeRequest[]
+  lessons                 LessonLearned[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1059,6 +1062,7 @@ model SubProject {
   tobeRoadmaps     TobeRoadmap[]
   risks            Risk[]
   stakeholderAssignments StakeholderSubProject[]
+  lessons          LessonLearned[]
 
   @@map("sub_projects")
 }
@@ -1098,6 +1102,7 @@ model Constraint {
   title        String
   description  String?  @db.Text
   category     String?
+  kind         String?  @default("CONSTRAINT") // CONSTRAINT=制約 / ASSUMPTION=前提条件
   order        Int      @default(0)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
@@ -1407,6 +1412,9 @@ model Stakeholder {
   ownedMeetings         Meeting[]               @relation("MeetingOwner")
   ownedRisks            Risk[]                  @relation("RiskOwner")
   subProjectAssignments StakeholderSubProject[]
+  approvedCharters      ProjectCharter[]        @relation("CharterApprover")
+  sponsoredCharters     ProjectCharter[]        @relation("CharterSponsor")
+  approvedChangeRequests ChangeRequest[]        @relation("ChangeApprover")
 
   @@map("stakeholders")
 }
@@ -1903,4 +1911,71 @@ model CruoaCell {
   row CruoaRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
 
   @@map("cruoa_cells")
+}
+
+// ===========================================
+// PMBOK 補完：プロジェクト憲章 / 変更要求 / 教訓
+// ===========================================
+
+// プロジェクト憲章（プロジェクトごとに1件）
+model ProjectCharter {
+  id                    String   @id @default(uuid())
+  projectId             String   @unique @map("project_id")
+  background            String?  @db.Text
+  purpose               String?  @db.Text
+  successCriteria       String?  @db.Text @map("success_criteria")
+  scopeIn               String?  @db.Text @map("scope_in")
+  scopeOut              String?  @db.Text @map("scope_out")
+  budgetNote            String?  @map("budget_note")
+  approverStakeholderId String?  @map("approver_stakeholder_id")
+  sponsorStakeholderId  String?  @map("sponsor_stakeholder_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approver Stakeholder? @relation("CharterApprover", fields: [approverStakeholderId], references: [id], onDelete: SetNull)
+  sponsor  Stakeholder? @relation("CharterSponsor", fields: [sponsorStakeholderId], references: [id], onDelete: SetNull)
+
+  @@map("project_charters")
+}
+
+// 変更要求（変更管理）
+model ChangeRequest {
+  id                    String    @id @default(uuid())
+  projectId             String    @map("project_id")
+  title                 String
+  reason                String?   @db.Text
+  impactScope           String?   @db.Text @map("impact_scope")
+  impactSchedule        String?   @map("impact_schedule")
+  impactCost            String?   @map("impact_cost")
+  status                String?   @default("REQUESTED") // REQUESTED / APPROVED / REJECTED / APPLIED
+  approverStakeholderId String?   @map("approver_stakeholder_id")
+  decidedAt             DateTime? @map("decided_at")
+  note                  String?   @db.Text
+  order                 Int       @default(0)
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  project  Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approver Stakeholder? @relation("ChangeApprover", fields: [approverStakeholderId], references: [id], onDelete: SetNull)
+
+  @@map("change_requests")
+}
+
+// 教訓（レッスンズラーンド）
+model LessonLearned {
+  id             String   @id @default(uuid())
+  projectId      String   @map("project_id")
+  kind           String?  @default("WENT_WELL") // WENT_WELL=うまくいった / PROBLEM=問題 / IMPROVEMENT=改善
+  content        String   @db.Text
+  recommendation String?  @db.Text
+  subProjectId   String?  @map("sub_project_id")
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+
+  @@map("lessons_learned")
 }

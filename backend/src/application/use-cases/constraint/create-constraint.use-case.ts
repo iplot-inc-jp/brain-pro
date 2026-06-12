@@ -18,6 +18,7 @@ export interface CreateConstraintInput {
   title: string;
   description?: string | null;
   category?: string | null;
+  kind?: string | null;
   order?: number;
   subProjectId?: string | null;
 }
@@ -57,6 +58,7 @@ export class CreateConstraintUseCase {
         title: input.title,
         description: input.description,
         category: input.category,
+        kind: input.kind,
         order: input.order,
         subProjectId: input.subProjectId,
       },

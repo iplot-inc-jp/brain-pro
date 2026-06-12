@@ -299,6 +299,11 @@ import {
   TobeVisionByIdController,
   TobeRoadmapController,
   TobeRoadmapByIdController,
+  ProjectCharterController,
+  ChangeRequestController,
+  ChangeRequestByIdController,
+  LessonLearnedController,
+  LessonLearnedByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -423,6 +428,11 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     TobeRoadmapByIdController,
     RoadmapPhaseController,
     RoadmapPhaseByIdController,
+    ProjectCharterController,
+    ChangeRequestController,
+    ChangeRequestByIdController,
+    LessonLearnedController,
+    LessonLearnedByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========

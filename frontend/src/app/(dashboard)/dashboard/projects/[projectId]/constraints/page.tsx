@@ -3,9 +3,10 @@
 /**
  * 制約条件 管理ページ。
  *
- * ASIS/TOBE 共通の制約条件（守るべき条件）を CRUD する。
+ * ASIS/TOBE 共通の制約条件（守るべき条件）と前提条件（成り立つと仮定する条件）を
+ * kind（CONSTRAINT/ASSUMPTION）で区別して CRUD する。既存データ（kind 未設定）は制約扱い。
  * 各制約は領域（SubProject）に紐づけられる（任意）。
- * 一覧 + 作成フォーム + 各行インライン編集（onBlur 保存）+ 削除。
+ * 一覧（kind フィルタタブ付き）+ 作成フォーム + 各行インライン編集（onBlur 保存）+ 削除。
  * 作法は InformationTypeRegistry / stakeholder-management の各ボードに合わせる。
  */
 
@@ -19,6 +20,10 @@ import { Button } from '@/components/ui/button';
 import {
   constraintApi,
   subProjectApi,
+  normalizeConstraintKind,
+  constraintKindMeta,
+  CONSTRAINT_KINDS,
+  type ConstraintKind,
   type ConstraintMaster,
   type SubProjectMaster,
 } from '@/lib/masters';
@@ -35,10 +40,14 @@ export default function ConstraintsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 作成フォーム（title + category）。
+  // 作成フォーム（title + category + kind）。
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState('');
+  const [newKind, setNewKind] = useState<ConstraintKind>('CONSTRAINT');
   const [creating, setCreating] = useState(false);
+
+  // kind フィルタ（既定は両方表示）。
+  const [kindFilter, setKindFilter] = useState<'ALL' | ConstraintKind>('ALL');
 
   const load = useCallback(async () => {
     setError(null);
@@ -75,6 +84,7 @@ export default function ConstraintsPage() {
       await constraintApi.create(projectId, {
         title,
         category: newCategory.trim() || null,
+        kind: newKind,
       });
       setNewTitle('');
       setNewCategory('');
@@ -84,34 +94,57 @@ export default function ConstraintsPage() {
     } finally {
       setCreating(false);
     }
-  }, [newTitle, newCategory, projectId, load]);
+  }, [newTitle, newCategory, newKind, projectId, load]);
+
+  // フィルタ適用後の一覧（既存データ＝kind 未設定は制約扱い）。
+  const visibleConstraints =
+    kindFilter === 'ALL'
+      ? constraints
+      : constraints.filter((c) => normalizeConstraintKind(c.kind) === kindFilter);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="制約条件"
-        description="ASIS/TOBE 共通の制約条件（守るべき条件）。領域に紐づけられます。"
-        help="法令・社内規定・技術・予算など、設計や業務で必ず守るべき条件を登録します。各制約は領域（サブプロジェクト）に紐づけられます。"
+        title="制約条件・前提条件"
+        description="ASIS/TOBE 共通の制約条件（守るべき条件）と前提条件（成り立つと仮定する条件）。領域に紐づけられます。"
+        help="法令・社内規定・技術・予算など、設計や業務で必ず守るべき条件（制約）と、計画の前提として成り立つと仮定する条件（前提条件）を登録します。各行は領域（サブプロジェクト）に紐づけられます。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
           <HowToPanel
             steps={[
-              '上のフォームに制約のタイトルとカテゴリ（任意）を入力して「追加」します。',
+              '上のフォームに種別（制約/前提条件）・タイトル・カテゴリ（任意）を入力して「追加」します。',
               '各行のタイトル・カテゴリ・説明はその場で編集でき、入力欄から離れると自動保存されます。',
-              '「領域」を選ぶと、その制約を特定の領域（サブプロジェクト）に紐づけられます。',
-              '不要になった制約はゴミ箱ボタンで削除します。',
+              '「種別」バッジをクリックすると、制約 ⇔ 前提条件 を切り替えられます。',
+              '上部のタブで「すべて／制約／前提条件」を切り替えて絞り込めます。',
+              '「領域」を選ぶと、その行を特定の領域（サブプロジェクト）に紐づけられます。',
+              '不要になった行はゴミ箱ボタンで削除します。',
             ]}
           />
         }
       />
 
-      {/* 作成フォーム（title + category） */}
+      {/* 作成フォーム（kind + title + category） */}
       <Card className="bg-white border-gray-200">
         <CardContent className="flex flex-wrap items-end gap-2 p-4">
+          <div className="w-32 space-y-1">
+            <label className="block text-[11px] font-medium text-gray-500">種別</label>
+            <select
+              value={newKind}
+              onChange={(e) => setNewKind(e.target.value as ConstraintKind)}
+              className="w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label="種別"
+            >
+              {CONSTRAINT_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {constraintKindMeta[k].label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex-1 min-w-[200px] space-y-1">
             <label className="block text-[11px] font-medium text-gray-500">
-              制約条件のタイトル<span className="ml-1 text-rose-500">*</span>
+              タイトル<span className="ml-1 text-rose-500">*</span>
             </label>
             <input
               value={newTitle}
@@ -166,6 +199,37 @@ export default function ConstraintsPage() {
         </div>
       )}
 
+      {/* kind フィルタタブ（既定は両方表示） */}
+      <div className="flex items-center gap-1" role="tablist" aria-label="種別フィルタ">
+        {(
+          [
+            { value: 'ALL', label: 'すべて' },
+            { value: 'CONSTRAINT', label: constraintKindMeta.CONSTRAINT.label },
+            { value: 'ASSUMPTION', label: constraintKindMeta.ASSUMPTION.label },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={kindFilter === tab.value}
+            onClick={() => setKindFilter(tab.value)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              kindFilter === tab.value
+                ? 'bg-primary text-white'
+                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {tab.label}
+            <span className="ml-1.5 text-xs opacity-70">
+              {tab.value === 'ALL'
+                ? constraints.length
+                : constraints.filter((c) => normalizeConstraintKind(c.kind) === tab.value).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* 一覧 */}
       {loading ? (
         <div className="flex h-[200px] items-center justify-center">
@@ -181,8 +245,11 @@ export default function ConstraintsPage() {
                     <th className="w-10 px-2 py-2 text-left text-xs font-medium text-gray-400">
                       #
                     </th>
+                    <th className="w-28 px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      種別
+                    </th>
                     <th className="min-w-[200px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
-                      制約条件のタイトル
+                      タイトル
                     </th>
                     <th className="w-40 px-3 py-2 text-left text-xs font-semibold text-gray-600">
                       カテゴリ
@@ -197,7 +264,7 @@ export default function ConstraintsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {constraints.map((c, i) => (
+                  {visibleConstraints.map((c, i) => (
                     <ConstraintRow
                       key={c.id}
                       index={i + 1}
@@ -207,13 +274,15 @@ export default function ConstraintsPage() {
                       onError={setError}
                     />
                   ))}
-                  {constraints.length === 0 && (
+                  {visibleConstraints.length === 0 && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="px-4 py-10 text-center text-sm text-gray-400"
                       >
-                        まだ制約条件がありません。上のフォームから追加してください。
+                        {constraints.length === 0
+                          ? 'まだ制約条件・前提条件がありません。上のフォームから追加してください。'
+                          : 'この種別の行はありません。'}
                       </td>
                     </tr>
                   )}
@@ -289,6 +358,22 @@ function ConstraintRow({
     [constraint.id, constraint.title, constraint.category, constraint.description, onChanged, onError],
   );
 
+  // 種別（kind）トグル：クリックで 制約 ⇔ 前提条件 を切り替えて即保存。
+  const kind = normalizeConstraintKind(constraint.kind);
+  const toggleKind = useCallback(async () => {
+    const next: ConstraintKind = kind === 'CONSTRAINT' ? 'ASSUMPTION' : 'CONSTRAINT';
+    setBusy(true);
+    onError(null);
+    try {
+      await constraintApi.update(constraint.id, { kind: next });
+      await onChanged();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : '保存に失敗しました');
+    } finally {
+      setBusy(false);
+    }
+  }, [constraint.id, kind, onChanged, onError]);
+
   // 領域（subProjectId）select は変更即保存。
   const saveSubProject = useCallback(
     async (value: string) => {
@@ -335,11 +420,23 @@ function ConstraintRow({
         </span>
       </td>
       <td className="px-3 py-2">
+        <button
+          type="button"
+          onClick={() => void toggleKind()}
+          disabled={busy}
+          title="クリックで 制約 ⇔ 前提条件 を切り替え"
+          aria-label={`種別を切り替え（現在：${constraintKindMeta[kind].label}）`}
+          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-opacity hover:opacity-75 disabled:opacity-40 ${constraintKindMeta[kind].badge}`}
+        >
+          {constraintKindMeta[kind].label}
+        </button>
+      </td>
+      <td className="px-3 py-2">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={(e) => void saveText('title', e.target.value)}
-          placeholder="制約条件のタイトル"
+          placeholder="タイトル"
           className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-[#050f3e] hover:border-gray-200 focus:border-primary focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </td>

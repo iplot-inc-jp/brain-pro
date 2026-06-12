@@ -14,6 +14,7 @@ export class ConstraintRepositoryImpl implements IConstraintRepository {
     title: string;
     description: string | null;
     category: string | null;
+    kind: string | null;
     order: number;
     subProjectId: string | null;
     createdAt: Date;
@@ -25,6 +26,7 @@ export class ConstraintRepositoryImpl implements IConstraintRepository {
       title: record.title,
       description: record.description,
       category: record.category,
+      kind: record.kind,
       order: record.order,
       subProjectId: record.subProjectId,
       createdAt: record.createdAt,
@@ -55,6 +57,7 @@ export class ConstraintRepositoryImpl implements IConstraintRepository {
         title: constraint.title,
         description: constraint.description,
         category: constraint.category,
+        kind: constraint.kind,
         order: constraint.order,
         createdAt: constraint.createdAt,
         updatedAt: constraint.updatedAt,
@@ -70,6 +73,7 @@ export class ConstraintRepositoryImpl implements IConstraintRepository {
         title: constraint.title,
         description: constraint.description,
         category: constraint.category,
+        kind: constraint.kind,
         order: constraint.order,
         updatedAt: constraint.updatedAt,
       },

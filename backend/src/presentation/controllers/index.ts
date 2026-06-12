@@ -24,3 +24,6 @@ export * from './interest-matrix-row.controller';
 export * from './asis-memo.controller';
 export * from './tobe-vision.controller';
 export * from './tobe-roadmap.controller';
+export * from './project-charter.controller';
+export * from './change-request.controller';
+export * from './lesson-learned.controller';

@@ -58,6 +58,22 @@ export const systemApi = {
 
 // ========== 制約条件（Constraint） ==========
 
+/** 制約の種別: CONSTRAINT=制約 / ASSUMPTION=前提条件。 */
+export type ConstraintKind = 'CONSTRAINT' | 'ASSUMPTION';
+
+export const CONSTRAINT_KINDS: ConstraintKind[] = ['CONSTRAINT', 'ASSUMPTION'];
+
+/** 種別バッジ表示（制約=blue / 前提条件=violet）。 */
+export const constraintKindMeta: Record<ConstraintKind, { label: string; badge: string }> = {
+  CONSTRAINT: { label: '制約', badge: 'border-blue-200 bg-blue-50 text-blue-700' },
+  ASSUMPTION: { label: '前提条件', badge: 'border-violet-200 bg-violet-50 text-violet-700' },
+};
+
+/** 生値を ConstraintKind に正規化する（既存データ＝未設定は制約扱い）。 */
+export function normalizeConstraintKind(raw: string | null | undefined): ConstraintKind {
+  return raw === 'ASSUMPTION' ? 'ASSUMPTION' : 'CONSTRAINT';
+}
+
 export interface ConstraintMaster {
   id: string;
   projectId: string;
@@ -66,6 +82,8 @@ export interface ConstraintMaster {
   title: string;
   description: string | null;
   category: string | null;
+  /** 種別（CONSTRAINT=制約 / ASSUMPTION=前提条件）。既存データは null（=制約扱い）。 */
+  kind?: string | null;
   order: number;
   createdAt: string;
   updatedAt: string;
@@ -79,7 +97,7 @@ export const constraintApi = {
   },
   async create(
     projectId: string,
-    body: { title: string; description?: string | null; category?: string | null; subProjectId?: string | null; order?: number },
+    body: { title: string; description?: string | null; category?: string | null; kind?: ConstraintKind; subProjectId?: string | null; order?: number },
   ): Promise<ConstraintMaster> {
     const res = await fetch(`${API_URL}/api/projects/${projectId}/constraints`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
     if (!res.ok) throw new Error('制約条件の作成に失敗しました');
@@ -87,7 +105,7 @@ export const constraintApi = {
   },
   async update(
     id: string,
-    patch: { title?: string; description?: string | null; category?: string | null; subProjectId?: string | null; order?: number },
+    patch: { title?: string; description?: string | null; category?: string | null; kind?: ConstraintKind; subProjectId?: string | null; order?: number },
   ): Promise<ConstraintMaster> {
     const res = await fetch(`${API_URL}/api/constraints/${id}`, { method: 'PATCH', headers: headers(), body: JSON.stringify(patch) });
     if (!res.ok) throw new Error('制約条件の更新に失敗しました');

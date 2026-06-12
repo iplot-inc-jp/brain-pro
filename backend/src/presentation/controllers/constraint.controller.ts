@@ -17,7 +17,7 @@ import {
   ApiParam,
   ApiProperty,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsInt } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsIn } from 'class-validator';
 import {
   CreateConstraintUseCase,
   GetConstraintsUseCase,
@@ -47,6 +47,15 @@ class CreateConstraintDto {
   @IsString()
   category?: string | null;
 
+  @ApiProperty({
+    description: '種別（CONSTRAINT=制約 / ASSUMPTION=前提条件）',
+    required: false,
+    enum: ['CONSTRAINT', 'ASSUMPTION'],
+  })
+  @IsOptional()
+  @IsIn(['CONSTRAINT', 'ASSUMPTION'])
+  kind?: string;
+
   @ApiProperty({ description: '並び順', required: false })
   @IsOptional()
   @IsInt()
@@ -73,6 +82,15 @@ class UpdateConstraintDto {
   @IsOptional()
   @IsString()
   category?: string | null;
+
+  @ApiProperty({
+    description: '種別（CONSTRAINT=制約 / ASSUMPTION=前提条件）',
+    required: false,
+    enum: ['CONSTRAINT', 'ASSUMPTION'],
+  })
+  @IsOptional()
+  @IsIn(['CONSTRAINT', 'ASSUMPTION'])
+  kind?: string;
 
   @ApiProperty({ description: '並び順', required: false })
   @IsOptional()
@@ -127,6 +145,7 @@ export class ConstraintController {
       title: dto.title,
       description: dto.description,
       category: dto.category,
+      kind: dto.kind,
       order: dto.order,
       subProjectId: dto.subProjectId,
     });
@@ -158,6 +177,7 @@ export class ConstraintByIdController {
       title: dto.title,
       description: dto.description,
       category: dto.category,
+      kind: dto.kind,
       order: dto.order,
       subProjectId: dto.subProjectId,
     });
