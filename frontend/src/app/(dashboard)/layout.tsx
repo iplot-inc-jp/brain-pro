@@ -42,6 +42,7 @@ import {
   Compass,
   Boxes,
   Table2,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -648,6 +649,7 @@ export default function DashboardLayout({
           { name: 'ロードマップ', href: `${base}/roadmap`, icon: MapIcon },
           { name: '要求定義', href: `${base}/requirements`, icon: FileText },
           { name: 'CRUD表', href: `${base}/crud-matrix`, icon: Grid3X3 },
+          { name: 'AI作成', href: `${base}/ai-create`, icon: Sparkles },
         ],
       },
       {

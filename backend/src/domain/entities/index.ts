@@ -39,3 +39,4 @@ export * from './asis-memo.entity';
 export * from './tobe-vision.entity';
 export * from './tobe-roadmap.entity';
 export * from './roadmap-phase.entity';
+export * from './kpi.entity';

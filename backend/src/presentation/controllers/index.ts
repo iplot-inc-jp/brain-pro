@@ -28,3 +28,4 @@ export * from './tobe-roadmap.controller';
 export * from './project-charter.controller';
 export * from './change-log.controller';
 export * from './adoption-status.controller';
+export * from './kpi.controller';

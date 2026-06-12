@@ -21,6 +21,8 @@ import {
   IsObject,
   IsArray,
   ValidateNested,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -593,10 +595,14 @@ class CreateFlowSnapshotDto {
 // ===== 注釈（付箋・コメント）DTOs =====
 
 class CreateFlowAnnotationDto {
-  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT', 'ICON'], required: false })
+  @ApiProperty({
+    description: '注釈種別',
+    enum: ['STICKY', 'COMMENT', 'ICON', 'SCOPE'],
+    required: false,
+  })
   @IsOptional()
-  @IsIn(['STICKY', 'COMMENT', 'ICON'])
-  kind?: 'STICKY' | 'COMMENT' | 'ICON';
+  @IsIn(['STICKY', 'COMMENT', 'ICON', 'SCOPE'])
+  kind?: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
 
   @IsOptional()
   @IsString()
@@ -629,13 +635,38 @@ class CreateFlowAnnotationDto {
   @IsOptional()
   @IsString()
   icon?: string | null;
+
+  @ApiProperty({
+    description: '枠線スタイル（kind=SCOPEのとき）',
+    enum: ['dashed', 'solid'],
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(['dashed', 'solid'])
+  borderStyle?: 'dashed' | 'solid' | null;
+
+  @ApiProperty({
+    description: '背景塗りの不透明度 0〜1（kind=SCOPEのとき）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  fillOpacity?: number | null;
 }
 
 class UpdateFlowAnnotationDto {
-  @ApiProperty({ description: '注釈種別', enum: ['STICKY', 'COMMENT', 'ICON'], required: false })
+  @ApiProperty({
+    description: '注釈種別',
+    enum: ['STICKY', 'COMMENT', 'ICON', 'SCOPE'],
+    required: false,
+  })
   @IsOptional()
-  @IsIn(['STICKY', 'COMMENT', 'ICON'])
-  kind?: 'STICKY' | 'COMMENT' | 'ICON';
+  @IsIn(['STICKY', 'COMMENT', 'ICON', 'SCOPE'])
+  kind?: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
 
   @IsOptional()
   @IsString()
@@ -668,6 +699,27 @@ class UpdateFlowAnnotationDto {
   @IsOptional()
   @IsString()
   icon?: string | null;
+
+  @ApiProperty({
+    description: '枠線スタイル（kind=SCOPEのとき）',
+    enum: ['dashed', 'solid'],
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsIn(['dashed', 'solid'])
+  borderStyle?: 'dashed' | 'solid' | null;
+
+  @ApiProperty({
+    description: '背景塗りの不透明度 0〜1（kind=SCOPEのとき）',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  fillOpacity?: number | null;
 }
 
 @ApiTags('Business Flows')
@@ -759,6 +811,14 @@ export class BusinessFlowController {
       where: { flowId: id },
       include: {
         informationType: { select: { id: true, name: true, category: true } },
+        apiLinks: {
+          include: {
+            apiEndpoint: {
+              select: { id: true, method: true, path: true, summary: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -841,6 +901,14 @@ export class BusinessFlowController {
               category: e.informationType.category,
             }
           : null,
+        // この矢印に紐づくAPIエンドポイント（FlowEdgeApiLink）
+        apiLinks: e.apiLinks.map((l) => ({
+          id: l.id,
+          apiEndpointId: l.apiEndpointId,
+          method: l.apiEndpoint.method,
+          path: l.apiEndpoint.path,
+          summary: l.apiEndpoint.summary,
+        })),
       })),
       children: children.map((c) => this.toResponse(c)),
       breadcrumbs,
@@ -1107,6 +1175,14 @@ export class BusinessFlowController {
       },
       include: {
         informationType: { select: { id: true, name: true, category: true } },
+        apiLinks: {
+          include: {
+            apiEndpoint: {
+              select: { id: true, method: true, path: true, summary: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
     });
 
@@ -1155,6 +1231,14 @@ export class BusinessFlowController {
       data,
       include: {
         informationType: { select: { id: true, name: true, category: true } },
+        apiLinks: {
+          include: {
+            apiEndpoint: {
+              select: { id: true, method: true, path: true, summary: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
     });
 
@@ -1196,6 +1280,14 @@ export class BusinessFlowController {
       data,
       include: {
         informationType: { select: { id: true, name: true, category: true } },
+        apiLinks: {
+          include: {
+            apiEndpoint: {
+              select: { id: true, method: true, path: true, summary: true },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
       },
     });
 
@@ -1594,6 +1686,8 @@ export class BusinessFlowController {
         height: dto.height ?? null,
         color: dto.color ?? null,
         icon: dto.icon ?? null,
+        borderStyle: dto.borderStyle ?? null,
+        fillOpacity: dto.fillOpacity ?? null,
       },
     });
 
@@ -1612,7 +1706,7 @@ export class BusinessFlowController {
     await this.assertFlowMembership(flowId, user.id);
 
     const data: {
-      kind?: 'STICKY' | 'COMMENT' | 'ICON';
+      kind?: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
       text?: string;
       positionX?: number;
       positionY?: number;
@@ -1620,6 +1714,8 @@ export class BusinessFlowController {
       height?: number | null;
       color?: string | null;
       icon?: string | null;
+      borderStyle?: string | null;
+      fillOpacity?: number | null;
     } = {};
     if (dto.kind !== undefined) data.kind = dto.kind;
     if (dto.text !== undefined) data.text = dto.text;
@@ -1629,6 +1725,8 @@ export class BusinessFlowController {
     if (dto.height !== undefined) data.height = dto.height;
     if (dto.color !== undefined) data.color = dto.color;
     if (dto.icon !== undefined) data.icon = dto.icon;
+    if (dto.borderStyle !== undefined) data.borderStyle = dto.borderStyle;
+    if (dto.fillOpacity !== undefined) data.fillOpacity = dto.fillOpacity;
 
     const updated = await this.prisma.flowAnnotation.update({
       where: { id },
@@ -1662,6 +1760,8 @@ export class BusinessFlowController {
     height: number | null;
     color: string | null;
     icon: string | null;
+    borderStyle: string | null;
+    fillOpacity: number | null;
     order: number;
     createdAt: Date;
     updatedAt: Date;
@@ -1676,6 +1776,8 @@ export class BusinessFlowController {
       height: a.height,
       color: a.color,
       icon: a.icon,
+      borderStyle: a.borderStyle,
+      fillOpacity: a.fillOpacity,
       order: a.order,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
@@ -1696,6 +1798,16 @@ export class BusinessFlowController {
     labelT?: number | null;
     infoT?: number | null;
     informationType?: { id: string; name: string; category: string } | null;
+    apiLinks?: Array<{
+      id: string;
+      apiEndpointId: string;
+      apiEndpoint: {
+        id: string;
+        method: string;
+        path: string;
+        summary: string | null;
+      };
+    }>;
   }) {
     return {
       id: e.id,
@@ -1717,6 +1829,14 @@ export class BusinessFlowController {
             category: e.informationType.category,
           }
         : null,
+      // この矢印に紐づくAPIエンドポイント（FlowEdgeApiLink）
+      apiLinks: (e.apiLinks ?? []).map((l) => ({
+        id: l.id,
+        apiEndpointId: l.apiEndpointId,
+        method: l.apiEndpoint.method,
+        path: l.apiEndpoint.path,
+        summary: l.apiEndpoint.summary,
+      })),
     };
   }
 

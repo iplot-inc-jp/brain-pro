@@ -16,7 +16,8 @@ export async function api<T>(
   }
 
   if (auth) {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    // login/register が保存するキーは 'accessToken'（'token' は誤りで常に未認証になる）
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
     if (token) {
       (requestHeaders as Record<string, string>)['Authorization'] = `Bearer ${token}`
     }
@@ -244,6 +245,38 @@ export const flowEdgesApi = {
     }),
   delete: (id: string) => api<void>(`/flow-edges/${id}`, { method: 'DELETE' }),
 }
+
+// ===== 業務フローの矢印 × API 紐づけ =====
+
+/** 矢印に紐づくAPIエンドポイント（FlowEdgeApiLink のレスポンス形）。 */
+export type EdgeApiLink = {
+  id: string
+  apiEndpointId: string
+  method: string
+  path: string
+  summary?: string | null
+}
+
+/** コード抽出で登録された API エンドポイント（GET /projects/:projectId/api-endpoints）。 */
+export type ApiEndpointItem = {
+  id: string
+  projectId: string
+  method: string
+  path: string
+  summary?: string | null
+  sourceFile?: string | null
+}
+
+/** 矢印に紐づくAPIエンドポイントを全置換する（PUT /flow-edges/:id/api-links）。 */
+export const updateEdgeApiLinks = (edgeId: string, apiEndpointIds: string[]) =>
+  api<EdgeApiLink[]>(`/flow-edges/${edgeId}/api-links`, {
+    method: 'PUT',
+    body: JSON.stringify({ apiEndpointIds }),
+  })
+
+/** プロジェクトのAPIエンドポイント一覧を取得する（GET /projects/:projectId/api-endpoints）。 */
+export const listApiEndpoints = (projectId: string) =>
+  api<ApiEndpointItem[]>(`/projects/${projectId}/api-endpoints`)
 
 // Export
 export const exportApi = {

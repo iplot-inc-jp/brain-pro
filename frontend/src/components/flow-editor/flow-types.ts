@@ -90,6 +90,19 @@ export type FlowSummary = {
   asisFlowId?: string | null;
 };
 
+/**
+ * 矢印（エッジ）に紐づくAPIエンドポイント（FlowEdgeApiLink）。
+ * GET business-flows/:id のエッジに `apiLinks` として含まれる。
+ * PUT /flow-edges/:id/api-links（updateEdgeApiLinks）で全置換できる。
+ */
+export type FlowEdgeApiLink = {
+  id: string;
+  apiEndpointId: string;
+  method: string;
+  path: string;
+  summary?: string | null;
+};
+
 export type FlowDataEdge = {
   id: string;
   sourceNodeId: string;
@@ -114,6 +127,8 @@ export type FlowDataEdge = {
   labelT?: number | null;
   /** 運ぶ情報チップのパス上位置（0〜1 の割合。未設定=0.5 中央）。 */
   infoT?: number | null;
+  /** この矢印に紐づくAPIエンドポイント（GET フロー詳細に含まれる）。 */
+  apiLinks?: FlowEdgeApiLink[];
 };
 
 export type FlowData = {
@@ -152,8 +167,11 @@ export type FlowNodeData = {
  */
 export type FlowAnnotation = {
   id: string;
-  /** STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）, ICON=アイコン注釈（透明背景）。 */
-  kind: 'STICKY' | 'COMMENT' | 'ICON';
+  /**
+   * STICKY=付箋（黄色）, COMMENT=コメント（白＋吹き出し風）, ICON=アイコン注釈（透明背景）,
+   * SCOPE=スコープ囲み（業務領域を点線/背景色つき矩形で囲う）。
+   */
+  kind: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
   text: string;
   positionX: number;
   positionY: number;
@@ -164,5 +182,9 @@ export type FlowAnnotation = {
   color?: string | null;
   /** kind==='ICON' のとき表示する lucide アイコン名（ICON_MAP のキー）。 */
   icon?: string | null;
+  /** kind==='SCOPE' のときの枠線スタイル（'dashed' | 'solid'）。未設定は dashed 扱い。 */
+  borderStyle?: 'dashed' | 'solid' | null;
+  /** kind==='SCOPE' のときの背景塗りの不透明度（0〜1）。未設定は薄め既定。 */
+  fillOpacity?: number | null;
   order: number;
 };

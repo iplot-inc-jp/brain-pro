@@ -42,6 +42,7 @@ import {
   TOBE_VISION_REPOSITORY,
   TOBE_ROADMAP_REPOSITORY,
   ROADMAP_PHASE_REPOSITORY,
+  KPI_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -223,6 +224,14 @@ import {
   GetRoadmapPhasesUseCase,
   UpdateRoadmapPhaseUseCase,
   DeleteRoadmapPhaseUseCase,
+  // KPI（業務KPI・AI精度KPI）
+  ListKpisUseCase,
+  CreateKpiUseCase,
+  UpdateKpiUseCase,
+  DeleteKpiUseCase,
+  SetKpiInformationTypesUseCase,
+  GetFlowIoSummaryUseCase,
+  GenerateKpisUseCase,
 } from './application';
 
 // Infrastructure
@@ -264,6 +273,7 @@ import {
   TobeVisionRepositoryImpl,
   TobeRoadmapRepositoryImpl,
   RoadmapPhaseRepositoryImpl,
+  KpiRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
 } from './infrastructure';
@@ -320,6 +330,7 @@ import {
   ChangeLogController,
   AdoptionStatusController,
   AdoptionStatusByIdController,
+  KpiController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -450,6 +461,7 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     ChangeLogController,
     AdoptionStatusController,
     AdoptionStatusByIdController,
+    KpiController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -606,6 +618,10 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: ROADMAP_PHASE_REPOSITORY,
       useClass: RoadmapPhaseRepositoryImpl,
+    },
+    {
+      provide: KPI_REPOSITORY,
+      useClass: KpiRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -784,6 +800,14 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     GetRoadmapPhasesUseCase,
     UpdateRoadmapPhaseUseCase,
     DeleteRoadmapPhaseUseCase,
+    // KPI（業務KPI・AI精度KPI）
+    ListKpisUseCase,
+    CreateKpiUseCase,
+    UpdateKpiUseCase,
+    DeleteKpiUseCase,
+    SetKpiInformationTypesUseCase,
+    GetFlowIoSummaryUseCase,
+    GenerateKpisUseCase,
 
     // ========== Services ==========
     ClaudeService,

@@ -62,6 +62,47 @@ export interface IssueNodeSuggestion {
   kind: string;
 }
 
+/**
+ * KPI生成（GenerateKpisUseCase）の入力コンテキスト
+ */
+export interface GenerateKpisContext {
+  /** KPI区分: 業務KPI（BUSINESS）/ AI精度KPI（AI_QUALITY） */
+  category: 'BUSINESS' | 'AI_QUALITY';
+  /** 対象業務フロー名（任意） */
+  flowName?: string | null;
+  /** 対象フローの種別（ASIS | TOBE。任意） */
+  flowKind?: string | null;
+  /** 対象システム名（AI_QUALITY時。任意） */
+  systemName?: string | null;
+  /** 測定対象の情報種別（名前＋帳票/情報/物体の別） */
+  informationTypes: Array<{ name: string; categoryLabel: string }>;
+  /** ユーザーからの追加指示（任意） */
+  instructions?: string | null;
+  /** 生成件数 */
+  count: number;
+}
+
+/**
+ * 生成AIが返すKPI候補（1件分。値の妥当化は呼び出し側で行う）
+ */
+export interface GeneratedKpiItem {
+  name: string;
+  description?: string | null;
+  definition?: string | null;
+  unit?: string | null;
+  direction?: string | null;
+  frequency?: string | null;
+  baselineValue?: number | null;
+  targetValue?: number | null;
+  measurementMethod?: string | null;
+  smartSpecific?: number | null;
+  smartMeasurable?: number | null;
+  smartAchievable?: number | null;
+  smartRelevant?: number | null;
+  smartTimeBound?: number | null;
+  smartComment?: string | null;
+}
+
 @Injectable()
 export class ClaudeService {
   private getClient(apiKey: string): Anthropic {
@@ -110,7 +151,7 @@ export class ClaudeService {
 4. 必ず有効なJSONのみを出力する（説明文は不要）`;
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: this.defaultModel(),
       max_tokens: 8192,
       messages: [
         {
@@ -157,7 +198,7 @@ ${naturalLanguageText}`,
     const client = this.getClient(apiKey);
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: this.defaultModel(),
       max_tokens: 4096,
       messages: [
         {
@@ -229,7 +270,7 @@ ${naturalLanguageText}`,
 7. 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
 
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: this.defaultModel(),
       max_tokens: 8192,
       messages: [
         {
@@ -394,6 +435,139 @@ ${mermaid}`,
       console.error('JSON parse error:', textContent.text);
       throw new Error('AI候補の解析に失敗しました');
     }
+  }
+
+  /**
+   * KPI候補を生成する（1回呼び出し＋コードフェンス除去＋JSON.parse）。
+   * 解析失敗時は throw する。リトライは呼び出し側（GenerateKpisUseCase）が行う。
+   */
+  async generateKpis(
+    context: GenerateKpisContext,
+    apiKey: string,
+  ): Promise<GeneratedKpiItem[]> {
+    const client = this.getClient(apiKey);
+
+    const aiQualityGuide = `
+このリクエストは「AI精度KPI（AI_QUALITY）」の生成です。
+業務KPI（売上・リードタイム・欠品率などの業務成果指標）ではなく、導入するAI/システム**自体の品質・精度**を測る指標を提案してください。
+必ず以下の精度指標の観点を踏まえること：
+- 認識精度（OCR/画像認識/音声認識などの正答率）
+- 適合率（Precision）/ 再現率（Recall）/ F1スコア
+- 誤り率（誤認識率・誤分類率）
+- 自動化率（人手を介さず処理が完結した割合）
+- 人手修正率（AI出力を人が修正した割合）
+- AI提案採用率（AIの提案がそのまま採用された割合）
+- 処理時間（1件あたりの推論・処理時間）
+- 予測誤差（MAPE・RMSE などの予測精度）`;
+
+    const businessGuide = `
+このリクエストは「業務KPI（BUSINESS）」の生成です。
+対象業務フローの改善効果を測る業務成果指標（処理時間・件数・エラー率・コスト・リードタイム・欠品率など）を提案してください。`;
+
+    const systemPrompt = `あなたは業務改善・AI導入プロジェクトのKPI設計の専門家です。
+与えられたコンテキスト（業務フロー・情報種別・システム）に基づき、SMART原則（Specific/Measurable/Achievable/Relevant/Time-bound）を意識したKPI候補を提案してください。
+${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
+
+出力は必ず以下のJSON配列のみを返してください（説明文・コードフェンス以外の文章は不要）：
+[
+  {
+    "name": "KPI名（簡潔に・日本語）",
+    "description": "KPIの説明（何を測るか・なぜ重要か）",
+    "definition": "計算式（例: 欠品率 = 欠品件数 / 発注明細数）",
+    "unit": "単位（% / 件 / 分 / 円 など）",
+    "direction": "INCREASE | DECREASE | MAINTAIN",
+    "frequency": "DAILY | WEEKLY | MONTHLY | QUARTERLY",
+    "baselineValue": 現状値の数値（不明なら省略可）,
+    "targetValue": 目標値の数値（不明なら省略可）,
+    "measurementMethod": "測定方法・データソース（どのデータからどう算出するか）",
+    "smartSpecific": 0〜5の整数,
+    "smartMeasurable": 0〜5の整数,
+    "smartAchievable": 0〜5の整数,
+    "smartRelevant": 0〜5の整数,
+    "smartTimeBound": 0〜5の整数,
+    "smartComment": "SMART評価の講評（改善点があれば指摘）"
+  }
+]
+
+ルール：
+1. 候補は必ず ${context.count} 件提案する。
+2. direction は「増やすほど良い指標なら INCREASE、減らすほど良いなら DECREASE、維持すべきなら MAINTAIN」。
+3. measurementMethod には与えられた情報種別（帳票・データ）をデータソースとして活用する。
+4. smart の5軸は自己採点（0〜5の整数）し、smartComment に講評を書く。
+5. 必ず有効なJSONのみを出力する。`;
+
+    const lines: string[] = [];
+    lines.push(
+      `KPI区分: ${context.category === 'AI_QUALITY' ? 'AI精度KPI（AIシステム自体の品質指標）' : '業務KPI（業務改善の成果指標）'}`,
+    );
+    if (context.flowName) {
+      const kindLabel =
+        context.flowKind === 'TOBE' ? 'TOBE（あるべき姿）' : context.flowKind === 'ASIS' ? 'ASIS（現状）' : context.flowKind ?? '';
+      lines.push(`対象業務フロー: ${context.flowName}${kindLabel ? `（${kindLabel}）` : ''}`);
+    }
+    if (context.systemName) {
+      lines.push(`対象システム: ${context.systemName}`);
+    }
+    if (context.informationTypes.length > 0) {
+      lines.push('測定対象の情報種別（INPUT/OUTPUT）:');
+      for (const it of context.informationTypes) {
+        lines.push(`- ${it.name}（${it.categoryLabel}）`);
+      }
+    }
+    if (context.instructions && context.instructions.trim().length > 0) {
+      lines.push(`追加指示: ${context.instructions.trim()}`);
+    }
+    lines.push('');
+    lines.push(`上記のコンテキストに対するKPI候補を ${context.count} 件、JSON配列で提案してください。`);
+
+    const response = await client.messages.create({
+      model: this.defaultModel(),
+      max_tokens: 8192,
+      messages: [
+        {
+          role: 'user',
+          content: lines.join('\n'),
+        },
+      ],
+      system: systemPrompt,
+    });
+
+    const textContent = response.content.find((c) => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    // コードフェンス除去 + JSON.parse（失敗時は throw → 呼び出し側で1リトライ）
+    let jsonText = textContent.text;
+    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1];
+    }
+    jsonText = jsonText.trim();
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      // フェンス無しで前後に説明文が混ざるケース：最初の '[' 〜 最後の ']' を抽出して再試行
+      const start = jsonText.indexOf('[');
+      const end = jsonText.lastIndexOf(']');
+      if (start < 0 || end <= start) {
+        throw new Error('KPI候補の解析に失敗しました（JSON配列が見つかりません）');
+      }
+      parsed = JSON.parse(jsonText.slice(start, end + 1));
+    }
+
+    const raw: unknown = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.kpis)
+        ? parsed.kpis
+        : null;
+    // 想定外ラッパー（{"items": [...]} 等）や空配列は throw して呼び出し側のリトライを発火させる
+    if (!Array.isArray(raw) || raw.length === 0) {
+      throw new Error('KPI候補の解析に失敗しました（候補配列が空または形式不正です）');
+    }
+    return raw as GeneratedKpiItem[];
   }
 }
 

@@ -42,7 +42,12 @@ import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
 import { dfdApi, informationTypeApi, type DfdDiagram, type DfdNode as DfdNodeModel, type DfdFlow as DfdFlowModel, type DfdNodeKind, type InformationType, type InformationCategory } from '@/lib/dfd';
 import { systemApi, type SystemMaster } from '@/lib/masters';
-import { type RoleType } from '@/lib/api';
+import {
+  type RoleType,
+  type ApiEndpointItem,
+  listApiEndpoints,
+  updateEdgeApiLinks,
+} from '@/lib/api';
 import type {
   FlowAnnotation,
   FlowData,
@@ -811,6 +816,8 @@ export default function ProjectFlowDetailPage() {
   const [systems, setSystems] = useState<SystemMaster[]>([]);
   // 注釈（付箋・コメント）。flowData.nodes/edges とは別系統で扱う（整形/転置/Undo-Redo 対象外）。
   const [annotations, setAnnotations] = useState<FlowAnnotation[]>([]);
+  // プロジェクトの API エンドポイント一覧（矢印×API 紐づけの選択肢。コードカタログで抽出済み）。
+  const [apiEndpoints, setApiEndpoints] = useState<ApiEndpointItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -945,6 +952,15 @@ export default function ProjectFlowDetailPage() {
     }
   }, [projectId]);
 
+  // プロジェクトの API エンドポイント一覧（矢印×API 紐づけセクションの選択肢）
+  const fetchApiEndpoints = useCallback(async () => {
+    try {
+      setApiEndpoints(await listApiEndpoints(projectId));
+    } catch {
+      /* API一覧の取得失敗は致命ではない（API セクションの選択肢が空になるだけ） */
+    }
+  }, [projectId]);
+
   // 初期読み込み
   useEffect(() => {
     if (flowId) {
@@ -964,6 +980,10 @@ export default function ProjectFlowDetailPage() {
   useEffect(() => {
     if (projectId) fetchSystems();
   }, [projectId, fetchSystems]);
+
+  useEffect(() => {
+    if (projectId) fetchApiEndpoints();
+  }, [projectId, fetchApiEndpoints]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -1105,6 +1125,31 @@ export default function ProjectFlowDetailPage() {
       }
     },
     [flowData, fetchFlowData, getHeaders]
+  );
+
+  // 矢印×API 紐づけの全置換保存（PUT /flow-edges/:id/api-links）。
+  // 成功時はレスポンスのリンク一覧で flowData.edges[].apiLinks を楽観更新し、
+  // 再取得のちらつき（キャンバス全体の再描画）を避ける。失敗時はサーバ状態へ戻す。
+  const handleSaveEdgeApiLinks = useCallback(
+    async (edgeId: string, apiEndpointIds: string[]) => {
+      try {
+        const links = await updateEdgeApiLinks(edgeId, apiEndpointIds);
+        setFlowData((prev) =>
+          prev
+            ? {
+                ...prev,
+                edges: prev.edges.map((e) =>
+                  e.id === edgeId ? { ...e, apiLinks: links } : e
+                ),
+              }
+            : prev
+        );
+      } catch (err) {
+        console.error('Failed to update edge api links:', err);
+        if (flowData) fetchFlowData(flowData.id, true);
+      }
+    },
+    [flowData, fetchFlowData]
   );
 
   // ノードロール更新
@@ -1811,6 +1856,10 @@ export default function ProjectFlowDetailPage() {
         height?: number;
         color?: string | null;
         icon?: string | null;
+        /** kind==='SCOPE' の枠線スタイル（点線/実線）。 */
+        borderStyle?: 'dashed' | 'solid';
+        /** kind==='SCOPE' の背景塗り不透明度（0〜1）。 */
+        fillOpacity?: number;
       }
     ) => {
       if (!flowData) return;
@@ -2455,6 +2504,8 @@ export default function ProjectFlowDetailPage() {
           onAddAnnotation={handleAddAnnotation}
           onUpdateAnnotation={handleUpdateAnnotation}
           onDeleteAnnotation={handleDeleteAnnotation}
+          apiEndpoints={apiEndpoints}
+          onSaveEdgeApiLinks={handleSaveEdgeApiLinks}
         />
       </div>
 

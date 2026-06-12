@@ -34,6 +34,8 @@ import {
   ScrollText,
   History,
   ChevronRight,
+  Sparkles,
+  Grid3X3,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -313,6 +315,63 @@ function buildSections(base: string): GuideSection[] {
         },
       ],
       manualKeys: ['asis-tobe', 'flows'],
+    },
+    {
+      badge: 'フロー編集',
+      title: '業務フローキャンバスの新機能',
+      accent: '#0ea5e9',
+      summary:
+        'ASIS/TOBE の業務フローキャンバスに、スコープ囲み・メモ（付箋）・DB/人アイコン・矢印へのAPI紐づけが加わりました。フローを「業務の説明図」としてだけでなく、システム設計（CRUD表のAPI）とつながる設計図として使えます。',
+      links: [
+        {
+          name: 'ASIS管理',
+          href: `${base}/asis`,
+          description: '現状フローのキャンバスで新機能を使えます',
+          icon: ClipboardList,
+        },
+        {
+          name: 'TOBE管理',
+          href: `${base}/tobe`,
+          description: 'あるべき姿フローのキャンバスでも同じ機能を使えます',
+          icon: Target,
+        },
+        {
+          name: 'CRUD表',
+          href: `${base}/crud-matrix`,
+          description: '矢印に紐づけるAPIエンドポイントはCRUD表で管理します',
+          icon: Grid3X3,
+        },
+      ],
+      manualKeys: [],
+      steps: [
+        'スコープ囲み: まとまりのある業務領域を点線枠＋背景色の矩形で囲って見える化します。枠線スタイル（実線/点線）と背景色の濃さは編集パネルで変更できます。',
+        'メモ（付箋）: 補足・申し送り・検討メモを付箋としてキャンバスの好きな位置に置けます。',
+        'DB/人アイコン: データベース（データの所在）や人（フロー外の登場人物）を表すアイコンをキャンバスに配置し、フローの文脈を補足します。',
+        '矢印へのAPI紐づけ: システム⇄人をまたぐ矢印を選択すると、CRUD表のAPIエンドポイントを複数紐づけられます。どの業務のやり取りがどのAPIで実現されるかをフロー上で確認できます。',
+      ],
+    },
+    {
+      badge: 'AI作成',
+      title: 'AI作成（業務KPI・AI精度KPI）',
+      accent: '#db2777',
+      summary:
+        '業務フローを起点に、AI が業務KPI を生成します。各KPIには SMART の5軸採点が付き、AI精度KPI（認識精度・自動化率など）は対象システムに紐づけて、baseline / target / current と達成率で継続的に管理します。',
+      links: [
+        {
+          name: 'AI作成',
+          href: `${base}/ai-create`,
+          description: '業務フローからAIが業務KPI・AI精度KPIを生成します',
+          icon: Sparkles,
+        },
+      ],
+      manualKeys: [],
+      steps: [
+        '対象の業務フローを選びます。',
+        'フロー上の INPUT/OUTPUT・帳票を複数選択します。種別（帳票/データ/物体）の紐づけはその場で変更できます。',
+        'AI が業務KPI を生成します。各KPIには SMART（Specific / Measurable / Achievable / Relevant / Time-bound）の5軸採点とコメントが付くので、KPIの質をその場で確認できます。',
+        'AI精度KPI（認識精度・自動化率などのプリセット、またはAI生成）は対象システムに紐づけて登録します。',
+        '各KPIは baseline（現状値）・target（目標値）・current（最新値）と達成率で管理し、測定頻度（日次/週次/月次/四半期）と測定方法・オーナー（ロール）を設定して運用します。',
+      ],
     },
     {
       badge: 'STEP 3',

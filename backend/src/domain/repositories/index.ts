@@ -34,3 +34,4 @@ export * from './asis-memo.repository';
 export * from './tobe-vision.repository';
 export * from './tobe-roadmap.repository';
 export * from './roadmap-phase.repository';
+export * from './kpi.repository';

@@ -38,6 +38,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   NodeResizer,
+  NodeToolbar,
   getSmoothStepPath,
   getBezierPath,
   getStraightPath,
@@ -101,6 +102,9 @@ import {
   Smile,
   MousePointer2,
   Hand,
+  BoxSelect,
+  Plug,
+  Search,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -136,6 +140,17 @@ export type FlowOrientation = 'horizontal' | 'vertical';
 
 /** ロールの人/システム区分（@/lib/api の RoleType と同値）。 */
 export type RoleType = 'HUMAN' | 'SYSTEM' | 'OTHER';
+
+/**
+ * 矢印に紐づけられる API エンドポイントの選択肢（@/lib/api の ApiEndpointItem と互換）。
+ * コンポーネントを lib/api に依存させないため、必要なフィールドだけ局所定義する。
+ */
+export type ApiEndpointOption = {
+  id: string;
+  method: string;
+  path: string;
+  summary?: string | null;
+};
 
 /** ロール種別 → レーンヘッダーに出すアイコン（人/システム/中立）。 */
 function roleTypeIcon(type: string | undefined): typeof User {
@@ -388,10 +403,26 @@ export interface SwimlaneCanvasProps {
       height?: number;
       color?: string | null;
       icon?: string | null;
+      /** kind==='SCOPE' の枠線スタイル（点線/実線）。 */
+      borderStyle?: 'dashed' | 'solid';
+      /** kind==='SCOPE' の背景塗り不透明度（0〜1）。 */
+      fillOpacity?: number;
     },
   ) => void;
   /** 注釈を削除する（ホバー時の ✕）。 */
   onDeleteAnnotation?: (id: string) => void;
+  // --- 矢印 × API エンドポイント紐づけ ---
+  /**
+   * プロジェクトの API エンドポイント一覧（コードカタログで抽出済みのもの）。
+   * エッジ編集パネルの「API」セクションの選択肢として使う。
+   */
+  apiEndpoints?: ApiEndpointOption[];
+  /**
+   * 矢印に紐づく API エンドポイントを全置換保存する。
+   * ページ側が PUT /flow-edges/:id/api-links（updateEdgeApiLinks）で永続化し、
+   * flowData.edges[].apiLinks を更新する。
+   */
+  onSaveEdgeApiLinks?: (edgeId: string, apiEndpointIds: string[]) => Promise<void> | void;
   /**
    * 比較ビュー等で、自前のツールバー（右上）/全画面ボタン/IO候補パネル（左サイド）/
    * 左上パンくずバッジを隠す閲覧用埋め込みモード。
@@ -699,6 +730,8 @@ function EditableEdge({
     onInsertNode?: (id: string) => void;
     /** この矢印が運ぶ情報種別名（チップ表示用）。未設定なら表示しない。 */
     informationTypeName?: string | null;
+    /** この矢印に紐づく API エンドポイント数（>0 でパス中央付近に「API n」バッジを出す）。 */
+    apiLinkCount?: number;
     /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
     onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
     /** 先端をノードから離れた場所にドロップした時、矢印自体を削除する。 */
@@ -899,6 +932,28 @@ function EditableEdge({
             </span>
           </div>
         )}
+        {/* 紐づくAPIのバッジ: パス中央付近に小さく「API n」。クリックで矢印を選択（編集パネルでAPI編集）。 */}
+        {(data?.apiLinkCount ?? 0) > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${insertPt.x}px,${insertPt.y + 16}px)`,
+              pointerEvents: 'all',
+            }}
+            className="nodrag nopan cursor-pointer"
+            onClick={handleSelectClick}
+            title="このやり取りに紐づくAPI（クリックで選択して編集）"
+          >
+            <span
+              className={`inline-flex items-center gap-0.5 rounded-full border bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700 shadow-sm ${
+                selected ? 'border-violet-400' : 'border-violet-200'
+              }`}
+            >
+              <Plug className="h-2.5 w-2.5" />
+              API {data?.apiLinkCount}
+            </span>
+          </div>
+        )}
         {/* エッジ中点の「＋」: クリックでこの接続線の途中にノードを挿入。実際のパス中心に置く。 */}
         {data?.onInsertNode && (
           <button
@@ -1087,16 +1142,51 @@ type AnnotationNodeData = {
   color?: string | null;
   /** kind==='ICON' のとき表示する lucide アイコン名（ICON_MAP のキー）。 */
   icon?: string | null;
+  /** kind==='SCOPE' のときの枠線スタイル（未設定は dashed 扱い）。 */
+  borderStyle?: 'dashed' | 'solid' | null;
+  /** kind==='SCOPE' のときの背景塗りの不透明度（0〜1。未設定は既定 0.08）。 */
+  fillOpacity?: number | null;
   onUpdateText?: (id: string, text: string) => void;
   onDelete?: (id: string) => void;
   /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
   onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
+  /** kind==='SCOPE' の枠スタイル/色/塗りを更新する（選択時の編集ポップ）。 */
+  onUpdateStyle?: (
+    id: string,
+    patch: { color?: string; borderStyle?: 'dashed' | 'solid'; fillOpacity?: number },
+  ) => void;
 };
 
 const ANNOTATION_W = 200;
 const ANNOTATION_MIN_H = 96;
 // アイコン注釈ノードの一辺（透明背景の小ノード。h-8 w-8 のアイコンを中央に置く）。
 const ICON_ANNOTATION_SIZE = 40;
+// スコープ囲み（kind==='SCOPE'）の既定サイズ・色・塗り。ノード群を囲える広めの矩形で生成する。
+const SCOPE_DEFAULT_W = 320;
+const SCOPE_DEFAULT_H = 200;
+const SCOPE_DEFAULT_COLOR = '#6366f1';
+const SCOPE_DEFAULT_FILL_OPACITY = 0.08;
+// スコープの色プリセット（選択時の編集ポップ）。
+const SCOPE_COLOR_PRESETS = [
+  '#6366f1',
+  '#3b82f6',
+  '#0ea5e9',
+  '#14b8a6',
+  '#22c55e',
+  '#eab308',
+  '#f97316',
+  '#ef4444',
+  '#ec4899',
+  '#64748b',
+];
+
+/** #rrggbb → rgba(r,g,b,alpha)。スコープの背景塗り（色×不透明度）に使う。 */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return `rgba(99,102,241,${alpha})`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 // アイコン注釈で選べる固定パレット（lucide 名）。順序がパレットの並び。
 const ICON_PALETTE = [
@@ -1112,6 +1202,8 @@ const ICON_PALETTE = [
   'Target',
   'Lightbulb',
   'Ban',
+  'Database',
+  'User',
 ] as const;
 
 // アイコン名 → lucide コンポーネント。AnnotationNode / パレット双方で参照する。
@@ -1128,6 +1220,9 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Target,
   Lightbulb,
   Ban,
+  // ツールバーのプリセット（DB / 人）からワンクリック配置する lucide アイコン。
+  Database,
+  User,
 };
 
 // アイコン注釈の既定色（未指定 icon のフォールバックも含む）。
@@ -1144,7 +1239,15 @@ function AnnotationNode({
 }) {
   const isSticky = data.kind === 'STICKY';
   const isIcon = data.kind === 'ICON';
+  const isScope = data.kind === 'SCOPE';
   const [value, setValue] = useState(data.text ?? '');
+  // スコープのラベル（左上）はダブルクリックで input 編集に切り替える。
+  const [editingLabel, setEditingLabel] = useState(false);
+  // 塗りスライダーのドラッグ中ライブ値（pointerup で永続化。props 反映までちらつかせない）。
+  const [liveFill, setLiveFill] = useState<number | null>(null);
+  useEffect(() => {
+    setLiveFill(null);
+  }, [data.fillOpacity]);
   // 外部（再取得・楽観更新）で本文が変わったら同期。編集中の onBlur 確定後の再取得でも破綻しない。
   useEffect(() => {
     setValue(data.text ?? '');
@@ -1155,6 +1258,179 @@ function AnnotationNode({
       data.onUpdateText?.(id, value);
     }
   }, [value, data, id]);
+
+  // スコープ囲み: 業務領域を点線/実線の角丸矩形＋薄い背景塗りで囲う。
+  // ノードより背面（zIndex 0）に描かれ、ラッパは pointerEvents:none のため
+  // 内側のフローノード/エッジ操作を奪わない。掴めるのは枠線沿いの帯とラベルのみ。
+  if (isScope) {
+    const scopeColor = data.color || SCOPE_DEFAULT_COLOR;
+    const borderStyle: 'dashed' | 'solid' = data.borderStyle === 'solid' ? 'solid' : 'dashed';
+    const fillOpacity =
+      liveFill ?? (typeof data.fillOpacity === 'number' ? data.fillOpacity : SCOPE_DEFAULT_FILL_OPACITY);
+    const commitLabel = () => {
+      setEditingLabel(false);
+      handleBlur();
+    };
+    return (
+      <div className="group/annotation relative h-full w-full">
+        {/* 枠＋背景塗り（クリックを奪わない装飾層） */}
+        <div
+          className="pointer-events-none absolute inset-0 rounded-xl border-2"
+          style={{
+            borderStyle,
+            borderColor: scopeColor,
+            backgroundColor: hexToRgba(scopeColor, fillOpacity),
+          }}
+        />
+        {/* 枠線沿いのドラッグ帯（ここを掴んで移動 / クリックで選択）。内側は素通し。 */}
+        {(['top', 'bottom', 'left', 'right'] as const).map((edge) => (
+          <div
+            key={edge}
+            title="ドラッグで移動 / クリックで選択"
+            className={`pointer-events-auto absolute cursor-move ${
+              edge === 'top'
+                ? 'left-0 top-0 h-3 w-full'
+                : edge === 'bottom'
+                ? 'bottom-0 left-0 h-3 w-full'
+                : edge === 'left'
+                ? 'left-0 top-0 h-full w-3'
+                : 'right-0 top-0 h-full w-3'
+            }`}
+          />
+        ))}
+        {/* ラベル（枠の左上）。ダブルクリックで編集 → onBlur で保存。 */}
+        <div className="pointer-events-auto absolute left-2 top-1.5 max-w-[85%]">
+          {editingLabel ? (
+            <input
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onBlur={commitLabel}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitLabel();
+                if (e.key === 'Escape') {
+                  setValue(data.text ?? '');
+                  setEditingLabel(false);
+                }
+              }}
+              placeholder="スコープ名"
+              className="nodrag nopan h-6 w-40 rounded border border-gray-300 bg-white px-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          ) : (
+            <div
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (data.onUpdateText) setEditingLabel(true);
+              }}
+              title="ドラッグで移動 / ダブルクリックでラベル編集"
+              className="cursor-move truncate rounded px-1.5 py-0.5 text-[11px] font-semibold"
+              style={{ color: scopeColor, backgroundColor: hexToRgba(scopeColor, 0.12) }}
+            >
+              {value || 'スコープ'}
+            </div>
+          )}
+        </div>
+        {/* 選択時の編集ポップ（枠スタイル / 色 / 塗り）。NodeToolbar はポータル描画のため
+            前面のフローノードにも隠れない。 */}
+        {data.onUpdateStyle && (
+          <NodeToolbar isVisible={!!selected} position={Position.Top} align="start">
+            <div className="nodrag nopan flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5 shadow-md">
+              <div className="flex items-center gap-0.5">
+                {(
+                  [
+                    { v: 'dashed', label: '点線' },
+                    { v: 'solid', label: '実線' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => data.onUpdateStyle?.(id, { borderStyle: opt.v })}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] transition-colors ${
+                      borderStyle === opt.v
+                        ? 'border-blue-500 bg-blue-50 font-medium text-blue-700'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <span className="h-4 w-px bg-gray-200" />
+              <div className="flex items-center gap-1">
+                {SCOPE_COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => data.onUpdateStyle?.(id, { color: c })}
+                    title={c}
+                    className={`h-3.5 w-3.5 rounded-full border transition-transform ${
+                      scopeColor.toLowerCase() === c.toLowerCase()
+                        ? 'scale-110 ring-2 ring-blue-400 ring-offset-1'
+                        : ''
+                    }`}
+                    style={{ backgroundColor: c, borderColor: `${c}aa` }}
+                  />
+                ))}
+              </div>
+              <span className="h-4 w-px bg-gray-200" />
+              <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                塗り
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.02}
+                  value={fillOpacity}
+                  onChange={(e) => setLiveFill(Number(e.target.value))}
+                  onPointerUp={(e) =>
+                    data.onUpdateStyle?.(id, {
+                      fillOpacity: Number((e.target as HTMLInputElement).value),
+                    })
+                  }
+                  className="w-16"
+                  title="背景塗りの濃さ"
+                />
+              </label>
+            </div>
+          </NodeToolbar>
+        )}
+        {/* ホバー/選択時に出る削除ボタン（付箋・コメントと同じ✕） */}
+        <button
+          type="button"
+          title="このスコープを削除"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onDelete?.(id);
+          }}
+          className={`nodrag nopan pointer-events-auto absolute -right-2 -top-2 h-5 w-5 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 shadow-sm hover:bg-red-50 hover:text-red-600 group-hover/annotation:flex ${
+            selected ? 'flex' : 'hidden'
+          }`}
+        >
+          <X className="h-3 w-3" />
+        </button>
+        {/* マウスリサイズ（選択時のみ。embedded=閲覧では onResizeEnd 未設定＝非表示）。
+            ラッパが pointerEvents:none のためハンドル/ラインに明示的に pointer-events を戻す。
+            ドラッグ帯より後に描画して、選択中は枠リサイズを優先させる。 */}
+        {data.onResizeEnd && (
+          <NodeResizer
+            minWidth={160}
+            minHeight={100}
+            isVisible={!!selected}
+            keepAspectRatio={false}
+            handleClassName="pointer-events-auto"
+            lineClassName="pointer-events-auto"
+            onResizeEnd={(_, params) =>
+              data.onResizeEnd?.(id, {
+                width: Math.round(params.width),
+                height: Math.round(params.height),
+              })
+            }
+          />
+        )}
+      </div>
+    );
+  }
 
   // 付箋=黄色付箋風、コメント=白＋吹き出し風。
   const stickyColor = data.color || '#fef9c3';
@@ -2221,18 +2497,35 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         text: a.text,
         color: a.color,
         icon: a.icon,
+        borderStyle: a.borderStyle,
+        fillOpacity: a.fillOpacity,
         onUpdateText: (id, text) => props.onUpdateAnnotation?.(id, { text }),
         onDelete: (id) => props.onDeleteAnnotation?.(id),
         // embedded（閲覧）ではリサイズ不可（ハンドルを出さない）。
         onResizeEnd: props.embedded
           ? undefined
           : (id, size) => props.onUpdateAnnotation?.(id, { width: size.width, height: size.height }),
+        // スコープの枠スタイル/色/塗りの編集ポップ（選択時）。embedded では出さない。
+        onUpdateStyle:
+          props.embedded || a.kind !== 'SCOPE'
+            ? undefined
+            : (id, patch) => props.onUpdateAnnotation?.(id, patch),
       };
       // アイコン注釈は透明背景の小ノード。付箋/コメントの箱（幅 200 / 最低高 96）は出さない。
       const isIconAnnotation = a.kind === 'ICON';
+      // スコープ囲みはノード群を覆う広い矩形（既定 320×200）。
+      const isScopeAnnotation = a.kind === 'SCOPE';
       // 保存済みリサイズ値があればその寸法で描画、無ければ既定サイズ。
-      const defaultW = isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_W;
-      const defaultH = isIconAnnotation ? ICON_ANNOTATION_SIZE : ANNOTATION_MIN_H;
+      const defaultW = isIconAnnotation
+        ? ICON_ANNOTATION_SIZE
+        : isScopeAnnotation
+        ? SCOPE_DEFAULT_W
+        : ANNOTATION_W;
+      const defaultH = isIconAnnotation
+        ? ICON_ANNOTATION_SIZE
+        : isScopeAnnotation
+        ? SCOPE_DEFAULT_H
+        : ANNOTATION_MIN_H;
       const w = typeof a.width === 'number' && a.width > 0 ? a.width : defaultW;
       const h = typeof a.height === 'number' && a.height > 0 ? a.height : defaultH;
       return {
@@ -2242,11 +2535,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         data,
         width: w,
         height: h,
-        style: { width: w, height: h },
+        // スコープはノード（zIndex 1）より背面（レーン帯と同じ 0。DOM 順でレーンより手前）。
+        // さらにラッパは pointerEvents:none にし、内側のフローノード/エッジ操作を奪わない
+        // （掴めるのは AnnotationNode 側で pointer-events を戻した枠帯・ラベルのみ）。
+        style: isScopeAnnotation
+          ? { width: w, height: h, pointerEvents: 'none' as const }
+          : { width: w, height: h },
         draggable: true,
         selectable: true,
         connectable: false,
-        zIndex: 5,
+        zIndex: isScopeAnnotation ? 0 : 5,
       } as Node;
     });
 
@@ -2296,6 +2594,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onLabelUpdate: props.onUpdateEdgeLabel,
           onInsertNode: props.onInsertNodeOnEdge,
           informationTypeName: e.informationType?.name ?? null,
+          // 紐づくAPI数（>0 でパス中央付近に「API n」バッジを表示）。
+          apiLinkCount: e.apiLinks?.length ?? 0,
           // 線の形状・ラベル/チップのパス上位置。
           pathStyle: e.pathStyle ?? null,
           labelT: e.labelT ?? null,
@@ -2539,9 +2839,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // 取得できなければ固定オフセットにフォールバック。複数追加で重ならないよう少しずつずらす。
   const handleAddAnnotation = useCallback(
     (kind: FlowAnnotation['kind'], icon?: string) => {
-      // アイコン注釈は小ノード（ICON_ANNOTATION_SIZE）、付箋/コメントは箱サイズで左上補正する。
-      const w = kind === 'ICON' ? ICON_ANNOTATION_SIZE : ANNOTATION_W;
-      const h = kind === 'ICON' ? ICON_ANNOTATION_SIZE : ANNOTATION_MIN_H;
+      // アイコン注釈は小ノード（ICON_ANNOTATION_SIZE）、スコープは広い矩形、
+      // 付箋/コメントは箱サイズで左上補正する。
+      const w = kind === 'ICON' ? ICON_ANNOTATION_SIZE : kind === 'SCOPE' ? SCOPE_DEFAULT_W : ANNOTATION_W;
+      const h = kind === 'ICON' ? ICON_ANNOTATION_SIZE : kind === 'SCOPE' ? SCOPE_DEFAULT_H : ANNOTATION_MIN_H;
       let cx = 80;
       let cy = 80;
       const root = wrapperRef.current;
@@ -2964,10 +3265,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
                   size="sm"
                   onClick={() => handleAddAnnotation('STICKY')}
                   className="text-gray-700"
-                  title="付箋（メモ）を追加"
+                  title="メモ（付箋）を追加"
                 >
                   <StickyNote className="w-4 h-4 mr-1" />
-                  付箋
+                  メモ（付箋）
                 </Button>
                 <Button
                   variant="outline"
@@ -2978,6 +3279,17 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
                 >
                   <MessageSquarePlus className="w-4 h-4 mr-1" />
                   コメント
+                </Button>
+                {/* スコープ囲み: 業務領域を点線/実線の角丸矩形＋背景塗りで囲う（ノードより背面）。 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddAnnotation('SCOPE')}
+                  className="text-gray-700"
+                  title="スコープ囲み（業務領域を枠で囲む）を追加。ラベルはダブルクリックで編集"
+                >
+                  <BoxSelect className="w-4 h-4 mr-1" />
+                  スコープ
                 </Button>
                 {/* アイコン注釈: ボタン→小さなパレットでアイコンを選んで追加。 */}
                 <div className="relative">
@@ -3020,6 +3332,27 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
                     </>
                   )}
                 </div>
+                {/* よく使うアイコンのプリセット: DB / 人 をワンクリック配置（kind=ICON）。 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddAnnotation('ICON', 'Database')}
+                  className="text-gray-700"
+                  title="DB（データベース）アイコンを追加"
+                >
+                  <Database className="w-4 h-4 mr-1" />
+                  DB
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAddAnnotation('ICON', 'User')}
+                  className="text-gray-700"
+                  title="人アイコンを追加"
+                >
+                  <User className="w-4 h-4 mr-1" />
+                  人
+                </Button>
                 <span className="mx-0.5 h-5 w-px bg-gray-200" />
               </>
             )}
@@ -3156,11 +3489,25 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       {selectedEdgeId && (() => {
         const edge = flowData.edges.find((e) => e.id === selectedEdgeId);
         if (!edge) return null;
+        // source/target ノードのロール種別が HUMAN⇄SYSTEM を跨ぐか。
+        // 跨ぐエッジは人とシステムのやり取り＝API が介在しやすいので、
+        // パネルの API セクションを上部に目立たせる（未設定/OTHER は HUMAN 扱い）。
+        const roleTypeOfNode = (nodeId: string): 'HUMAN' | 'SYSTEM' => {
+          const n = flowData.nodes.find((x) => x.id === nodeId);
+          const rid = n?.roleId ?? n?.role?.id;
+          const t = roles.find((r) => r.id === rid)?.type ?? n?.role?.type;
+          return t === 'SYSTEM' ? 'SYSTEM' : 'HUMAN';
+        };
+        const crossesHumanSystem =
+          roleTypeOfNode(edge.sourceNodeId) !== roleTypeOfNode(edge.targetNodeId);
         return (
           <EdgePropertyPanel
             key={selectedEdgeId}
             edge={edge}
             informationTypes={props.informationTypes ?? []}
+            apiEndpoints={props.apiEndpoints ?? []}
+            onSaveApiLinks={props.onSaveEdgeApiLinks}
+            crossesHumanSystem={crossesHumanSystem}
             nodes={flowData.nodes
               .filter((n) => n.type !== 'lane')
               .map((n) => ({ id: n.id, label: n.label }))}
@@ -3757,6 +4104,153 @@ function InformationTypeMultiSelect({
 }
 
 // ===========================================
+// 矢印 × API エンドポイント紐づけ（エッジ編集パネル内セクション）
+// プロジェクトの API 一覧（method+path で検索可能）から複数選択し、
+// パネルの保存時に onSaveApiLinks（PUT /flow-edges/:id/api-links 全置換）へ渡す。
+// ===========================================
+
+/** HTTP メソッド → バッジ配色。 */
+const API_METHOD_BADGE: Record<string, string> = {
+  GET: 'bg-sky-100 text-sky-700 border-sky-200',
+  POST: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  PUT: 'bg-amber-100 text-amber-700 border-amber-200',
+  PATCH: 'bg-orange-100 text-orange-700 border-orange-200',
+  DELETE: 'bg-rose-100 text-rose-700 border-rose-200',
+};
+
+function EdgeApiLinkSection({
+  apiEndpoints,
+  selectedIds,
+  onChange,
+  emphasized,
+}: {
+  apiEndpoints: ApiEndpointOption[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  /** HUMAN⇄SYSTEM を跨ぐエッジで true。枠を強調し説明を添える。 */
+  emphasized: boolean;
+}) {
+  const [query, setQuery] = useState('');
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const byId = useMemo(
+    () => new Map(apiEndpoints.map((a) => [a.id, a] as const)),
+    [apiEndpoints],
+  );
+  // method + path + summary を対象に部分一致検索（大文字小文字無視）。
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return apiEndpoints;
+    return apiEndpoints.filter((a) =>
+      `${a.method} ${a.path} ${a.summary ?? ''}`.toLowerCase().includes(q),
+    );
+  }, [apiEndpoints, query]);
+
+  const toggle = (id: string, checked: boolean) => {
+    if (checked) {
+      if (!selected.has(id)) onChange([...selectedIds, id]);
+    } else {
+      onChange(selectedIds.filter((x) => x !== id));
+    }
+  };
+
+  return (
+    <div
+      className={`space-y-2 rounded border px-2.5 py-2 ${
+        emphasized ? 'border-violet-300 bg-violet-50/60' : 'border-gray-200 bg-gray-50/60'
+      }`}
+    >
+      <div className="flex items-center gap-1.5">
+        <Plug className={`h-3.5 w-3.5 ${emphasized ? 'text-violet-600' : 'text-gray-500'}`} />
+        <span className="text-[11px] font-semibold text-gray-700">API（このやり取りを担うAPI）</span>
+        <span className="ml-auto text-[10px] text-gray-400">{selectedIds.length} 件</span>
+      </div>
+      {emphasized && (
+        <p className="text-[10px] leading-snug text-violet-700">
+          人⇄システムを跨ぐ矢印です。対応するAPIエンドポイントを紐づけましょう（任意）。
+        </p>
+      )}
+      {/* 選択済みチップ（✕ で外す） */}
+      {selectedIds.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selectedIds.map((id) => {
+            const ep = byId.get(id);
+            return (
+              <span
+                key={id}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border border-violet-200 bg-white py-0.5 pl-1.5 pr-1 text-[10px] text-violet-700"
+                title={ep ? `${ep.method} ${ep.path}${ep.summary ? `（${ep.summary}）` : ''}` : id}
+              >
+                <span className="font-bold">{ep?.method ?? 'API'}</span>
+                <span className="max-w-[140px] truncate">{ep?.path ?? id}</span>
+                <button
+                  type="button"
+                  onClick={() => toggle(id, false)}
+                  className="rounded-full p-0.5 hover:bg-violet-100"
+                  title="紐づけを外す"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {apiEndpoints.length === 0 ? (
+        <p className="text-[10px] text-gray-400">
+          プロジェクトにAPIエンドポイントが登録されていません（コードカタログから抽出できます）。
+        </p>
+      ) : (
+        <>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="method / path で検索"
+              className="w-full rounded border border-gray-300 bg-white py-1 pl-6 pr-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-violet-400"
+            />
+          </div>
+          <div className="max-h-40 divide-y divide-gray-100 overflow-auto rounded border border-gray-200 bg-white">
+            {filtered.length === 0 ? (
+              <p className="px-2 py-1.5 text-[10px] text-gray-400">該当するAPIがありません。</p>
+            ) : (
+              filtered.map((ep) => {
+                const checked = selected.has(ep.id);
+                const badge =
+                  API_METHOD_BADGE[ep.method?.toUpperCase() ?? ''] ??
+                  'bg-gray-100 text-gray-600 border-gray-200';
+                return (
+                  <label
+                    key={ep.id}
+                    className="flex cursor-pointer items-center gap-1.5 px-2 py-1 hover:bg-violet-50/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => toggle(ep.id, e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <span className={`shrink-0 rounded border px-1 py-0.5 text-[9px] font-bold ${badge}`}>
+                      {ep.method}
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 truncate text-[11px] text-gray-800"
+                      title={`${ep.path}${ep.summary ? `（${ep.summary}）` : ''}`}
+                    >
+                      {ep.path}
+                    </span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===========================================
 // エッジ（矢印）の編集パネル（右サイドバー）
 // 矢印が運ぶ情報種別（source の OUTPUT → target の INPUT）とラベルを編集し、
 // 向きの反転（source/target スワップ）を行う。
@@ -3768,6 +4262,9 @@ function EdgePropertyPanel({
   nodes,
   sourceLabel,
   targetLabel,
+  apiEndpoints,
+  onSaveApiLinks,
+  crossesHumanSystem,
   onClose,
   onUpdateEdge,
   onRepoint,
@@ -3781,6 +4278,12 @@ function EdgePropertyPanel({
   nodes: Array<{ id: string; label: string }>;
   sourceLabel?: string;
   targetLabel?: string;
+  /** プロジェクトの API エンドポイント一覧（API セクションの選択肢）。 */
+  apiEndpoints?: ApiEndpointOption[];
+  /** 矢印に紐づく API を全置換保存する（保存時に変化があったときのみ呼ぶ）。 */
+  onSaveApiLinks?: (edgeId: string, apiEndpointIds: string[]) => Promise<void> | void;
+  /** source/target のロール種別が HUMAN⇄SYSTEM を跨ぐか（API セクションを上部に強調表示）。 */
+  crossesHumanSystem?: boolean;
   onClose: () => void;
   /** この矢印を削除する。 */
   onDelete?: () => void;
@@ -3811,12 +4314,25 @@ function EdgePropertyPanel({
     edge.informationTypeId ?? '',
   );
   const [label, setLabel] = useState<string>(edge.label ?? '');
+  // 紐づく API（複数選択）。保存時に初期値から変わっていれば全置換保存する。
+  const initialApiIds = useMemo(
+    () => (edge.apiLinks ?? []).map((l) => l.apiEndpointId),
+    [edge.apiLinks],
+  );
+  const [apiIds, setApiIds] = useState<string[]>(initialApiIds);
 
   const initialInfoId = edge.informationTypeId ?? '';
   const initialLabel = edge.label ?? '';
 
   // 情報種別 / ラベルが初期値から変わったぶんだけ送る（informationTypeId は '' → null）。
+  // API 紐づけは別エンドポイント（PUT /flow-edges/:id/api-links）へ、変化時のみ全置換保存。
   const save = useCallback(() => {
+    if (onSaveApiLinks) {
+      const sameIdSet =
+        apiIds.length === initialApiIds.length &&
+        [...apiIds].sort().join(' ') === [...initialApiIds].sort().join(' ');
+      if (!sameIdSet) void onSaveApiLinks(edge.id, apiIds);
+    }
     if (!onUpdateEdge) return;
     const patch: { informationTypeId?: string | null; label?: string } = {};
     if (informationTypeId !== initialInfoId) {
@@ -3825,7 +4341,27 @@ function EdgePropertyPanel({
     if (label !== initialLabel) patch.label = label;
     if (patch.informationTypeId === undefined && patch.label === undefined) return;
     void onUpdateEdge(edge.id, patch);
-  }, [onUpdateEdge, edge.id, informationTypeId, label, initialInfoId, initialLabel]);
+  }, [
+    onUpdateEdge,
+    edge.id,
+    informationTypeId,
+    label,
+    initialInfoId,
+    initialLabel,
+    onSaveApiLinks,
+    apiIds,
+    initialApiIds,
+  ]);
+
+  // API セクション（選択UI）。HUMAN⇄SYSTEM を跨ぐ矢印では上部に強調表示する。
+  const apiSection = onSaveApiLinks ? (
+    <EdgeApiLinkSection
+      apiEndpoints={apiEndpoints ?? []}
+      selectedIds={apiIds}
+      onChange={setApiIds}
+      emphasized={!!crossesHumanSystem}
+    />
+  ) : null;
 
   return (
     <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
@@ -3842,6 +4378,9 @@ function EdgePropertyPanel({
       </div>
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
+        {/* HUMAN⇄SYSTEM を跨ぐ矢印では API セクションを最上部に目立たせる。 */}
+        {crossesHumanSystem && apiSection}
+
         {/* 接続元 → 接続先（select で付け替え可能。ドラッグに頼らない確実な編集）。 */}
         {onRepoint ? (
           <div className="space-y-2 rounded border border-gray-200 bg-gray-50 px-3 py-2">
@@ -3972,6 +4511,9 @@ function EdgePropertyPanel({
             </div>
           </div>
         )}
+
+        {/* 跨がない矢印でも API は紐づけ可能（通常位置に表示）。 */}
+        {!crossesHumanSystem && apiSection}
 
         {onReverse && (
           <button
