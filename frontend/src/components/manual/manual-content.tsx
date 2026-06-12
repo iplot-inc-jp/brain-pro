@@ -760,16 +760,16 @@ const CharterIllustration: ManualIllustration = () => (
   </SvgFrame>
 )
 
-const ChangeRequestsIllustration: ManualIllustration = () => (
-  <SvgFrame label="変更要求の一覧と状態バッジの図解">
-    <Box x={12} y={14} w={296} h={22} text="変更要求一覧" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
+const HistoryIllustration: ManualIllustration = () => (
+  <SvgFrame label="変更履歴（自動記録された操作の一覧）の図解">
+    <Box x={12} y={14} w={296} h={22} text="変更履歴（自動記録）" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
     {(
       [
-        ['CR-1 納品書レイアウト変更', '承認', BLUE],
-        ['CR-2 対象範囲の追加', '申請中', '#64748b'],
-        ['CR-3 リリース時期の延期', '却下', '#dc2626'],
+        ['10:21 sato@…  業務フロー', '作成', '#16a34a'],
+        ['11:05 suzuki@…  タスク', '更新', BLUE],
+        ['13:40 sato@…  リスク', '削除', '#dc2626'],
       ] as const
-    ).map(([t, status, color], i) => {
+    ).map(([t, action, color], i) => {
       const y = 46 + i * 40
       return (
         <g key={t}>
@@ -779,43 +779,13 @@ const ChangeRequestsIllustration: ManualIllustration = () => (
           </text>
           <rect x={252} y={y + 8} width={44} height={18} rx={9} fill={color} />
           <text x={274} y={y + 17} fill="#fff" fontSize={7.5} textAnchor="middle" dominantBaseline="central">
-            {status}
+            {action}
           </text>
         </g>
       )
     })}
     <text x={160} y={172} fill={TEXT} fontSize={8} textAnchor="middle">
-      承認済みは「タスク化」で実行へ
-    </text>
-  </SvgFrame>
-)
-
-const LessonsIllustration: ManualIllustration = () => (
-  <SvgFrame label="教訓登録簿（分類バッジ付き）の図解">
-    <Box x={12} y={14} w={296} h={22} text="教訓登録簿" fill={NAVY} stroke={NAVY} textFill="#fff" fontSize={9} />
-    {(
-      [
-        ['朝会で手戻りが減った', 'うまくいった', '#16a34a'],
-        ['要件確認の漏れが多発', '問題', '#dc2626'],
-        ['チェックリストを導入する', '改善提案', BLUE],
-      ] as const
-    ).map(([t, kind, color], i) => {
-      const y = 46 + i * 40
-      return (
-        <g key={t}>
-          <rect x={12} y={y} width={296} height={34} rx={4} fill={i % 2 ? GRAY_FILL : '#fff'} stroke={GRAY_LINE} />
-          <rect x={20} y={y + 8} width={64} height={18} rx={9} fill={color} />
-          <text x={52} y={y + 17} fill="#fff" fontSize={7} textAnchor="middle" dominantBaseline="central">
-            {kind}
-          </text>
-          <text x={94} y={y + 17} fill={TEXT} fontSize={8} dominantBaseline="central">
-            {t}
-          </text>
-        </g>
-      )
-    })}
-    <text x={160} y={172} fill={TEXT} fontSize={8} textAnchor="middle">
-      分類バッジはクリックで切り替え
+      操作すると自動で記録される（手入力は不要）
     </text>
   </SvgFrame>
 )
@@ -1151,33 +1121,20 @@ export const MANUAL_ENTRIES: Record<string, ManualEntry> = {
     ],
     Illustration: CharterIllustration,
   },
-  'change-requests': {
-    key: 'change-requests',
-    title: '変更管理（変更要求）',
+  history: {
+    key: 'history',
+    title: '変更履歴',
     purpose:
-      'スコープ・スケジュール・コストに影響する変更要求を登録し、PMBOK の統合変更管理の流れで承認・却下を管理します。',
+      'プロジェクト内で行われた作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を」変更したかを後から確認できます。',
     steps: [
-      '上部のフォームに変更のタイトルを入力して「追加」します（状態は「申請」で作成されます）。',
-      '行クリックで編集モーダルを開き、変更の理由とスコープ・スケジュール・コストへの影響を記入します。',
-      '状態（申請／承認／却下／適用）を行内のセレクトまたは編集モーダルで更新します（承認／却下にすると決定日が記録されます）。',
-      '承認者を編集モーダルで記録します。',
-      '承認済み(APPROVED)の変更は「タスク化」で実行タスクとして起票します。',
+      'この画面は自動記録です。各画面で作成・更新・削除を行うと、その操作が自動でここに残ります（手動での登録は不要）。',
+      '一覧は新しい順に、時刻・操作者・対象・アクション（作成／更新／削除）・内容を表示します。',
+      '「対象種別」プルダウンで、業務フロー・タスクなど対象を絞り込みます。',
+      '「アクション」プルダウンで、作成／更新／削除を絞り込みます。',
+      '最新の操作を反映するには「更新」ボタンを押します。',
+      'グレーで打ち消し表示されている行は、失敗した（エラーになった）操作です。',
     ],
-    Illustration: ChangeRequestsIllustration,
-  },
-  lessons: {
-    key: 'lessons',
-    title: '教訓登録簿',
-    purpose:
-      'プロジェクトで得た教訓（レッスンズラーンド）を「うまくいった／問題／改善提案」の分類付きで記録します。',
-    steps: [
-      '上部のフォームで分類を選んで内容を入力し、「追加」で教訓を登録します。',
-      '分類バッジをクリックすると「うまくいった→問題→改善提案」の順に切り替わります。',
-      '内容と推奨（次にどうするか）を記入します（フォーカスを外すと自動保存）。',
-      '関連する領域をセレクトで紐づけます（任意）。',
-      '振り返りの場で一覧を見直し、次のプロジェクトへ引き継ぎます。',
-    ],
-    Illustration: LessonsIllustration,
+    Illustration: HistoryIllustration,
   },
 }
 

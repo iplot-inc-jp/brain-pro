@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -301,13 +301,13 @@ import {
   TobeRoadmapController,
   TobeRoadmapByIdController,
   ProjectCharterController,
-  ChangeRequestController,
-  ChangeRequestByIdController,
-  LessonLearnedController,
-  LessonLearnedByIdController,
+  ChangeLogController,
+  AdoptionStatusController,
+  AdoptionStatusByIdController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
+import { ChangeLogInterceptor } from './presentation/interceptors/change-log.interceptor';
 import { HealthController } from './presentation/controllers/health.controller';
 import { RequirementController } from './presentation/controllers/requirement.controller';
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
@@ -430,10 +430,9 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     RoadmapPhaseController,
     RoadmapPhaseByIdController,
     ProjectCharterController,
-    ChangeRequestController,
-    ChangeRequestByIdController,
-    LessonLearnedController,
-    LessonLearnedByIdController,
+    ChangeLogController,
+    AdoptionStatusController,
+    AdoptionStatusByIdController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -772,6 +771,13 @@ import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.s
     {
       provide: APP_FILTER,
       useClass: DomainExceptionFilter,
+    },
+
+    // ========== Global Interceptors ==========
+    // 書き込み系リクエストの自動変更履歴（fire-and-forget で ChangeLog に記録）
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ChangeLogInterceptor,
     },
   ],
 })

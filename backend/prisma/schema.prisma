@@ -126,6 +126,7 @@ model Project {
   charter                 ProjectCharter?
   changeRequests          ChangeRequest[]
   lessons                 LessonLearned[]
+  adoptionStatuses        AdoptionStatus[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -1091,9 +1092,10 @@ model System {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
-  roles      Role[]
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject       SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  roles            Role[]
+  adoptionStatuses AdoptionStatus[]
 
   @@map("systems")
 }
@@ -1418,6 +1420,7 @@ model Stakeholder {
   approvedCharters      ProjectCharter[]        @relation("CharterApprover")
   sponsoredCharters     ProjectCharter[]        @relation("CharterSponsor")
   approvedChangeRequests ChangeRequest[]        @relation("ChangeApprover")
+  adoptionStatuses      AdoptionStatus[]
 
   @@map("stakeholders")
 }
@@ -1999,4 +2002,54 @@ model LessonLearned {
   subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
 
   @@map("lessons_learned")
+}
+
+// ===========================================
+// 変更履歴（監査ログ）
+// ===========================================
+
+// 汎用の変更履歴。FKは張らない（対象が消えてもログは残す）。
+model ChangeLog {
+  id         String   @id @default(uuid())
+  projectId  String?  @map("project_id")
+  userId     String?  @map("user_id")
+  userEmail  String?  @map("user_email")
+  method     String // HTTPメソッド（POST/PUT/PATCH/DELETE 等）
+  path       String // リクエストパス
+  entity     String? // path から導出した対象種別（business-flows/tasks/risks 等）
+  action     String? // CREATE / UPDATE / DELETE
+  summary    String?
+  statusCode Int?     @map("status_code")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([projectId, createdAt])
+  @@map("change_logs")
+}
+
+// ===========================================
+// 導入状況（ステークホルダー × システム の定着度トラッキング）
+// ===========================================
+
+model AdoptionStatus {
+  id            String    @id @default(uuid())
+  projectId     String    @map("project_id")
+  stakeholderId String    @map("stakeholder_id")
+  // 対象システム。null = プロジェクト全体
+  systemId      String?   @map("system_id")
+  // NOT_STARTED=未着手 / INFORMED=周知済 / TRAINED=教育済 / TRIAL=試行中 / LIVE=本稼働 / ESTABLISHED=定着
+  stage         String?   @default("NOT_STARTED")
+  blockers      String?   @db.Text
+  nextAction    String?   @map("next_action") @db.Text
+  note          String?   @db.Text
+  lastContactAt DateTime? @map("last_contact_at")
+  order         Int       @default(0)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+  system      System?     @relation(fields: [systemId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, stakeholderId, systemId])
+  @@map("adoption_statuses")
 }

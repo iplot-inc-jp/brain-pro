@@ -26,8 +26,7 @@ const EXPECTED_KEYS = [
   'requirements',
   // PMBOK
   'charter',
-  'change-requests',
-  'lessons',
+  'history',
 ]
 
 describe('MANUAL_ENTRIES', () => {

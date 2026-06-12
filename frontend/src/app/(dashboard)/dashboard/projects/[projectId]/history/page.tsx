@@ -1,0 +1,410 @@
+'use client';
+
+/**
+ * 変更履歴ページ。
+ *
+ * GET /api/projects/:projectId/change-logs（自動記録された書き込み操作の履歴）を
+ * 新しい順に一覧表示する。
+ * - 列: 時刻 / 操作者(email) / 対象（entity の和名）/ アクションバッジ / 内容(summary)
+ * - 失敗（4xx/5xx）の行はグレー・打消し気味に表示する
+ * - フィルタ: 対象種別 select ＋ アクション select。「更新」で再取得。
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { History, Loader2, RefreshCw } from 'lucide-react';
+import { PageHeader } from '@/components/ui/page-header';
+import { HowToPanel } from '@/components/ui/how-to-panel';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  const t = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  if (t) h['Authorization'] = `Bearer ${t}`;
+  return h;
+}
+
+/** 変更履歴1件（backend ChangeLog テーブルのレコード）。 */
+interface ChangeLogRow {
+  id: string;
+  projectId: string | null;
+  userId: string | null;
+  userEmail: string | null;
+  method: string;
+  path: string;
+  entity: string | null;
+  action: string | null; // CREATE / UPDATE / DELETE
+  summary: string | null;
+  statusCode: number | null;
+  createdAt: string;
+}
+
+async function listChangeLogs(projectId: string): Promise<ChangeLogRow[]> {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/change-logs?limit=300`, {
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error('変更履歴の取得に失敗しました');
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// 表示用メタ（entity 和名 / アクションバッジ）
+// ---------------------------------------------------------------------------
+
+/** entity（URL のリソース名）→ 和名。未知の entity はそのまま表示する。 */
+const ENTITY_LABELS: Record<string, string> = {
+  'business-flows': '業務フロー',
+  tasks: 'タスク',
+  risks: 'リスク',
+  meetings: '会議',
+  'gap-items': 'GAP',
+  stakeholders: 'ステークホルダー',
+  'sub-projects': '領域',
+  'information-types': 'INPUT/OUTPUT',
+  roles: 'ロール',
+  systems: 'システム',
+  constraints: '制約条件',
+  'tobe-visions': 'あるべき姿',
+  'tobe-roadmaps': '段階設計',
+  'roadmap-phases': '段階設計フェーズ',
+  'issue-trees': '課題ツリー',
+  'issue-nodes': '課題ツリー',
+  annotations: '付箋',
+  charter: '背景・目的',
+  requirements: '要求定義',
+  attachments: '添付ファイル',
+  'risk-categories': 'リスク種別',
+  'report-calendars': '会議・報告',
+  'interest-rows': '関心ごと',
+  projects: 'プロジェクト',
+  // 参考マスタ
+  suppliers: 'サプライヤー',
+  products: '製品',
+  'demand-data': '需要データ',
+  // 現状把握・計画
+  'asis-memos': '現状メモ',
+  phases: 'フェーズ',
+  'flow-folders': 'フローフォルダ',
+  'stakeholder-assignments': '担当割当',
+  'gap-ledgers': 'GAP管理簿',
+  // タスクのサブリソース（/api/tasks/:id/comments 等）
+  'task-comments': 'タスクコメント',
+  comments: 'タスクコメント',
+  dependencies: 'タスク依存',
+  // 業務フローのサブリソース（/api/business-flows/:flowId/... 等）
+  definition: '業務定義',
+  cruoa: 'CRUOA表',
+  nodes: 'ノード',
+  edges: '接続線',
+  positions: 'ノード配置',
+  snapshots: 'スナップショット',
+  restore: 'フロー復元',
+  'import-mermaid': 'フロー取込',
+  'child-flow': '子フロー',
+  links: '入出力リンク',
+  'node-links': '入出力リンク',
+  'information-links': '入出力リンク',
+  // DFD
+  dfd: 'DFD',
+  'dfd-diagrams': 'DFD',
+  'dfd-nodes': 'DFDノード',
+  'dfd-flows': 'DFDフロー',
+  // 分析（パレート / 感度 / GAP / 漏れ）
+  'analysis-pareto': '分析(パレート)',
+  'analysis-sensitivity': '分析(感度)',
+  'analysis-gap': '分析(GAP)',
+  'analysis-leak': '分析(漏れ)',
+  // テーブル定義
+  tables: 'テーブル',
+  columns: 'カラム',
+  'crud-mappings': 'CRUD紐づけ',
+};
+
+function entityLabel(entity: string | null): string {
+  if (!entity) return '—';
+  return ENTITY_LABELS[entity] ?? entity;
+}
+
+/** アクションバッジ（作成=emerald / 更新=blue / 削除=rose）。 */
+const ACTION_META: Record<string, { label: string; badge: string }> = {
+  CREATE: { label: '作成', badge: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  UPDATE: { label: '更新', badge: 'border-blue-200 bg-blue-50 text-blue-700' },
+  DELETE: { label: '削除', badge: 'border-rose-200 bg-rose-50 text-rose-700' },
+};
+
+/** ISO 日時を YYYY/MM/DD HH:mm 表示にする（不正値・null は '—'）。 */
+function fmtDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 4xx/5xx は失敗扱い（グレー・打消し気味に表示）。 */
+function isFailed(statusCode: number | null): boolean {
+  return statusCode != null && statusCode >= 400;
+}
+
+export default function HistoryPage() {
+  const params = useParams();
+  const projectId = params.projectId as string;
+
+  const [logs, setLogs] = useState<ChangeLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // フィルタ（対象種別 / アクション）。空文字 = すべて。
+  const [entityFilter, setEntityFilter] = useState('');
+  const [actionFilter, setActionFilter] = useState('');
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const rows = await listChangeLogs(projectId);
+      setLogs(rows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      await load();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  // 取得済みログに登場する entity の選択肢（和名でソート）。
+  const entityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const log of logs) {
+      if (log.entity) set.add(log.entity);
+    }
+    return Array.from(set).sort((a, b) =>
+      entityLabel(a).localeCompare(entityLabel(b), 'ja'),
+    );
+  }, [logs]);
+
+  const filtered = useMemo(
+    () =>
+      logs.filter(
+        (log) =>
+          (!entityFilter || log.entity === entityFilter) &&
+          (!actionFilter || log.action === actionFilter),
+      ),
+    [logs, entityFilter, actionFilter],
+  );
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            <History className="h-5 w-5 text-primary" />
+            変更履歴
+          </span>
+        }
+        description="このプロジェクトに対する作成・更新・削除の操作が自動で記録されます。「いつ・誰が・何を」変更したかを確認できます。"
+        help="各画面での書き込み操作（作成・更新・削除）はサーバー側で自動記録されます。手動での登録は不要です。失敗した操作（4xx/5xx）はグレーの打消し表示になります。"
+        backHref={`/dashboard/projects/${projectId}`}
+        backLabel="プロジェクトへ戻る"
+        actions={
+          <>
+            <HowToPanel
+              steps={[
+                'この一覧は自動記録です。各画面で作成・更新・削除を行うと、その操作が自動でここに残ります。',
+                '「対象種別」プルダウンで、業務フロー・タスクなど対象を絞り込みます。',
+                '「アクション」プルダウンで、作成／更新／削除を絞り込みます。',
+                '最新の操作を反映するには「更新」ボタンを押します。',
+                'グレーで打ち消し表示されている行は、失敗した（エラーになった）操作です。',
+              ]}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              className="gap-1.5"
+            >
+              {refreshing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              更新
+            </Button>
+          </>
+        }
+      />
+
+      {/* フィルタ */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-gray-500">対象種別</label>
+            <select
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+              className="min-w-[180px] rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label="対象種別で絞り込み"
+            >
+              <option value="">すべて</option>
+              {entityOptions.map((e) => (
+                <option key={e} value={e}>
+                  {entityLabel(e)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-gray-500">アクション</label>
+            <select
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              className="min-w-[120px] rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label="アクションで絞り込み"
+            >
+              <option value="">すべて</option>
+              <option value="CREATE">作成</option>
+              <option value="UPDATE">更新</option>
+              <option value="DELETE">削除</option>
+            </select>
+          </div>
+          <p className="ml-auto text-xs text-gray-400">
+            {filtered.length} / {logs.length} 件（最新 300 件まで）
+          </p>
+        </CardContent>
+      </Card>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {/* 一覧 */}
+      {loading ? (
+        <div className="flex h-[200px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <Card className="bg-white border-gray-200">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="w-36 px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      時刻
+                    </th>
+                    <th className="min-w-[160px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      操作者
+                    </th>
+                    <th className="w-36 px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      対象
+                    </th>
+                    <th className="w-20 px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      アクション
+                    </th>
+                    <th className="min-w-[200px] px-3 py-2 text-left text-xs font-semibold text-gray-600">
+                      内容
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((log) => {
+                    const failed = isFailed(log.statusCode);
+                    const meta = log.action ? ACTION_META[log.action] : undefined;
+                    return (
+                      <tr
+                        key={log.id}
+                        className={`border-b border-gray-100 align-top ${
+                          failed ? 'bg-gray-50/60 text-gray-400' : ''
+                        }`}
+                        title={failed ? `失敗（HTTP ${log.statusCode}）: ${log.path}` : log.path}
+                      >
+                        <td
+                          className={`whitespace-nowrap px-3 py-2 font-mono text-xs ${
+                            failed ? 'text-gray-400' : 'text-gray-500'
+                          }`}
+                        >
+                          {fmtDateTime(log.createdAt)}
+                        </td>
+                        <td
+                          className={`px-3 py-2 text-sm ${
+                            failed ? 'text-gray-400 line-through' : 'text-gray-700'
+                          }`}
+                        >
+                          {log.userEmail || '—'}
+                        </td>
+                        <td
+                          className={`px-3 py-2 text-sm ${
+                            failed ? 'text-gray-400 line-through' : 'text-gray-700'
+                          }`}
+                        >
+                          {entityLabel(log.entity)}
+                        </td>
+                        <td className="px-3 py-2">
+                          {meta ? (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                                failed
+                                  ? 'border-gray-200 bg-gray-100 text-gray-400 line-through'
+                                  : meta.badge
+                              }`}
+                            >
+                              {meta.label}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                          {failed && (
+                            <span className="ml-1.5 align-middle text-[10px] font-medium text-gray-400">
+                              失敗
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-3 py-2 text-sm ${
+                            failed ? 'text-gray-400 line-through' : 'text-gray-600'
+                          }`}
+                        >
+                          <span className="line-clamp-2">{log.summary || '—'}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-gray-400">
+                        {logs.length === 0
+                          ? 'まだ変更履歴がありません。各画面で作成・更新・削除を行うと自動で記録されます。'
+                          : '条件に一致する履歴がありません。フィルタを変更してください。'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

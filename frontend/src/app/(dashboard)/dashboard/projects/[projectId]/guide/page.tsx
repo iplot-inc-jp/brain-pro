@@ -30,8 +30,7 @@ import {
   Map as MapIcon,
   CalendarClock,
   ScrollText,
-  GitPullRequestArrow,
-  GraduationCap,
+  History,
   ChevronRight,
   type LucideIcon,
 } from 'lucide-react'
@@ -348,7 +347,7 @@ function buildSections(base: string): GuideSection[] {
       title: 'プロジェクトを統制する',
       accent: '#0f766e',
       summary:
-        '背景・目的で立ち上げの合意を1枚にまとめ、変更要求は統合変更管理の流れで取り扱い、得られた教訓を登録簿に残して次へ引き継ぎます。',
+        '背景・目的で立ち上げの合意を1枚にまとめ、プロジェクト内の作成・更新・削除は変更履歴に自動で記録されます。',
       links: [
         {
           name: '背景・目的',
@@ -357,19 +356,13 @@ function buildSections(base: string): GuideSection[] {
           icon: ScrollText,
         },
         {
-          name: '変更管理',
-          href: `${base}/change-requests`,
-          description: 'スコープ等に影響する変更要求の承認・却下を管理します',
-          icon: GitPullRequestArrow,
-        },
-        {
-          name: '教訓登録簿',
-          href: `${base}/lessons`,
-          description: 'うまくいった/問題/改善提案の教訓を記録します',
-          icon: GraduationCap,
+          name: '変更履歴',
+          href: `${base}/history`,
+          description: '「いつ・誰が・何を」変更したかの自動記録を確認します',
+          icon: History,
         },
       ],
-      manualKeys: ['charter', 'change-requests', 'lessons'],
+      manualKeys: ['charter', 'history'],
     },
   ]
 }

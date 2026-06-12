@@ -35,8 +35,7 @@ import {
   ShieldAlert,
   FileSpreadsheet,
   Landmark,
-  GitPullRequestArrow,
-  GraduationCap,
+  History,
   ArrowLeftRight,
   Server,
   Lock,
@@ -507,7 +506,7 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   'ステークホルダーマネジメント': 'ステーク…',
   'リスクマネジメント': 'リスク…',
   '背景・目的': '背景',
-  '教訓登録簿': '教訓',
+  '変更履歴': '履歴',
 }
 
 function collapsedLabel(name: string): string {
@@ -654,8 +653,7 @@ export default function DashboardLayout({
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },
-          { name: '変更管理', href: `${base}/change-requests`, icon: GitPullRequestArrow },
-          { name: '教訓登録簿', href: `${base}/lessons`, icon: GraduationCap },
+          { name: '変更履歴', href: `${base}/history`, icon: History },
         ],
       },
       {
@@ -694,7 +692,7 @@ export default function DashboardLayout({
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
               <Database className="h-4 w-4 text-primary" />
             </div>
-            <span className="font-mono font-semibold text-foreground">DataFlow</span>
+            <span className="font-mono font-semibold text-foreground">Brain Pro</span>
           </Link>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -723,7 +721,7 @@ export default function DashboardLayout({
               <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
                 <Database className="h-5 w-5 text-primary" />
               </div>
-              <span className="font-mono text-lg font-semibold text-foreground">DataFlow</span>
+              <span className="font-mono text-lg font-semibold text-foreground">Brain Pro</span>
             </Link>
             <button
               onClick={() => setSidebarCollapsed(true)}
