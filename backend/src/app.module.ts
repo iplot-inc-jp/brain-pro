@@ -279,6 +279,7 @@ import {
   BcryptPasswordHashService,
   JwtTokenService,
   ProjectAccessService,
+  ProjectBundleService,
 } from './infrastructure';
 
 // Presentation
@@ -336,6 +337,9 @@ import {
   AdoptionStatusController,
   AdoptionStatusByIdController,
   KpiController,
+  ProjectBundleController,
+  OrganizationProjectImportController,
+  ExportSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
 } from './presentation';
@@ -478,6 +482,10 @@ import {
     AdoptionStatusController,
     AdoptionStatusByIdController,
     KpiController,
+    // Project Bundle (export/import)
+    ProjectBundleController,
+    OrganizationProjectImportController,
+    ExportSchemaController,
     // Background Jobs (Upstash QStash)
     JobWorkerController,
     ProjectJobController,
@@ -833,6 +841,7 @@ import {
 
     // ========== Services ==========
     ProjectAccessService,
+    ProjectBundleService,
     ClaudeService,
     ApiKeyService,
     CryptoService,

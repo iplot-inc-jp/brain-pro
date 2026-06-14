@@ -22,6 +22,7 @@ import { initOpenApi } from './lib/openapi.mjs';
 
 import * as generic from './tools/generic.mjs';
 import * as projects from './tools/projects.mjs';
+import * as projectBundle from './tools/project_bundle.mjs';
 import * as flows from './tools/flows.mjs';
 import * as issuesGaps from './tools/issues_gaps.mjs';
 import * as tobeRequirements from './tools/tobe_requirements.mjs';
@@ -51,6 +52,7 @@ const server = new McpServer({ name: 'ai-data-flow', version: '1.0.0' });
 const modules = [
   generic,
   projects,
+  projectBundle,
   flows,
   issuesGaps,
   tobeRequirements,
