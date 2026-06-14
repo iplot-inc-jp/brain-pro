@@ -41,9 +41,25 @@ import {
   X,
   StickyNote,
   MessageSquare,
+  Frame,
+  Eye,
+  EyeOff,
+  Wand2,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { SubProjectPicker, subProjectPath } from '@/components/ui/sub-project-picker';
+import type { SubProjectMaster } from '@/lib/masters';
 import {
   RELATION_CARDINALITY_OPTIONS,
   type DataObjectAnnotationDto,
@@ -56,6 +72,7 @@ import {
   CARD_W,
   CARD_H,
   CARDINALITY_STYLES,
+  OBJECT_COLORS,
   objectColor,
 } from './object-map-shared';
 
@@ -125,6 +142,43 @@ const HANDLE_OPTIONS: ReadonlyArray<{ value: '' | SideHandle; label: string }> =
 const ANNOT_W = 170;
 const ANNOT_H = 100;
 
+/** スコープ囲みの既定サイズ・既定色（作成時） */
+const SCOPE_W = 320;
+const SCOPE_H = 200;
+const SCOPE_MIN_W = 120;
+const SCOPE_MIN_H = 80;
+const DEFAULT_SCOPE_COLOR = '#6366f1'; // indigo
+
+/** スコープ囲み編集パネルの色選択肢（オブジェクト色パレットを流用） */
+const SCOPE_COLORS = OBJECT_COLORS;
+
+/**
+ * 「mermaidから生成」ダイアログのサンプル（erDiagram の実用例）。
+ * バックエンドの import-mermaid は erDiagram/classDiagram/flowchart を解析する。
+ */
+const MERMAID_SAMPLE = `erDiagram
+  CUSTOMER ||--o{ ORDER : places
+  ORDER ||--|{ ORDER_ITEM : contains
+  PRODUCT ||--o{ ORDER_ITEM : "ordered in"
+  CUSTOMER {
+    string id
+    string name
+    string email
+  }
+  ORDER {
+    string id
+    date orderedAt
+  }
+  ORDER_ITEM {
+    string id
+    int quantity
+  }
+  PRODUCT {
+    string id
+    string name
+    int price
+  }`;
+
 /** ノブドラッグ接続の進行状態（ノブ pointerdown→ドラッグ→別カードで pointerup） */
 interface LinkDragState {
   sourceId: string;
@@ -147,8 +201,10 @@ function clamp(v: number, min: number, max: number): number {
 export interface ObjectMapCanvasProps {
   objects: DataObjectDto[];
   relations: ObjectRelationDto[];
-  /** 付箋/メモ（接続モード・オブジェクト選択の対象外） */
+  /** 付箋/メモ/スコープ囲み（接続モード・オブジェクト選択の対象外） */
   annotations: DataObjectAnnotationDto[];
+  /** 領域（SubProject）一覧。スコープ囲みの領域名表示・領域ピッカー用 */
+  subProjects: SubProjectMaster[];
   selectedObjectId: string | null;
   onSelectObject: (id: string | null) => void;
   /** ノードドラッグ終了時（親側で楽観更新＋デバウンス保存する） */
@@ -180,12 +236,36 @@ export interface ObjectMapCanvasProps {
   onAnnotationMoved: (id: string, x: number, y: number) => void;
   onUpdateAnnotationText: (id: string, text: string) => void | Promise<void>;
   onDeleteAnnotation: (id: string) => void | Promise<void>;
+  // ===== スコープ囲み（領域） =====
+  /** スコープ囲みの作成（位置はビュー中心付近。既定サイズ/色はここで決める） */
+  onAddScope: (positionX: number, positionY: number) => void | Promise<void>;
+  /** スコープ囲みの移動/リサイズ確定時（楽観更新＋デバウンス保存＋applyScopeLinks は親が担う） */
+  onScopeGeometryChanged: (
+    id: string,
+    geom: { positionX: number; positionY: number; width: number; height: number },
+  ) => void;
+  /** スコープ囲みのプロパティ更新（領域/色/枠線/表示）。subProjectId 変更時は親が applyScopeLinks する */
+  onUpdateScope: (
+    id: string,
+    patch: {
+      subProjectId?: string | null;
+      color?: string | null;
+      borderStyle?: 'dashed' | 'solid' | null;
+      fillOpacity?: number | null;
+      visible?: boolean | null;
+    },
+  ) => void | Promise<void>;
+  onDeleteScope: (id: string) => void | Promise<void>;
+  // ===== Mermaidから生成 =====
+  /** Mermaid 記法から objects/relations を一括生成（生成後に親がグラフ再取得） */
+  onImportMermaid: (mermaid: string) => Promise<void>;
 }
 
 export function ObjectMapCanvas({
   objects,
   relations,
   annotations,
+  subProjects,
   selectedObjectId,
   onSelectObject,
   onObjectMoved,
@@ -199,6 +279,11 @@ export function ObjectMapCanvas({
   onAnnotationMoved,
   onUpdateAnnotationText,
   onDeleteAnnotation,
+  onAddScope,
+  onScopeGeometryChanged,
+  onUpdateScope,
+  onDeleteScope,
+  onImportMermaid,
 }: ObjectMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -240,8 +325,57 @@ export function ObjectMapCanvas({
   const [annotationDraft, setAnnotationDraft] = useState('');
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
 
+  // ===== スコープ囲み =====
+  // 選択中のスコープ（編集パネル表示）。
+  const [selectedScopeId, setSelectedScopeId] = useState<string | null>(null);
+  // 囲みの全体表示/非表示トグル（ローカル。各囲みの visible(永続) とは別レイヤ）
+  const [scopesShown, setScopesShown] = useState(true);
+  // ドラッグ/リサイズ中のスコープ位置・サイズの一時上書き（pointerup で確定）
+  const [scopeDraft, setScopeDraft] = useState<
+    Record<string, { x: number; y: number; w: number; h: number }>
+  >({});
+  const scopeDragRef = useRef<
+    | {
+        id: string;
+        mode: 'move' | 'resize';
+        startX: number; // pointerdown 時のワールド座標
+        startY: number;
+        baseX: number; // pointerdown 時の矩形
+        baseY: number;
+        baseW: number;
+        baseH: number;
+        moved: boolean;
+        // pointermove で更新する確定用の最新矩形（state は非同期なのでここで保持）
+        last: { x: number; y: number; w: number; h: number };
+      }
+    | null
+  >(null);
+
+  // ===== Mermaidから生成ダイアログ =====
+  const [showMermaidImport, setShowMermaidImport] = useState(false);
+  const [mermaidImportText, setMermaidImportText] = useState('');
+  const [mermaidImporting, setMermaidImporting] = useState(false);
+  const [mermaidImportError, setMermaidImportError] = useState<string | null>(null);
+
+  // 注釈を「スコープ囲み」と「付箋/メモ」に振り分け（描画レイヤ・操作系が異なる）
+  const scopeAnnotations = useMemo(
+    () => annotations.filter((a) => a.kind === 'SCOPE'),
+    [annotations],
+  );
+  const noteAnnotations = useMemo(
+    () => annotations.filter((a) => a.kind !== 'SCOPE'),
+    [annotations],
+  );
+
   const objectById = useMemo(() => new Map(objects.map((o) => [o.id, o] as const)), [objects]);
+  const subProjectById = useMemo(
+    () => new Map(subProjects.map((s) => [s.id, s] as const)),
+    [subProjects],
+  );
   const editingRelation = edgeEdit ? relations.find((r) => r.id === edgeEdit.id) ?? null : null;
+  const selectedScope = selectedScopeId
+    ? scopeAnnotations.find((a) => a.id === selectedScopeId) ?? null
+    : null;
 
   const posOf = useCallback(
     (o: DataObjectDto): Point => dragPos[o.id] ?? { x: o.positionX, y: o.positionY },
@@ -262,21 +396,30 @@ export function ObjectMapCanvas({
     return { x: (clientX - rect.left - v.x) / v.k, y: (clientY - rect.top - v.y) / v.k };
   }, []);
 
-  // ===== ズーム（ホイール。React の onWheel は passive のため native で登録） =====
+  // ===== ホイール: ズーム（Ctrl+wheel / Macピンチ）/ パン（2本指スクロール） =====
+  // React の onWheel は passive のため native で登録。
+  // e.ctrlKey===true（Macのピンチや Ctrl+wheel）はズーム、それ以外（トラックパッド2本指
+  // スクロール・通常ホイール）はパン（view を deltaX/deltaY ぶん動かす）。
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      setView((v) => {
-        const k = clamp(v.k * Math.exp(-e.deltaY * 0.0015), 0.25, 2.5);
-        const wx = (px - v.x) / v.k;
-        const wy = (py - v.y) / v.k;
-        return { k, x: px - wx * k, y: py - wy * k };
-      });
+      if (e.ctrlKey) {
+        // ズーム（カーソル位置を中心に拡縮）
+        const rect = el.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        setView((v) => {
+          const k = clamp(v.k * Math.exp(-e.deltaY * 0.0015), 0.25, 2.5);
+          const wx = (px - v.x) / v.k;
+          const wy = (py - v.y) / v.k;
+          return { k, x: px - wx * k, y: py - wy * k };
+        });
+      } else {
+        // パン（2本指スクロール）。横方向は deltaX、縦方向は deltaY。
+        setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -334,6 +477,7 @@ export function ObjectMapCanvas({
       setConnectMode(false);
       setEdgeEdit(null);
       setEditingAnnotationId(null);
+      setSelectedScopeId(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -581,6 +725,109 @@ export function ObjectMapCanvas({
     [annotations.length, screenToWorld, onAddAnnotation],
   );
 
+  // ===== スコープ囲み =====
+  // 描画時の矩形（ドラッグ/リサイズ中は draft で上書き）
+  const scopeRect = useCallback(
+    (a: DataObjectAnnotationDto): { x: number; y: number; w: number; h: number } => {
+      const d = scopeDraft[a.id];
+      if (d) return d;
+      return {
+        x: a.positionX,
+        y: a.positionY,
+        w: a.width ?? SCOPE_W,
+        h: a.height ?? SCOPE_H,
+      };
+    },
+    [scopeDraft],
+  );
+
+  // スコープ囲みの新規作成位置 = 現在のビュー中心付近
+  const addScopeAtCenter = useCallback(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const c = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    void onAddScope(Math.round(c.x - SCOPE_W / 2), Math.round(c.y - SCOPE_H / 2));
+  }, [screenToWorld, onAddScope]);
+
+  // スコープ囲みのドラッグ移動 / 右下ハンドルでのリサイズ（pointerup で確定→親が保存＋紐付け）
+  const handleScopePointerDown = useCallback(
+    (e: ReactPointerEvent<SVGElement>, a: DataObjectAnnotationDto, mode: 'move' | 'resize') => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const world = screenToWorld(e.clientX, e.clientY);
+      const base = scopeRect(a);
+      scopeDragRef.current = {
+        id: a.id,
+        mode,
+        startX: world.x,
+        startY: world.y,
+        baseX: base.x,
+        baseY: base.y,
+        baseW: base.w,
+        baseH: base.h,
+        moved: false,
+        last: { x: base.x, y: base.y, w: base.w, h: base.h },
+      };
+      setSelectedScopeId(a.id);
+
+      const onMove = (ev: PointerEvent) => {
+        const d = scopeDragRef.current;
+        if (!d) return;
+        const w = screenToWorld(ev.clientX, ev.clientY);
+        const dx = w.x - d.startX;
+        const dy = w.y - d.startY;
+        if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
+        const next =
+          d.mode === 'move'
+            ? { x: Math.round(d.baseX + dx), y: Math.round(d.baseY + dy), w: d.baseW, h: d.baseH }
+            : {
+                x: d.baseX,
+                y: d.baseY,
+                w: Math.max(SCOPE_MIN_W, Math.round(d.baseW + dx)),
+                h: Math.max(SCOPE_MIN_H, Math.round(d.baseH + dy)),
+              };
+        d.last = next; // 確定用に最新値を ref に保持（state は非同期のため）
+        setScopeDraft({ [d.id]: next });
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        const d = scopeDragRef.current;
+        scopeDragRef.current = null;
+        if (!d) return;
+        if (d.moved) {
+          onScopeGeometryChanged(d.id, {
+            positionX: d.last.x,
+            positionY: d.last.y,
+            width: d.last.w,
+            height: d.last.h,
+          });
+        }
+        setScopeDraft({});
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [screenToWorld, scopeRect, onScopeGeometryChanged],
+  );
+
+  // ===== Mermaidから生成 =====
+  const handleMermaidImport = useCallback(async () => {
+    if (!mermaidImportText.trim()) return;
+    setMermaidImporting(true);
+    setMermaidImportError(null);
+    try {
+      await onImportMermaid(mermaidImportText);
+      setShowMermaidImport(false);
+      setMermaidImportText('');
+    } catch (err) {
+      setMermaidImportError(err instanceof Error ? err.message : 'Mermaidからの生成に失敗しました');
+    } finally {
+      setMermaidImporting(false);
+    }
+  }, [mermaidImportText, onImportMermaid]);
+
   // ===== 背景パン / 背景クリックで選択解除 =====
   const handleBackgroundPointerDown = useCallback(
     (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -602,12 +849,13 @@ export function ObjectMapCanvas({
         const p = panRef.current;
         panRef.current = null;
         if (p && !p.moved) {
-          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップ/注釈編集を閉じる
+          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップ/注釈編集・スコープ選択を閉じる
           onSelectObject(null);
           setConnectSourceId(null);
           setConnectSourceHandle(null);
           setEdgeEdit(null);
           setEditingAnnotationId(null);
+          setSelectedScopeId(null);
         }
       };
       window.addEventListener('pointermove', onMove);
@@ -811,6 +1059,69 @@ export function ObjectMapCanvas({
         <rect width="100%" height="100%" fill="url(#object-map-dots)" />
 
         <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
+          {/* ===== スコープ囲み（最背面。低z。ドラッグ移動・右下ハンドルでリサイズ） =====
+              囲みはオブジェクト選択/接続/関係線の対象にしない（専用ハンドルのみ反応）。 */}
+          {scopesShown &&
+            scopeAnnotations.map((a) => {
+              if (a.visible === false) return null; // 個別非表示
+              const r = scopeRect(a);
+              const color = a.color && a.color.trim() !== '' ? a.color : DEFAULT_SCOPE_COLOR;
+              const dashed = a.borderStyle !== 'solid'; // 未設定/dashed は点線
+              const fillOpacity = a.fillOpacity ?? 0.08;
+              const sp = a.subProjectId ? subProjectById.get(a.subProjectId) ?? null : null;
+              const areaLabel = sp ? sp.name : '領域未設定';
+              const selected = selectedScopeId === a.id;
+              return (
+                <g key={a.id}>
+                  {/* 矩形本体（塗り＋枠）。本体ドラッグで移動 */}
+                  <rect
+                    x={r.x}
+                    y={r.y}
+                    width={r.w}
+                    height={r.h}
+                    rx={10}
+                    fill={color}
+                    fillOpacity={fillOpacity}
+                    stroke={color}
+                    strokeWidth={selected ? 2 : 1.5}
+                    strokeDasharray={dashed ? '8 5' : undefined}
+                    style={{ cursor: 'move' }}
+                    onPointerDown={(e) => handleScopePointerDown(e, a, 'move')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedScopeId(a.id);
+                    }}
+                  />
+                  {/* 左上の領域名ラベル */}
+                  <foreignObject x={r.x + 6} y={r.y + 6} width={Math.max(40, r.w - 12)} height={22}>
+                    <div className="pointer-events-none flex">
+                      <span
+                        className="inline-flex max-w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] font-semibold text-white shadow-sm"
+                        style={{ background: color }}
+                      >
+                        <Frame className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{areaLabel}</span>
+                      </span>
+                    </div>
+                  </foreignObject>
+                  {/* 右下リサイズハンドル */}
+                  <rect
+                    x={r.x + r.w - 9}
+                    y={r.y + r.h - 9}
+                    width={14}
+                    height={14}
+                    rx={3}
+                    fill="#ffffff"
+                    stroke={color}
+                    strokeWidth={1.5}
+                    style={{ cursor: 'nwse-resize' }}
+                    onPointerDown={(e) => handleScopePointerDown(e, a, 'resize')}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </g>
+              );
+            })}
+
           {/* ===== エッジ ===== */}
           {edgeGeometries.map(({ rel, path, mid, srcMark, tgtMark, arrowTip, arrowL, arrowR }) => {
             const style = CARDINALITY_STYLES[rel.cardinality];
@@ -932,7 +1243,7 @@ export function ObjectMapCanvas({
           )}
 
           {/* ===== 付箋/メモ（接続モード・オブジェクト選択の対象外。カードの下層に描画） ===== */}
-          {annotations.map((a) => {
+          {noteAnnotations.map((a) => {
             const p = posOfAnnotation(a);
             const w = a.width ?? ANNOT_W;
             const h = a.height ?? ANNOT_H;
@@ -1160,6 +1471,41 @@ export function ObjectMapCanvas({
           <MessageSquare className="h-4 w-4 text-gray-500" />
           メモ
         </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1.5 px-2 text-xs"
+          onClick={addScopeAtCenter}
+          title="領域（業務範囲）を囲む矩形を追加します"
+        >
+          <Frame className="h-4 w-4 text-indigo-500" />
+          スコープ
+        </Button>
+        <div className="mx-0.5 h-5 w-px bg-gray-200" />
+        <Button
+          size="sm"
+          variant={scopesShown ? 'ghost' : 'default'}
+          className="h-8 gap-1.5 px-2 text-xs"
+          onClick={() => setScopesShown((s) => !s)}
+          title="スコープ囲みの表示/非表示を切り替えます"
+        >
+          {scopesShown ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          囲み{scopesShown ? '表示' : '非表示'}
+        </Button>
+        <div className="mx-0.5 h-5 w-px bg-gray-200" />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1.5 px-2 text-xs"
+          onClick={() => {
+            setMermaidImportError(null);
+            setShowMermaidImport(true);
+          }}
+          title="Mermaid記法からオブジェクトと関係を一括生成します"
+        >
+          <Wand2 className="h-4 w-4 text-violet-500" />
+          mermaidから生成
+        </Button>
       </div>
 
       {/* ===== ズーム操作（右下） ===== */}
@@ -1333,6 +1679,197 @@ export function ObjectMapCanvas({
           </div>
         </div>
       )}
+
+      {/* ===== スコープ囲み編集パネル（右上。囲み選択時） ===== */}
+      {selectedScope && (
+        <div
+          className="absolute right-3 top-3 z-10 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+              <Frame className="h-3.5 w-3.5 text-indigo-500" />
+              スコープ囲み
+            </p>
+            <button
+              type="button"
+              className="text-gray-400 hover:text-gray-600"
+              onClick={() => setSelectedScopeId(null)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="space-y-3">
+            {/* 領域（SubProject） */}
+            <div>
+              <label className="mb-1 block text-[11px] font-medium text-gray-500">領域</label>
+              <SubProjectPicker
+                subProjects={subProjects}
+                value={selectedScope.subProjectId ?? ''}
+                onChange={(v) =>
+                  void onUpdateScope(selectedScope.id, { subProjectId: v === '' ? null : v })
+                }
+                placeholder="領域を選択（未設定）"
+                className="w-full"
+              />
+              {selectedScope.subProjectId ? (
+                <p className="mt-1 text-[11px] text-gray-400">
+                  この囲みの内側にあるオブジェクトを「
+                  {subProjectPath(selectedScope.subProjectId, subProjects)}」に自動で紐付けます。
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-amber-600">
+                  領域を選ぶと、囲みの内側のオブジェクトを自動でその領域に紐付けます。
+                </p>
+              )}
+            </div>
+
+            {/* 色 */}
+            <div>
+              <label className="mb-1 block text-[11px] font-medium text-gray-500">色</label>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SCOPE_COLORS.map((c) => {
+                  const cur =
+                    selectedScope.color && selectedScope.color.trim() !== ''
+                      ? selectedScope.color
+                      : DEFAULT_SCOPE_COLOR;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110"
+                      style={{ background: c, borderColor: c === cur ? '#0f172a' : 'transparent' }}
+                      title={c}
+                      onClick={() => void onUpdateScope(selectedScope.id, { color: c })}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 枠線 */}
+            <div>
+              <label className="mb-1 block text-[11px] font-medium text-gray-500">枠線</label>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={(selectedScope.borderStyle ?? 'dashed') === 'dashed' ? 'default' : 'outline'}
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => void onUpdateScope(selectedScope.id, { borderStyle: 'dashed' })}
+                >
+                  点線
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedScope.borderStyle === 'solid' ? 'default' : 'outline'}
+                  className="h-7 flex-1 text-xs"
+                  onClick={() => void onUpdateScope(selectedScope.id, { borderStyle: 'solid' })}
+                >
+                  実線
+                </Button>
+              </div>
+            </div>
+
+            {/* 表示/非表示トグル（永続） */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-gray-500">この囲みを表示</span>
+              <Button
+                size="sm"
+                variant={selectedScope.visible === false ? 'outline' : 'default'}
+                className="h-7 gap-1.5 px-2 text-xs"
+                onClick={() =>
+                  void onUpdateScope(selectedScope.id, {
+                    visible: selectedScope.visible === false ? true : false,
+                  })
+                }
+              >
+                {selectedScope.visible === false ? (
+                  <>
+                    <EyeOff className="h-3.5 w-3.5" />
+                    非表示
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-3.5 w-3.5" />
+                    表示
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* 削除 */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 w-full gap-1.5 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+              onClick={() => {
+                if (!window.confirm('このスコープ囲みを削除しますか？')) return;
+                setSelectedScopeId(null);
+                void onDeleteScope(selectedScope.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              囲みを削除
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== mermaidから生成ダイアログ ===== */}
+      <Dialog
+        open={showMermaidImport}
+        onOpenChange={(open) => {
+          if (!open && !mermaidImporting) setShowMermaidImport(false);
+        }}
+      >
+        <DialogContent className="max-w-2xl bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">mermaidから生成</DialogTitle>
+            <DialogDescription className="text-gray-500">
+              Mermaid記法（erDiagram / classDiagram / flowchart）を貼り付けると、オブジェクトと関係線を解析してこのマップへ一括追加します。
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={mermaidImportText}
+            onChange={(e) => setMermaidImportText(e.target.value)}
+            placeholder={'erDiagram\n  CUSTOMER ||--o{ ORDER : places'}
+            rows={12}
+            className="min-h-[240px] font-mono text-xs text-gray-800"
+            disabled={mermaidImporting}
+          />
+          {mermaidImportError && (
+            <div className="flex items-start gap-2 text-sm text-red-600">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{mermaidImportError}</span>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+              disabled={mermaidImporting}
+              className="mr-auto text-gray-600"
+              title="サンプルで上書きします"
+            >
+              サンプルを表示
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowMermaidImport(false)}
+              disabled={mermaidImporting}
+            >
+              キャンセル
+            </Button>
+            <Button
+              onClick={() => void handleMermaidImport()}
+              disabled={mermaidImporting || !mermaidImportText.trim()}
+            >
+              {mermaidImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              生成
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

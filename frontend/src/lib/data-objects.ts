@@ -36,6 +36,8 @@ export interface DataObjectDto {
   name: string;
   description: string | null;
   color: string | null;
+  /** 所属領域（SubProject）ID。null は未分類。 */
+  subProjectId: string | null;
   positionX: number;
   positionY: number;
   order: number;
@@ -61,10 +63,13 @@ export interface ObjectRelationDto {
   targetHandle: string | null;
 }
 
-/** 付箋/メモの種別（STICKY=付箋, COMMENT=メモ） */
-export type DataObjectAnnotationKind = 'STICKY' | 'COMMENT';
+/** 付箋/メモ/スコープ囲みの種別（STICKY=付箋, COMMENT=メモ, SCOPE=領域囲み） */
+export type DataObjectAnnotationKind = 'STICKY' | 'COMMENT' | 'SCOPE';
 
-/** オブジェクト関係性マップ上の付箋/メモ（FlowAnnotation / DfdAnnotation と同型） */
+/**
+ * オブジェクト関係性マップ上の付箋/メモ/スコープ囲み（FlowAnnotation / DfdAnnotation と同型）。
+ * SCOPE は業務領域（SubProject）を点線/背景色つき矩形でカードの背面に囲う注釈。
+ */
 export interface DataObjectAnnotationDto {
   id: string;
   projectId: string;
@@ -75,6 +80,14 @@ export interface DataObjectAnnotationDto {
   width: number | null;
   height: number | null;
   color: string | null;
+  /** SCOPE の枠線スタイル（'dashed' | 'solid'）。未設定は dashed 扱い。 */
+  borderStyle: 'dashed' | 'solid' | null;
+  /** SCOPE の背景塗りの不透明度（0〜1）。未設定は薄め既定。 */
+  fillOpacity: number | null;
+  /** SCOPE が表す領域（SubProject）ID。null は領域未設定。 */
+  subProjectId: string | null;
+  /** SCOPE の表示/非表示（false で囲みを隠す）。 */
+  visible: boolean | null;
   order: number;
   updatedAt: string;
 }
@@ -167,6 +180,8 @@ export const dataObjectApi = {
       name: string;
       description?: string | null;
       color?: string | null;
+      /** 所属領域（SubProject）ID。未指定/null は未分類。 */
+      subProjectId?: string | null;
       positionX?: number;
       positionY?: number;
       order?: number;
@@ -179,16 +194,33 @@ export const dataObjectApi = {
     return res.json();
   },
 
-  /** データオブジェクト更新（name/description/color/order）。PATCH /api/data-objects/:id */
+  /** データオブジェクト更新（name/description/color/subProjectId/order）。PATCH /api/data-objects/:id */
   async updateObject(
     id: string,
-    patch: { name?: string; description?: string | null; color?: string | null; order?: number },
+    patch: {
+      name?: string;
+      description?: string | null;
+      color?: string | null;
+      subProjectId?: string | null;
+      order?: number;
+    },
   ): Promise<DataObjectDto> {
     const res = await fetch(`${API_URL}/api/data-objects/${id}`, {
       method: 'PATCH', headers: headers(), body: JSON.stringify(patch),
     });
     if (!res.ok) throw new Error('オブジェクトの更新に失敗しました');
     return res.json();
+  },
+
+  /**
+   * オブジェクトを領域（SubProject）へ紐付け/解除。
+   * subProjectId=null（または空文字）で未分類に戻す。PUT /api/data-objects/:id/sub-project
+   */
+  async linkObjectToSubProject(id: string, subProjectId: string | null): Promise<void> {
+    const res = await fetch(`${API_URL}/api/data-objects/${id}/sub-project`, {
+      method: 'PUT', headers: headers(), body: JSON.stringify({ subProjectId }),
+    });
+    if (!res.ok) throw new Error('領域の紐付けに失敗しました');
   },
 
   /** データオブジェクト削除。DELETE /api/data-objects/:id */
@@ -285,6 +317,29 @@ export const dataObjectApi = {
     });
     if (!res.ok) throw new Error('テーブルの紐づけに失敗しました');
   },
+
+  /**
+   * Mermaid（erDiagram/classDiagram/flowchart）を解析して objects/relations を一括生成。
+   * 生成後の ObjectGraph を返す。POST /api/projects/:projectId/data-objects/import-mermaid
+   */
+  async importMermaid(projectId: string, mermaid: string): Promise<ObjectGraphDto> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/data-objects/import-mermaid`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ mermaid }),
+    });
+    if (!res.ok) {
+      // Anthropic鍵未設定時など、バックエンドが分かりやすい 400 メッセージを返す
+      let msg = 'Mermaidからの生成に失敗しました';
+      try {
+        const data = await res.json();
+        if (data?.message) msg = data.message;
+        else if (data?.error) msg = data.error;
+      } catch {
+        /* JSON でなければ既定メッセージ */
+      }
+      throw new Error(msg);
+    }
+    return res.json();
+  },
 };
 
 /** オブジェクト関係性マップ上の付箋/メモ API */
@@ -296,7 +351,7 @@ export const dataObjectAnnotationApi = {
     return res.json();
   },
 
-  /** 付箋/メモ作成。POST /api/projects/:projectId/data-object-annotations */
+  /** 付箋/メモ/スコープ囲み作成。POST /api/projects/:projectId/data-object-annotations */
   async create(
     projectId: string,
     body: {
@@ -304,7 +359,17 @@ export const dataObjectAnnotationApi = {
       text: string;
       positionX: number;
       positionY: number;
+      width?: number | null;
+      height?: number | null;
       color?: string | null;
+      /** SCOPE 用: 枠線スタイル */
+      borderStyle?: 'dashed' | 'solid' | null;
+      /** SCOPE 用: 背景塗りの不透明度（0〜1） */
+      fillOpacity?: number | null;
+      /** SCOPE 用: 表す領域（SubProject）ID */
+      subProjectId?: string | null;
+      /** SCOPE 用: 表示/非表示 */
+      visible?: boolean | null;
       order?: number;
     },
   ): Promise<DataObjectAnnotationDto> {
@@ -315,7 +380,7 @@ export const dataObjectAnnotationApi = {
     return res.json();
   },
 
-  /** 付箋/メモ更新。PATCH /api/data-object-annotations/:id */
+  /** 付箋/メモ/スコープ囲み更新。PATCH /api/data-object-annotations/:id */
   async update(
     id: string,
     patch: {
@@ -325,6 +390,14 @@ export const dataObjectAnnotationApi = {
       width?: number | null;
       height?: number | null;
       color?: string | null;
+      /** SCOPE 用: 枠線スタイル */
+      borderStyle?: 'dashed' | 'solid' | null;
+      /** SCOPE 用: 背景塗りの不透明度（0〜1） */
+      fillOpacity?: number | null;
+      /** SCOPE 用: 表す領域（SubProject）ID（null で領域未設定へ） */
+      subProjectId?: string | null;
+      /** SCOPE 用: 表示/非表示 */
+      visible?: boolean | null;
       order?: number;
     },
   ): Promise<DataObjectAnnotationDto> {
@@ -335,9 +408,20 @@ export const dataObjectAnnotationApi = {
     return res.json();
   },
 
-  /** 付箋/メモ削除。DELETE /api/data-object-annotations/:id */
+  /** 付箋/メモ/スコープ囲み削除。DELETE /api/data-object-annotations/:id */
   async remove(id: string): Promise<void> {
     const res = await fetch(`${API_URL}/api/data-object-annotations/${id}`, { method: 'DELETE', headers: headers() });
     if (!res.ok) throw new Error('付箋/メモの削除に失敗しました');
+  },
+
+  /**
+   * SCOPE 注釈の矩形に中心が入る DataObject を、注釈の領域（subProjectId）へ一括紐付け。
+   * subProjectId 未設定の注釈では何もしない。POST /api/data-object-annotations/:id/apply-scope-links
+   */
+  async applyScopeLinks(annotationId: string): Promise<void> {
+    const res = await fetch(`${API_URL}/api/data-object-annotations/${annotationId}/apply-scope-links`, {
+      method: 'POST', headers: headers(),
+    });
+    if (!res.ok) throw new Error('囲み内オブジェクトの領域紐付けに失敗しました');
   },
 };

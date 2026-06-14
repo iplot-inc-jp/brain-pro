@@ -21,6 +21,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { tablesApi, type Table } from '@/lib/api';
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   dataObjectApi,
   dataObjectAnnotationApi,
@@ -34,7 +35,11 @@ import { ObjectMapCanvas } from './_components/ObjectMapCanvas';
 import { ObjectDetailPanel } from './_components/ObjectDetailPanel';
 import { ObjectListTable } from './_components/ObjectListTable';
 import { RelationListTable } from './_components/RelationListTable';
+import { ObjectScopeLinkPanel } from './_components/ObjectScopeLinkPanel';
 import { DEFAULT_OBJECT_COLOR, OBJECT_COLORS } from './_components/object-map-shared';
+
+/** スコープ囲みの既定色（インディゴ。キャンバスの DEFAULT_SCOPE_COLOR と揃える） */
+const DEFAULT_SCOPE_COLOR = '#6366f1';
 
 export default function ObjectMapPage() {
   const params = useParams();
@@ -44,10 +49,13 @@ export default function ObjectMapPage() {
   const [graph, setGraph] = useState<ObjectGraphDto | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
   const [annotations, setAnnotations] = useState<DataObjectAnnotationDto[]>([]);
+  const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  // 領域紐付けパネルで保存中のオブジェクトID（ピッカーを一時無効化）
+  const [savingScopeObjectId, setSavingScopeObjectId] = useState<string | null>(null);
 
   const showError = useCallback(
     (err: unknown, fallback: string) => {
@@ -65,14 +73,16 @@ export default function ObjectMapPage() {
       if (withSpinner) setLoading(true);
       setError(null);
       try {
-        const [g, t, a] = await Promise.all([
+        const [g, t, a, sp] = await Promise.all([
           dataObjectApi.getGraph(projectId),
           tablesApi.list(projectId).catch(() => [] as Table[]),
           dataObjectAnnotationApi.list(projectId).catch(() => [] as DataObjectAnnotationDto[]),
+          subProjectApi.list(projectId).catch(() => [] as SubProjectMaster[]),
         ]);
         setGraph(g);
         setTables(t);
         setAnnotations(a);
+        setSubProjects(sp);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -336,6 +346,179 @@ export default function ObjectMapPage() {
     [showError],
   );
 
+  // ===== スコープ囲み（領域） =====
+  // 作成（既定サイズ 320×200・点線・薄塗り・領域未設定）
+  const handleAddScope = useCallback(
+    async (positionX: number, positionY: number) => {
+      try {
+        const created = await dataObjectAnnotationApi.create(projectId, {
+          kind: 'SCOPE',
+          text: '',
+          positionX: Math.round(positionX),
+          positionY: Math.round(positionY),
+          width: 320,
+          height: 200,
+          borderStyle: 'dashed',
+          fillOpacity: 0.08,
+          color: DEFAULT_SCOPE_COLOR,
+          order: annotations.length,
+        });
+        setAnnotations((list) => [...list, created]);
+      } catch (err) {
+        showError(err, 'スコープ囲みの作成に失敗しました');
+      }
+    },
+    [projectId, annotations.length, showError],
+  );
+
+  // スコープ囲みの位置/サイズのデバウンス保存（オブジェクト位置と同じパターン）。
+  // 確定後、その囲みに領域(subProjectId)があれば applyScopeLinks→グラフ再取得で内側を自動紐付け。
+  const pendingScopeGeom = useRef(
+    new Map<string, { positionX: number; positionY: number; width: number; height: number }>(),
+  );
+  const scopeGeomTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (scopeGeomTimer.current) clearTimeout(scopeGeomTimer.current);
+    };
+  }, []);
+
+  const handleScopeGeometryChanged = useCallback(
+    (
+      id: string,
+      geom: { positionX: number; positionY: number; width: number; height: number },
+    ) => {
+      // 楽観更新（再取得しないので fitView も飛ばない）
+      setAnnotations((list) =>
+        list.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                positionX: geom.positionX,
+                positionY: geom.positionY,
+                width: geom.width,
+                height: geom.height,
+              }
+            : a,
+        ),
+      );
+      pendingScopeGeom.current.set(id, geom);
+      if (scopeGeomTimer.current) clearTimeout(scopeGeomTimer.current);
+      scopeGeomTimer.current = setTimeout(() => {
+        const entries = Array.from(pendingScopeGeom.current.entries());
+        pendingScopeGeom.current.clear();
+        if (entries.length === 0) return;
+        void (async () => {
+          try {
+            // まず位置/サイズを保存
+            await Promise.all(
+              entries.map(([scopeId, g]) =>
+                dataObjectAnnotationApi.update(scopeId, {
+                  positionX: g.positionX,
+                  positionY: g.positionY,
+                  width: g.width,
+                  height: g.height,
+                }),
+              ),
+            );
+            // 領域が設定済みの囲みは内側オブジェクトを自動紐付け
+            const withArea = entries.filter(([scopeId]) => {
+              const sc = annotations.find((a) => a.id === scopeId);
+              return sc?.subProjectId;
+            });
+            if (withArea.length > 0) {
+              await Promise.all(
+                withArea.map(([scopeId]) => dataObjectAnnotationApi.applyScopeLinks(scopeId)),
+              );
+              await refresh(); // 紐付け結果をグラフへ反映
+            }
+          } catch (err) {
+            showError(err, 'スコープ囲みの保存に失敗しました');
+          }
+        })();
+      }, 600);
+    },
+    [annotations, refresh, showError],
+  );
+
+  // スコープ囲みのプロパティ更新（領域/色/枠線/表示）。
+  // 領域(subProjectId)を変更したときは、保存後に applyScopeLinks→グラフ再取得で内側を自動紐付け。
+  const handleUpdateScope = useCallback(
+    async (
+      id: string,
+      patch: {
+        subProjectId?: string | null;
+        color?: string | null;
+        borderStyle?: 'dashed' | 'solid' | null;
+        fillOpacity?: number | null;
+        visible?: boolean | null;
+      },
+    ) => {
+      // 楽観更新（色・枠線・表示・領域の即時反映でちらつき抑制）
+      setAnnotations((list) => list.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+      try {
+        await dataObjectAnnotationApi.update(id, patch);
+        // 領域を「設定」したときだけ囲み内オブジェクトを自動紐付け。
+        // クリア（subProjectId=null/空）時は applyScopeLinks が 400 を返すためスキップする
+        // （既存オブジェクトの紐付けは別途解除しない現仕様に合致）。
+        if (patch.subProjectId) {
+          await dataObjectAnnotationApi.applyScopeLinks(id);
+          await refresh();
+        }
+      } catch (err) {
+        showError(err, 'スコープ囲みの更新に失敗しました');
+        await refresh();
+      }
+    },
+    [refresh, showError],
+  );
+
+  const handleDeleteScope = useCallback(
+    async (id: string) => {
+      try {
+        await dataObjectAnnotationApi.remove(id);
+        setAnnotations((list) => list.filter((a) => a.id !== id));
+      } catch (err) {
+        showError(err, 'スコープ囲みの削除に失敗しました');
+      }
+    },
+    [showError],
+  );
+
+  // ===== Mermaidから生成 =====
+  const handleImportMermaid = useCallback(
+    async (mermaid: string) => {
+      // 失敗時はキャンバス側ダイアログがエラー表示するので throw する
+      const g = await dataObjectApi.importMermaid(projectId, mermaid);
+      setGraph(g);
+      await refresh(); // 注釈などその他もまとめて再取得（楽観の取りこぼし防止）
+    },
+    [projectId, refresh],
+  );
+
+  // ===== オブジェクトの領域紐付け（領域紐付けパネル） =====
+  const handleLinkObjectToSubProject = useCallback(
+    async (objectId: string, subProjectId: string | null) => {
+      setSavingScopeObjectId(objectId);
+      // 楽観更新
+      setGraph((g) =>
+        g
+          ? { ...g, objects: g.objects.map((o) => (o.id === objectId ? { ...o, subProjectId } : o)) }
+          : g,
+      );
+      try {
+        await dataObjectApi.linkObjectToSubProject(objectId, subProjectId);
+      } catch (err) {
+        showError(err, '領域の紐付けに失敗しました');
+        await refresh();
+      } finally {
+        setSavingScopeObjectId(null);
+      }
+    },
+    [refresh, showError],
+  );
+
   // ===== テーブル紐づけ =====
   const handleLinkTable = useCallback(
     async (tableId: string, dataObjectId: string | null) => {
@@ -446,6 +629,7 @@ export default function ObjectMapPage() {
                 objects={objects}
                 relations={relations}
                 annotations={annotations}
+                subProjects={subProjects}
                 selectedObjectId={selectedObjectId}
                 onSelectObject={setSelectedObjectId}
                 onObjectMoved={handleObjectMoved}
@@ -461,6 +645,11 @@ export default function ObjectMapPage() {
                 onAnnotationMoved={handleAnnotationMoved}
                 onUpdateAnnotationText={handleUpdateAnnotationText}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onAddScope={handleAddScope}
+                onScopeGeometryChanged={handleScopeGeometryChanged}
+                onUpdateScope={handleUpdateScope}
+                onDeleteScope={handleDeleteScope}
+                onImportMermaid={handleImportMermaid}
               />
             </div>
             {selectedObject && (
@@ -512,6 +701,13 @@ export default function ObjectMapPage() {
                 onDelete={handleDeleteRelation}
               />
             </div>
+            {/* ===== 領域紐付け（オブジェクト × 領域） ===== */}
+            <ObjectScopeLinkPanel
+              objects={objects}
+              subProjects={subProjects}
+              savingObjectId={savingScopeObjectId}
+              onLinkChange={handleLinkObjectToSubProject}
+            />
           </div>
         </>
       )}
