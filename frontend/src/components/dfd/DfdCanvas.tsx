@@ -44,6 +44,7 @@ import {
   useReactFlow,
   useNodesState,
   ConnectionMode,
+  SelectionMode,
   type Node,
   type Edge,
   type EdgeProps,
@@ -69,6 +70,8 @@ import {
   Boxes,
   StickyNote,
   MessageSquarePlus,
+  MousePointer2,
+  Hand,
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -834,6 +837,11 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // 操作モード（選択 / 移動）。SwimlaneCanvas と同じトグル。
+  //   - 'select': 左ドラッグで範囲選択・ノード移動。中/右ドラッグで画面パン。Space 押しながら左ドラッグでもパン。
+  //   - 'move'  : 左ドラッグで画面パン。
+  // 付箋/メモの注釈・ノードの既存ドラッグ・接続は SelectionMode.Partial と panOnDrag=[1,2] で両立する。
+  const [interactMode, setInteractMode] = useState<'select' | 'move'>('select');
   // 全画面トグル（fixed inset-0 z-50 オーバーレイ）。Esc で解除。
   const [isFullscreen, setIsFullscreen] = useState(false);
   // オブジェクト追加ピッカー（既存オブジェクト選択 or 新規名入力）。
@@ -1293,6 +1301,14 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           // 2本指スクロール=パン（移動）。ズームはピンチ（zoomOnPinch 既定true）と +/- コントロールで。
           panOnScroll
           zoomOnScroll={false}
+          // 操作モード:
+          //   選択モード … 左ドラッグ=範囲選択（＋ノード移動）/ 中・右ドラッグ=パン / Space+左ドラッグ=パン
+          //   移動モード … 左ドラッグ=パン
+          // SelectionMode.Partial で注釈（付箋/メモ）も含めた範囲選択がノード/接続のドラッグと両立する。
+          selectionOnDrag={interactMode === 'select'}
+          panOnDrag={interactMode === 'move' ? true : [1, 2]}
+          panActivationKeyCode={'Space'}
+          selectionMode={SelectionMode.Partial}
           proOptions={{ hideAttribution: true }}
           onNodeDragStop={handleNodeDragStop}
           onPaneClick={() => { setSelectedEdgeId(null); setSelectedNodeId(null); }}
@@ -1327,6 +1343,27 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           {/* ツールバー（右上） */}
           <Panel position="top-right" className="bg-white border border-gray-200 rounded-lg shadow-sm p-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
+              {/* 操作モード（選択 / 移動）のトグル。SwimlaneCanvas と同挙動。 */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setInteractMode((m) => (m === 'select' ? 'move' : 'select'))}
+                className="text-gray-700"
+                title="選択: ドラッグで範囲選択・ノード移動／移動: ドラッグで画面移動。選択中も Space 押しながらで画面移動"
+              >
+                {interactMode === 'select' ? (
+                  <>
+                    <MousePointer2 className="w-4 h-4 mr-1" />
+                    選択
+                  </>
+                ) : (
+                  <>
+                    <Hand className="w-4 h-4 mr-1" />
+                    移動
+                  </>
+                )}
+              </Button>
+              <span className="mx-0.5 h-5 w-px bg-gray-200" />
               <Button variant="outline" size="sm" onClick={handleAddExternal} disabled={!props.onAddNode} className="text-gray-700" title="外部実体（四角）を追加">
                 <Square className="w-4 h-4 mr-1" />外部実体
               </Button>

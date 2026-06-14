@@ -1667,7 +1667,9 @@ function InformationTypeSidePanel({
   informationTypes: InformationType[];
   onCreateInformationType?: SwimlaneCanvasProps['onCreateInformationType'];
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  // 既定は折りたたみ。展開時もロールレーン左端のラベル列に被らないよう左下隅に置く
+  // （従来は left-3 top-1/2 でレーンのロール名ラベルに重なって隠していた）。
+  const [collapsed, setCollapsed] = useState(true);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [category, setCategory] = useState<InformationCategory>('INFORMATION');
@@ -1695,18 +1697,17 @@ function InformationTypeSidePanel({
         type="button"
         onClick={() => setCollapsed(false)}
         title="INPUT/OUTPUT 候補（情報種別マスタ）を開く"
-        className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-2 text-[11px] font-medium text-gray-600 shadow-sm hover:bg-gray-50"
+        className="absolute bottom-4 left-3 z-20 flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[11px] font-medium text-gray-600 shadow-sm hover:bg-gray-50"
       >
         <Database className="h-4 w-4 text-indigo-500" />
-        <span className="[writing-mode:vertical-rl]">INPUT/OUTPUT候補</span>
+        <span>INPUT/OUTPUT候補</span>
       </button>
     );
   }
 
   return (
     <DraggableFloating
-      className="absolute left-3 top-1/2 z-20 flex max-h-[70%] w-56 flex-col rounded-lg border border-gray-200 bg-white shadow-md"
-      baseTransform="translateY(-50%)"
+      className="absolute bottom-14 left-3 z-20 flex max-h-[70%] w-56 flex-col rounded-lg border border-gray-200 bg-white shadow-md"
       bodyClassName="flex min-h-0 flex-1 flex-col"
       header={
         <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">

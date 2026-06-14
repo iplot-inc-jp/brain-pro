@@ -89,6 +89,18 @@ if (typeof window !== 'undefined') {
 
 type FlowTab = 'flow' | 'definition' | 'cruoa' | 'dfd';
 
+// Mermaidから生成ダイアログの「サンプルを表示」用テンプレート。
+// ロールを subgraph で表現する（parseMermaidToFlow の解析ルール: subgraph タイトル＝レーン）。
+// エクスポート（exportMermaid）の往復でも破綻しない flowchart TD 記法。
+const MERMAID_SAMPLE = `flowchart TD
+  subgraph 営業
+    A[受注受付] --> B[与信確認]
+  end
+  subgraph 物流
+    C[出荷指示] --> D[配送手配]
+  end
+  B --> C`;
+
 // ===========================================
 // DFDタブ：このフローのデータフロー図（get-or-generate）＋ 図 / 一覧表 サブ切替
 // ===========================================
@@ -2718,6 +2730,15 @@ export default function ProjectFlowDetailPage() {
             </div>
           )}
           <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+              disabled={mermaidImporting}
+              className="mr-auto text-gray-600"
+              title="サンプルで上書きします"
+            >
+              サンプルを表示
+            </Button>
             <Button
               variant="outline"
               onClick={() => setShowMermaidImport(false)}
