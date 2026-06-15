@@ -423,6 +423,7 @@ import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
 import { GithubService } from './infrastructure/services/github.service';
 import { CodeExtractionService } from './infrastructure/services/code-extraction.service';
+import { LlmUsageRecorder } from './infrastructure/services/llm-usage-recorder.service';
 import { SyncService } from './infrastructure/services/sync.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
 import { QStashService } from './infrastructure/services/qstash.service';
@@ -990,6 +991,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
     CompanyKeyService,
     GithubService,
     CodeExtractionService,
+    LlmUsageRecorder,
     SyncService,
     SyncSchedulerService,
     QStashService,
