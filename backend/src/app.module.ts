@@ -249,13 +249,18 @@ import {
   CancelBatchUseCase,
   RetryFileUseCase,
   SkipFileUseCase,
-  // Knowledge（ナレッジグラフ read + node/document 編集）
+  // Knowledge（ナレッジグラフ read + node/document/relation 編集）
   GetKnowledgeGraphUseCase,
   GetKnowledgeNodeUseCase,
   SearchKnowledgeUseCase,
   UpdateKnowledgeNodeUseCase,
   DeleteKnowledgeNodeUseCase,
+  MergeKnowledgeNodesUseCase,
   UpdateDocumentPositionUseCase,
+  UpdateKnowledgeDocumentUseCase,
+  DeleteKnowledgeDocumentUseCase,
+  UpdateKnowledgeRelationUseCase,
+  DeleteKnowledgeRelationUseCase,
   // KnowledgeSettings（課金ガード設定）
   GetOrCreateSettingsUseCase,
   UpdateSettingsUseCase,
@@ -442,6 +447,7 @@ import {
   KnowledgeProjectController,
   KnowledgeNodeController,
   KnowledgeDocumentController,
+  KnowledgeRelationController,
 } from './presentation/controllers/knowledge.controller';
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
 // ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
@@ -568,6 +574,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
     KnowledgeProjectController,
     KnowledgeNodeController,
     KnowledgeDocumentController,
+    KnowledgeRelationController,
     KnowledgeSettingsController,
     // Google Drive ソースアダプタ（Phase 3）
     DriveController,
@@ -946,13 +953,18 @@ import { DriveController } from './presentation/controllers/drive.controller';
     CancelBatchUseCase,
     RetryFileUseCase,
     SkipFileUseCase,
-    // Knowledge（ナレッジグラフ read + node/document 編集）
+    // Knowledge（ナレッジグラフ read + node/document/relation 編集）
     GetKnowledgeGraphUseCase,
     GetKnowledgeNodeUseCase,
     SearchKnowledgeUseCase,
     UpdateKnowledgeNodeUseCase,
     DeleteKnowledgeNodeUseCase,
+    MergeKnowledgeNodesUseCase,
     UpdateDocumentPositionUseCase,
+    UpdateKnowledgeDocumentUseCase,
+    DeleteKnowledgeDocumentUseCase,
+    UpdateKnowledgeRelationUseCase,
+    DeleteKnowledgeRelationUseCase,
     // KnowledgeSettings（課金ガード設定）
     GetOrCreateSettingsUseCase,
     UpdateSettingsUseCase,

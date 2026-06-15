@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Patch,
   Delete,
   Body,
@@ -17,20 +18,27 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiQuery,
+  ApiProperty,
   ApiPropertyOptional,
 } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsIn } from 'class-validator';
 import {
   GetKnowledgeGraphUseCase,
   GetKnowledgeNodeUseCase,
   SearchKnowledgeUseCase,
   UpdateKnowledgeNodeUseCase,
   DeleteKnowledgeNodeUseCase,
+  MergeKnowledgeNodesUseCase,
   UpdateDocumentPositionUseCase,
+  UpdateKnowledgeDocumentUseCase,
+  DeleteKnowledgeDocumentUseCase,
+  UpdateKnowledgeRelationUseCase,
+  DeleteKnowledgeRelationUseCase,
   KnowledgeGraphOutput,
   KnowledgeNodeDetailOutput,
   KnowledgeNodeOutput,
   KnowledgeDocumentOutput,
+  KnowledgeEdgeOutput,
   KnowledgeSearchOutput,
 } from '../../application';
 import {
@@ -67,6 +75,22 @@ class UpdateKnowledgeNodeDto {
   @IsOptional()
   @IsNumber()
   positionY?: number | null;
+
+  @ApiPropertyOptional({ description: '実体種別（PERSON/SYSTEM/ORG など）' })
+  @IsOptional()
+  @IsString()
+  entityKind?: string | null;
+
+  @ApiPropertyOptional({ description: 'ノード種別', enum: ['TAG', 'ENTITY'] })
+  @IsOptional()
+  @IsIn(['TAG', 'ENTITY'])
+  type?: 'TAG' | 'ENTITY';
+}
+
+class MergeKnowledgeNodeDto {
+  @ApiProperty({ description: 'マージ先（残る側）ノードID' })
+  @IsString()
+  targetNodeId!: string;
 }
 
 class UpdateDocumentPositionDto {
@@ -79,6 +103,30 @@ class UpdateDocumentPositionDto {
   @IsOptional()
   @IsNumber()
   positionY?: number | null;
+}
+
+class UpdateKnowledgeDocumentDto {
+  @ApiPropertyOptional({ description: 'タイトル' })
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @ApiPropertyOptional({ description: '要約' })
+  @IsOptional()
+  @IsString()
+  summary?: string | null;
+}
+
+class UpdateKnowledgeRelationDto {
+  @ApiPropertyOptional({ description: 'ラベル' })
+  @IsOptional()
+  @IsString()
+  label?: string | null;
+
+  @ApiPropertyOptional({ description: '関係の種別' })
+  @IsOptional()
+  @IsString()
+  type?: string | null;
 }
 
 @ApiTags('ナレッジグラフ')
@@ -130,6 +178,7 @@ export class KnowledgeNodeController {
     private readonly getKnowledgeNodeUseCase: GetKnowledgeNodeUseCase,
     private readonly updateKnowledgeNodeUseCase: UpdateKnowledgeNodeUseCase,
     private readonly deleteKnowledgeNodeUseCase: DeleteKnowledgeNodeUseCase,
+    private readonly mergeKnowledgeNodesUseCase: MergeKnowledgeNodesUseCase,
   ) {}
 
   @Get(':id')
@@ -144,7 +193,10 @@ export class KnowledgeNodeController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'ナレッジノード更新（label/description/color/position）' })
+  @ApiOperation({
+    summary:
+      'ナレッジノード更新（label/description/color/position/entityKind/type）',
+  })
   @ApiParam({ name: 'id', description: 'ノードID' })
   @ApiResponse({ status: 404, description: 'ノードが見つかりません' })
   async update(
@@ -160,6 +212,31 @@ export class KnowledgeNodeController {
       color: dto.color,
       positionX: dto.positionX,
       positionY: dto.positionY,
+      entityKind: dto.entityKind,
+      type: dto.type,
+    });
+  }
+
+  @Post(':id/merge')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'ナレッジノードマージ（:id を targetNodeId に統合して削除）',
+  })
+  @ApiParam({ name: 'id', description: 'マージ元ノードID' })
+  @ApiResponse({ status: 404, description: 'ノードが見つかりません' })
+  @ApiResponse({
+    status: 400,
+    description: '同一 / 別type / 別project はマージ不可',
+  })
+  async merge(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: MergeKnowledgeNodeDto,
+  ): Promise<KnowledgeNodeOutput> {
+    return this.mergeKnowledgeNodesUseCase.execute({
+      userId: user.id,
+      id,
+      targetNodeId: dto.targetNodeId,
     });
   }
 
@@ -185,6 +262,8 @@ export class KnowledgeNodeController {
 export class KnowledgeDocumentController {
   constructor(
     private readonly updateDocumentPositionUseCase: UpdateDocumentPositionUseCase,
+    private readonly updateKnowledgeDocumentUseCase: UpdateKnowledgeDocumentUseCase,
+    private readonly deleteKnowledgeDocumentUseCase: DeleteKnowledgeDocumentUseCase,
   ) {}
 
   @Patch(':id/position')
@@ -202,5 +281,79 @@ export class KnowledgeDocumentController {
       positionX: dto.positionX,
       positionY: dto.positionY,
     });
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'ナレッジ文書更新（title / summary）' })
+  @ApiParam({ name: 'id', description: '文書ID' })
+  @ApiResponse({ status: 404, description: '文書が見つかりません' })
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateKnowledgeDocumentDto,
+  ): Promise<KnowledgeDocumentOutput> {
+    return this.updateKnowledgeDocumentUseCase.execute({
+      userId: user.id,
+      id,
+      title: dto.title,
+      summary: dto.summary,
+    });
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'ナレッジ文書削除（mentions も削除・mentionCount 再計算）',
+  })
+  @ApiParam({ name: 'id', description: '文書ID' })
+  @ApiResponse({ status: 404, description: '文書が見つかりません' })
+  async remove(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean }> {
+    await this.deleteKnowledgeDocumentUseCase.execute({ userId: user.id, id });
+    return { success: true };
+  }
+}
+
+@ApiTags('ナレッジグラフ')
+@ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
+@Controller('knowledge-relations')
+export class KnowledgeRelationController {
+  constructor(
+    private readonly updateKnowledgeRelationUseCase: UpdateKnowledgeRelationUseCase,
+    private readonly deleteKnowledgeRelationUseCase: DeleteKnowledgeRelationUseCase,
+  ) {}
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'ナレッジ関係（エッジ）更新（label / type）' })
+  @ApiParam({ name: 'id', description: '関係ID' })
+  @ApiResponse({ status: 404, description: '関係が見つかりません' })
+  async update(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateKnowledgeRelationDto,
+  ): Promise<KnowledgeEdgeOutput> {
+    return this.updateKnowledgeRelationUseCase.execute({
+      userId: user.id,
+      id,
+      label: dto.label,
+      type: dto.type,
+    });
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'ナレッジ関係（エッジ）削除' })
+  @ApiParam({ name: 'id', description: '関係ID' })
+  @ApiResponse({ status: 404, description: '関係が見つかりません' })
+  async remove(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ): Promise<{ success: boolean }> {
+    await this.deleteKnowledgeRelationUseCase.execute({ userId: user.id, id });
+    return { success: true };
   }
 }

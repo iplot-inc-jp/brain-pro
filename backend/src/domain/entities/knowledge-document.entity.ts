@@ -1,4 +1,5 @@
 import { BaseEntity } from './base.entity';
+import { ValidationError } from '../errors';
 import { IngestionSourceTypeValue } from './ingestion-file.entity';
 
 export interface ReconstructKnowledgeDocumentProps {
@@ -21,6 +22,11 @@ export interface ReconstructKnowledgeDocumentProps {
 export interface UpdateKnowledgeDocumentPositionProps {
   positionX?: number | null;
   positionY?: number | null;
+}
+
+export interface UpdateKnowledgeDocumentProps {
+  title?: string;
+  summary?: string | null;
 }
 
 /**
@@ -66,6 +72,19 @@ export class KnowledgeDocument extends BaseEntity {
   updatePosition(props: UpdateKnowledgeDocumentPositionProps): void {
     if (props.positionX !== undefined) this._positionX = props.positionX;
     if (props.positionY !== undefined) this._positionY = props.positionY;
+    this.touch();
+  }
+
+  update(props: UpdateKnowledgeDocumentProps): void {
+    if (props.title !== undefined) {
+      if (!props.title.trim()) {
+        throw new ValidationError('Document title is required');
+      }
+      this._title = props.title.trim();
+    }
+    if (props.summary !== undefined) {
+      this._summary = props.summary?.trim() || null;
+    }
     this.touch();
   }
 

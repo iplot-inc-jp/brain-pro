@@ -3,6 +3,7 @@ import {
   IKnowledgeRepository,
   KNOWLEDGE_REPOSITORY,
   EntityNotFoundError,
+  KnowledgeNodeTypeValue,
 } from '../../../domain';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import {
@@ -18,10 +19,12 @@ export interface UpdateKnowledgeNodeInput {
   color?: string | null;
   positionX?: number | null;
   positionY?: number | null;
+  entityKind?: string | null;
+  type?: KnowledgeNodeTypeValue;
 }
 
 /**
- * ナレッジノード更新ユースケース（label / description / color / position）。
+ * ナレッジノード更新ユースケース（label / description / color / position / entityKind / type）。
  */
 @Injectable()
 export class UpdateKnowledgeNodeUseCase {
@@ -50,6 +53,8 @@ export class UpdateKnowledgeNodeUseCase {
       color: input.color,
       positionX: input.positionX,
       positionY: input.positionY,
+      entityKind: input.entityKind,
+      type: input.type,
     });
     await this.knowledgeRepository.saveNode(node);
 

@@ -655,6 +655,7 @@ export default function DashboardLayout({
         items: [
           { name: '取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
           { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
+          { name: '一覧編集', href: `${base}/knowledge/list`, icon: ListTodo },
           { name: '設定', href: `${base}/knowledge/settings`, icon: Settings },
         ],
       },

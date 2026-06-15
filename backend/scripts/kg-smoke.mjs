@@ -188,6 +188,31 @@ async function main() {
   }
   ok(blockedSsrf, '不正 blobUrl（file:///etc/passwd）をバッチ作成で拒否（SSRF/LFI 防御）');
 
+  // 8e) 一覧編集API: 文書 PATCH(タイトル)→ DELETE（mention は Cascade で消える）
+  const gNow = await api('GET', `/projects/${pid}/knowledge/graph`, undefined, token);
+  if (gNow.documents.length > 0) {
+    const doc = gNow.documents[0];
+    const upd = await api('PATCH', `/knowledge-documents/${doc.id}`, { title: (doc.title || 'doc') + ' [edited]' }, token);
+    ok(typeof upd.title === 'string' && upd.title.endsWith('[edited]'), '文書 PATCH（タイトル編集）');
+    const del = await api('DELETE', `/knowledge-documents/${doc.id}`, undefined, token);
+    ok(del.success === true, '文書 DELETE');
+    const gAfter = await api('GET', `/projects/${pid}/knowledge/graph`, undefined, token);
+    ok(gAfter.documents.length === gNow.documents.length - 1, `削除で文書数 -1（${gNow.documents.length}→${gAfter.documents.length}）`);
+  } else { ok(true, '文書編集: 文書0のためスキップ'); }
+
+  // 8f) 一覧編集API: 同 type の2ノードを統合 merge（high-degree でも timeout しない set-based）
+  const gN = await api('GET', `/projects/${pid}/knowledge/graph`, undefined, token);
+  const byType = {};
+  for (const n of gN.nodes) (byType[n.type] = byType[n.type] || []).push(n);
+  const pair = Object.values(byType).find((arr) => arr.length >= 2);
+  if (pair) {
+    const [a, b] = pair;
+    const merged = await api('POST', `/knowledge-nodes/${b.id}/merge`, { targetNodeId: a.id }, token);
+    ok(!!merged && merged.id === a.id, 'ノード統合 merge（target を返す）');
+    const gM = await api('GET', `/projects/${pid}/knowledge/graph`, undefined, token);
+    ok(!gM.nodes.find((n) => n.id === b.id), 'merge で source ノード消滅（mention/relation 付替え）');
+  } else { ok(true, 'merge: 同typeの2ノードが無いためスキップ'); }
+
   // 9) （任意）AI ON で 1ファイル → タグ/実体が付く
   if (process.env.KG_AI === '1') {
     console.log('--- AI ON テスト（Claude 実呼び出し・少額課金）---');

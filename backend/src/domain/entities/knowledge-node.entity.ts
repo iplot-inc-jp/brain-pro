@@ -39,6 +39,8 @@ export interface UpdateKnowledgeNodeProps {
   color?: string | null;
   positionX?: number | null;
   positionY?: number | null;
+  entityKind?: string | null;
+  type?: KnowledgeNodeTypeValue;
 }
 
 /**
@@ -46,7 +48,7 @@ export interface UpdateKnowledgeNodeProps {
  */
 export class KnowledgeNode extends BaseEntity {
   private readonly _projectId: string;
-  private readonly _type: KnowledgeNodeTypeValue;
+  private _type: KnowledgeNodeTypeValue;
   private _entityKind: string | null;
   private _label: string;
   private _normalizedLabel: string;
@@ -115,6 +117,11 @@ export class KnowledgeNode extends BaseEntity {
     if (props.color !== undefined) this._color = props.color ?? null;
     if (props.positionX !== undefined) this._positionX = props.positionX;
     if (props.positionY !== undefined) this._positionY = props.positionY;
+    if (props.entityKind !== undefined) {
+      this._entityKind = props.entityKind?.trim() || null;
+    }
+    // type 変更時は normalizedLabel 再計算は不要（@@unique の衝突は永続層で検知）。
+    if (props.type !== undefined) this._type = props.type;
     this.touch();
   }
 

@@ -675,3 +675,139 @@ export function isArchiveFile(filename: string, mimeType?: string): boolean {
   if (m.includes('zip')) return true;
   return /\.zip$/i.test(filename);
 }
+
+// ---------------------------------------------------------------------------
+// 一覧編集（ナレッジグラフ要素の編集）API — Phase 2 一覧編集ページで利用
+//
+// 編集系エンドポイント（すべて assertProjectAccess(edit)。グローバル prefix `api`）:
+//   ノード:
+//     PATCH  /api/knowledge-nodes/:id        部分更新（label/description/color/entityKind/type/position）
+//     POST   /api/knowledge-nodes/:id/merge  { targetNodeId } → 統合先ノードを返す
+//     DELETE /api/knowledge-nodes/:id        → { success }
+//   文書:
+//     PATCH  /api/knowledge-documents/:id     { title?, summary? }
+//     DELETE /api/knowledge-documents/:id     → { success }
+//   関係:
+//     PATCH  /api/knowledge-relations/:id     { label?, type? }
+//     DELETE /api/knowledge-relations/:id     → { success }
+// ---------------------------------------------------------------------------
+
+/** ノード更新リクエスト（部分更新）。 */
+export interface UpdateKnowledgeNodeInput {
+  label?: string;
+  description?: string | null;
+  color?: string | null;
+  entityKind?: string | null;
+  type?: KnowledgeNodeType;
+  positionX?: number | null;
+  positionY?: number | null;
+}
+
+/** 文書更新リクエスト（部分更新）。 */
+export interface UpdateKnowledgeDocumentInput {
+  title?: string;
+  summary?: string | null;
+}
+
+/** 関係更新リクエスト（部分更新）。 */
+export interface UpdateKnowledgeRelationInput {
+  label?: string | null;
+  type?: string | null;
+}
+
+export const knowledgeEditApi = {
+  /**
+   * ノード更新（label/description/color/entityKind/type/position の部分更新）。
+   * PATCH /api/knowledge-nodes/:id
+   */
+  async updateNode(
+    id: string,
+    input: UpdateKnowledgeNodeInput,
+  ): Promise<KnowledgeNode> {
+    const res = await fetch(`${API_URL}/api/knowledge-nodes/${id}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify(input),
+    });
+    return ok<KnowledgeNode>(res, 'ノードの更新に失敗しました');
+  },
+
+  /**
+   * ノードを別ノードへ統合（mentions/relations を付け替え、:id を削除）。
+   * POST /api/knowledge-nodes/:id/merge  body { targetNodeId }
+   * 統合先（target）ノードを返す。
+   */
+  async mergeNodes(id: string, targetNodeId: string): Promise<KnowledgeNode> {
+    const res = await fetch(`${API_URL}/api/knowledge-nodes/${id}/merge`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ targetNodeId }),
+    });
+    return ok<KnowledgeNode>(res, 'ノードの統合に失敗しました');
+  },
+
+  /** ノード削除。DELETE /api/knowledge-nodes/:id */
+  async deleteNode(id: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_URL}/api/knowledge-nodes/${id}`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    return ok<{ success: boolean }>(res, 'ノードの削除に失敗しました');
+  },
+
+  /** 文書更新（title/summary）。PATCH /api/knowledge-documents/:id */
+  async updateDocument(
+    id: string,
+    input: UpdateKnowledgeDocumentInput,
+  ): Promise<KnowledgeDocument> {
+    const res = await fetch(`${API_URL}/api/knowledge-documents/${id}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify(input),
+    });
+    return ok<KnowledgeDocument>(res, '文書の更新に失敗しました');
+  },
+
+  /** 文書削除（文書＋mentions を削除、関連ノードの mentionCount 再計算）。DELETE /api/knowledge-documents/:id */
+  async deleteDocument(id: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_URL}/api/knowledge-documents/${id}`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    return ok<{ success: boolean }>(res, '文書の削除に失敗しました');
+  },
+
+  /** 関係更新（label/type）。PATCH /api/knowledge-relations/:id */
+  async updateRelation(
+    id: string,
+    input: UpdateKnowledgeRelationInput,
+  ): Promise<KnowledgeEdge> {
+    const res = await fetch(`${API_URL}/api/knowledge-relations/${id}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify(input),
+    });
+    return ok<KnowledgeEdge>(res, '関係の更新に失敗しました');
+  },
+
+  /** 関係削除。DELETE /api/knowledge-relations/:id */
+  async deleteRelation(id: string): Promise<{ success: boolean }> {
+    const res = await fetch(`${API_URL}/api/knowledge-relations/${id}`, {
+      method: 'DELETE',
+      headers: headers(),
+    });
+    return ok<{ success: boolean }>(res, '関係の削除に失敗しました');
+  },
+};
+
+/**
+ * 個別 export のショートハンド（タスク指定の関数名で直接呼びたい場合に流用）。
+ * いずれも knowledgeEditApi の薄いラッパ。
+ */
+export const updateNode = knowledgeEditApi.updateNode;
+export const mergeNodes = knowledgeEditApi.mergeNodes;
+export const deleteNode = knowledgeEditApi.deleteNode;
+export const updateDocument = knowledgeEditApi.updateDocument;
+export const deleteDocument = knowledgeEditApi.deleteDocument;
+export const updateRelation = knowledgeEditApi.updateRelation;
+export const deleteRelation = knowledgeEditApi.deleteRelation;

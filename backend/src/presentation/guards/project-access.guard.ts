@@ -8,6 +8,7 @@ import {
   ProjectAccessService,
   RequiredAccess,
 } from '../../infrastructure/services/project-access.service';
+import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 
 /**
  * プロジェクト単位アクセス制御ガード。
@@ -25,7 +26,12 @@ import {
  */
 @Injectable()
 export class ProjectAccessGuard implements CanActivate {
-  constructor(private readonly projectAccess: ProjectAccessService) {}
+  // prisma はフラットなナレッジ系 :id ルートの projectId 解決にのみ使う。
+  // 既存テスト（params.projectId を持つルート）は prisma 不要のため optional。
+  constructor(
+    private readonly projectAccess: ProjectAccessService,
+    private readonly prisma?: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -36,7 +42,7 @@ export class ProjectAccessGuard implements CanActivate {
       return true;
     }
 
-    const projectId = this.resolveProjectId(context, request);
+    const projectId = await this.resolveProjectId(context, request);
     if (!projectId) {
       // projectId 非依存ルートは素通り（既存チェックに委ねる）。
       return true;
@@ -61,19 +67,55 @@ export class ProjectAccessGuard implements CanActivate {
   /**
    * params.projectId を最優先で解決。
    * ProjectByIdController（GET /projects/:id 詳細）だけ params.id を projectId とみなす。
+   * フラットなナレッジ系ルート（knowledge-nodes/:id, knowledge-documents/:id,
+   * knowledge-relations/:id）は params に projectId が無いため、エンティティを
+   * load して projectId を解決する（解決不能だと認可が素通りになるため）。
    */
-  private resolveProjectId(
+  private async resolveProjectId(
     context: ExecutionContext,
     request: { params?: Record<string, string> },
-  ): string | undefined {
+  ): Promise<string | undefined> {
     const params = request.params ?? {};
     if (params.projectId) {
       return params.projectId;
     }
-    if (params.id && context.getClass().name === 'ProjectByIdController') {
+    const className = context.getClass().name;
+    if (params.id && className === 'ProjectByIdController') {
       return params.id;
     }
+    if (params.id) {
+      return this.resolveKnowledgeProjectId(className, params.id);
+    }
     return undefined;
+  }
+
+  /**
+   * フラットなナレッジ系コントローラの params.id からエンティティの projectId を解決。
+   * 該当エンティティが無い / 対象外コントローラなら undefined（素通り → use-case 側で 404）。
+   */
+  private async resolveKnowledgeProjectId(
+    className: string,
+    id: string,
+  ): Promise<string | undefined> {
+    if (!this.prisma) return undefined;
+    let row: { projectId: string } | null = null;
+    if (className === 'KnowledgeNodeController') {
+      row = await this.prisma.knowledgeNode.findUnique({
+        where: { id },
+        select: { projectId: true },
+      });
+    } else if (className === 'KnowledgeDocumentController') {
+      row = await this.prisma.knowledgeDocument.findUnique({
+        where: { id },
+        select: { projectId: true },
+      });
+    } else if (className === 'KnowledgeRelationController') {
+      row = await this.prisma.knowledgeRelation.findUnique({
+        where: { id },
+        select: { projectId: true },
+      });
+    }
+    return row?.projectId ?? undefined;
   }
 
   private requiredLevel(method: string): RequiredAccess {
