@@ -239,7 +239,9 @@ export default function ProjectDfdPage() {
   );
 
   // データフロー再ルーティング（端点ドラッグで source/target ノード・接続側を付け替え）
-  // PATCH /api/dfd-flows/:id で sourceNodeId/targetNodeId/sourceHandle/targetHandle を更新 → 再取得。
+  // PATCH /api/dfd-flows/:id で更新。**楽観更新**でローカル diagram.flows を即書き換え、
+  // 再取得（load）はしない＝矢印付け替えのたびにリロード/ちらつきしないようにする。
+  // 失敗時のみ load() で巻き戻す。
   const handleReconnectFlow = useCallback(
     async (
       flowId: string,
@@ -250,13 +252,34 @@ export default function ProjectDfdPage() {
         targetHandle?: string | null;
       },
     ) => {
-      await dfdApi.updateFlow(flowId, {
-        sourceNodeId: next.sourceNodeId,
-        targetNodeId: next.targetNodeId,
-        sourceHandle: next.sourceHandle ?? null,
-        targetHandle: next.targetHandle ?? null,
-      });
-      await load();
+      setDiagram((prev) =>
+        prev
+          ? {
+              ...prev,
+              flows: prev.flows.map((f) =>
+                f.id === flowId
+                  ? {
+                      ...f,
+                      sourceNodeId: next.sourceNodeId,
+                      targetNodeId: next.targetNodeId,
+                      sourceHandle: next.sourceHandle ?? null,
+                      targetHandle: next.targetHandle ?? null,
+                    }
+                  : f,
+              ),
+            }
+          : prev,
+      );
+      try {
+        await dfdApi.updateFlow(flowId, {
+          sourceNodeId: next.sourceNodeId,
+          targetNodeId: next.targetNodeId,
+          sourceHandle: next.sourceHandle ?? null,
+          targetHandle: next.targetHandle ?? null,
+        });
+      } catch {
+        await load(); // 失敗時のみ再取得で巻き戻し
+      }
     },
     [load],
   );
