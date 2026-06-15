@@ -1,7 +1,11 @@
-import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ManageTrackerWebhookUseCase } from '../../application/use-cases';
+import {
+  ManageTrackerWebhookUseCase,
+  ProcessTrackerWebhookUseCase,
+} from '../../application/use-cases';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
+import { Public } from '../decorators/public.decorator';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
 
@@ -15,8 +19,9 @@ import { ProjectAccessGuard } from '../guards/project-access.guard';
  * レスポンスの url には秘密が含まれる（管理者のみが取得できる）。
  * Jira/Backlog 側の Webhook 設定にこの URL を貼り付けて使う。
  *
- * 受信エンドポイント（公開 POST /trackers/webhook/:provider/:connectionId/:token）は
- * 後続タスクで本コントローラに追記する。
+ * 受信エンドポイント（公開 POST /trackers/webhook/:provider/:connectionId/:token）も
+ * 本コントローラに同居する（@Public()。JwtAuthGuard / ProjectAccessGuard は @Public・user 不在で
+ * 素通りするため、クラスのガード付与下でも認証なしで受信できる）。
  */
 @ApiTags('外部トラッカー連携')
 @ApiBearerAuth()
@@ -26,7 +31,27 @@ import { ProjectAccessGuard } from '../guards/project-access.guard';
 export class TrackerWebhookController {
   constructor(
     private readonly manageWebhook: ManageTrackerWebhookUseCase,
+    private readonly processWebhook: ProcessTrackerWebhookUseCase,
   ) {}
+
+  /**
+   * Jira/Backlog からの webhook 受信（公開）。
+   * URL に埋め込まれた秘密トークンを use-case 側で timing-safe 照合し、検証後に当該 1 課題を
+   * 取り込む（created/updated → import、deleted → Task を CLOSED）。token 不一致は 401。
+   * それ以外の失敗は use-case 側でログに握り、受信は常に素早く 2xx を返す。
+   */
+  @Public()
+  @Post('trackers/webhook/:provider/:connectionId/:token')
+  @ApiOperation({ summary: 'Webhook 受信（公開・URL に秘密トークン）' })
+  async receive(
+    @Param('provider') provider: string,
+    @Param('connectionId') connectionId: string,
+    @Param('token') token: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    await this.processWebhook.execute({ provider, connectionId, token, body });
+    return { ok: true };
+  }
 
   @Post('tracker-connections/:id/webhook/enable')
   @ApiOperation({ summary: 'Webhook を有効化（秘密を生成し、秘密入り URL を返す）' })

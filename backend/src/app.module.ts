@@ -121,6 +121,8 @@ import {
   ImportJiraTasksUseCase,
   // 外部トラッカー Webhook（秘密の生成/再生成/無効化/URL取得）
   ManageTrackerWebhookUseCase,
+  // 外部トラッカー Webhook 受信（token検証→単一import / 削除=クローズ）
+  ProcessTrackerWebhookUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -830,6 +832,8 @@ import { DriveController } from './presentation/controllers/drive.controller';
     ImportJiraTasksUseCase,
     // 外部トラッカー Webhook 秘密の管理
     ManageTrackerWebhookUseCase,
+    // 外部トラッカー Webhook 受信処理
+    ProcessTrackerWebhookUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,
