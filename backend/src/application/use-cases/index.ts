@@ -33,4 +33,5 @@ export * from './kpi';
 export * from './ingestion';
 export * from './knowledge';
 export * from './knowledge-settings';
+export * from './tracker';
 

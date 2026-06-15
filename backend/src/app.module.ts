@@ -119,6 +119,8 @@ import {
   RemoveTaskDependencyUseCase,
   ImportBacklogTasksUseCase,
   ImportJiraTasksUseCase,
+  // 外部トラッカー Webhook（秘密の生成/再生成/無効化/URL取得）
+  ManageTrackerWebhookUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -427,6 +429,7 @@ import { TaskWebhookService } from './infrastructure/services/task-webhook.servi
 import { TrackerImportService } from './infrastructure/services/trackers/tracker-import.service';
 import { WebhookController } from './presentation/controllers/webhook.controller';
 import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
+import { TrackerWebhookController } from './presentation/controllers/tracker-webhook.controller';
 import {
   JobWorkerController,
   ProjectJobController,
@@ -565,6 +568,8 @@ import { DriveController } from './presentation/controllers/drive.controller';
     WebhookController,
     // 外部トラッカー（Backlog/Jira）移行・同期
     TrackerConnectionController,
+    // 外部トラッカー Webhook 秘密の管理（admin）
+    TrackerWebhookController,
     // ナレッジグラフ バッチ取り込み（取り込み/ナレッジ/設定）
     IngestionBatchProjectController,
     IngestionBatchByIdController,
@@ -823,6 +828,8 @@ import { DriveController } from './presentation/controllers/drive.controller';
     RemoveTaskDependencyUseCase,
     ImportBacklogTasksUseCase,
     ImportJiraTasksUseCase,
+    // 外部トラッカー Webhook 秘密の管理
+    ManageTrackerWebhookUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,
