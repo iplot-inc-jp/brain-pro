@@ -8,3 +8,4 @@ export * from './delete-task.use-case';
 export * from './add-task-dependency.use-case';
 export * from './remove-task-dependency.use-case';
 export * from './import-backlog-tasks.use-case';
+export * from './import-jira-tasks.use-case';
