@@ -32,6 +32,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileDropZone } from '@/components/ui/file-drop-zone'
 import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { uploadProjectFile } from '@/lib/upload'
 import {
   Loader2,
   X,
@@ -297,15 +298,28 @@ export function NewBatchDialog({
       setUploading(true)
       setError(null)
       try {
-        const results = await ingestionApi.upload(projectId, files)
-        setUploads((prev) => [...prev, ...results])
+        // 共有プール: アップロードは即 Attachment 化（client直Blob、未設定時はサーバ経由）。
+        // 取り込みは ATTACHMENT ソースで参照するため、再アップロードなしで何度でも再開/再試行できる。
+        const ids: string[] = []
+        for (const f of files) {
+          const att = await uploadProjectFile(projectId, f)
+          ids.push(att.id)
+        }
+        // 既存添付一覧を再取得し、アップロード分を選択状態に（「既存添付」タブで確認できる）。
+        await loadAttachments()
+        setSelectedAttIds((prev) => {
+          const next = new Set(prev)
+          for (const id of ids) next.add(id)
+          return next
+        })
+        setTab('attachment')
       } catch (e) {
         setError(e instanceof Error ? e.message : 'アップロードに失敗しました')
       } finally {
         setUploading(false)
       }
     },
-    [projectId],
+    [projectId, loadAttachments],
   )
 
   const removeUpload = (idx: number) => {
