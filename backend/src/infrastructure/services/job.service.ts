@@ -436,7 +436,11 @@ export class JobService {
         const projectId = this.requireString(job.projectId, 'projectId');
         const mermaid = this.requireString(payload.mermaid, 'payload.mermaid');
         const apiKey = await this.resolveKey(projectId, job.createdById);
-        const flow = await this.claude.parseMermaidToFlow(mermaid, apiKey);
+        const flow = await this.claude.parseMermaidToFlow(mermaid, apiKey, {
+          projectId,
+          area: 'MERMAID_FLOW',
+          userId: job.createdById,
+        });
         return { kind: 'MERMAID_FLOW', flow };
       }
 
@@ -470,6 +474,7 @@ export class JobService {
               : null,
           },
           apiKey,
+          { projectId, area: 'ISSUE_SUGGEST', userId: job.createdById },
         );
         return { kind: 'ISSUE_SUGGESTIONS', suggestions };
       }

@@ -123,7 +123,11 @@ export class SyncService {
         token,
       );
 
-      const extracted = await this.extraction.extractFromCode(files, apiKey);
+      const extracted = await this.extraction.extractFromCode(files, apiKey, {
+        projectId: connection.projectId,
+        area: 'CODE_EXTRACTION',
+        userId: null,
+      });
 
       const summary = await this.applyExtractResult(
         connection.projectId,
@@ -178,6 +182,7 @@ export class SyncService {
     const extracted = await this.extraction.extractFromSchemaText(
       schemaText,
       apiKey,
+      { projectId, area: 'CODE_EXTRACTION', userId: null },
     );
     const { tables, columns, statuses } = await this.upsertTables(
       projectId,

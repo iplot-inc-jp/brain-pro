@@ -2042,6 +2042,7 @@ export class BusinessFlowController {
     const parsed = await this.claudeService.parseMermaidToFlow(
       dto.mermaid,
       apiKey,
+      { projectId: flow.projectId, area: 'MERMAID_FLOW', userId: user.id },
     );
 
     const projectId = flow.projectId;

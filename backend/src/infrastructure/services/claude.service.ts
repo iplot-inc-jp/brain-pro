@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  LlmUsageRecorder,
+  LlmUsageContext,
+} from './llm-usage-recorder.service';
 
 export interface RequirementParseResult {
   requirements: Array<{
@@ -160,6 +164,8 @@ export interface ExtractInput {
 
 @Injectable()
 export class ClaudeService {
+  constructor(private readonly usageRecorder: LlmUsageRecorder) {}
+
   private getClient(apiKey: string): Anthropic {
     return new Anthropic({ apiKey });
   }
@@ -170,8 +176,10 @@ export class ClaudeService {
   async parseRequirements(
     naturalLanguageText: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<RequirementParseResult> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const systemPrompt = `あなたはシステム開発の要求分析の専門家です。
 ユーザーが入力した自然言語のテキストを、システム開発用の要求定義に変換してください。
@@ -206,7 +214,7 @@ export class ClaudeService {
 4. 必ず有効なJSONのみを出力する（説明文は不要）`;
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 8192,
       messages: [
         {
@@ -218,6 +226,7 @@ ${naturalLanguageText}`,
       ],
       system: systemPrompt,
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     // レスポンスからテキストを抽出
     const textContent = response.content.find((c) => c.type === 'text');
@@ -249,11 +258,13 @@ ${naturalLanguageText}`,
     requirement: { title: string; description: string },
     context: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<{ description: string; acceptanceCriteria: string[] }> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 4096,
       messages: [
         {
@@ -272,6 +283,7 @@ ${naturalLanguageText}`,
         },
       ],
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {
@@ -296,8 +308,10 @@ ${naturalLanguageText}`,
   async parseMermaidToFlow(
     mermaid: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<MermaidFlowParseResult> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const systemPrompt = `あなたは業務フロー図の解析の専門家です。
 与えられた Mermaid の flowchart 図を、スイムレーン業務フロー用の「ロール（役割／レーン）」「ノード」「エッジ」に変換してください。
@@ -325,7 +339,7 @@ ${naturalLanguageText}`,
 7. 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 8192,
       messages: [
         {
@@ -337,6 +351,7 @@ ${mermaid}`,
       ],
       system: systemPrompt,
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {
@@ -368,8 +383,10 @@ ${mermaid}`,
   async parseMermaidToObjectMap(
     mermaid: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<MermaidObjectMapParseResult> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const systemPrompt = `あなたはデータモデル図の解析の専門家です。
 与えられた Mermaid 図を、オブジェクト関係性マップ用の「オブジェクト（object）」と「関係（relation）」に変換してください。
@@ -398,7 +415,7 @@ erDiagram / classDiagram / flowchart のいずれの Mermaid でも対応する�
 }`;
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 8192,
       messages: [
         {
@@ -410,6 +427,7 @@ ${mermaid}`,
       ],
       system: systemPrompt,
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {
@@ -478,8 +496,10 @@ ${mermaid}`,
     input: ExtractInput,
     apiKey: string,
     model?: string,
+    usage?: LlmUsageContext,
   ): Promise<KnowledgeExtraction> {
     const client = this.getClient(apiKey);
+    const usedModel = model || this.defaultModel();
 
     // 多モーダルコンテンツブロックを組み立てる（PDF=document / 画像=image / テキスト=text）。
     // SDK の media_type は union 型で厳格なため、content は any[] で扱う（既存 messages.create 呼び出しと同等）。
@@ -541,11 +561,12 @@ ${mermaid}`,
 - 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
 
     const response = await client.messages.create({
-      model: model || this.defaultModel(),
+      model: usedModel,
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content }],
     });
+    if (usage) await this.usageRecorder.record(usage, usedModel, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {
@@ -595,8 +616,10 @@ ${mermaid}`,
   async suggestIssueNodes(
     context: IssueNodeSuggestContext,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<IssueNodeSuggestion[]> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const systemPrompt = `あなたは経営課題解決のロジックツリー（イシューツリー）設計の専門家です。
 与えられた対象ノードの子として妥当な候補を、MECE（モレなくダブりなく）を意識して提案してください。
@@ -670,7 +693,7 @@ ${mermaid}`,
     }
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 2048,
       messages: [
         {
@@ -680,6 +703,7 @@ ${mermaid}`,
       ],
       system: systemPrompt,
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {
@@ -719,8 +743,10 @@ ${mermaid}`,
   async generateKpis(
     context: GenerateKpisContext,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<GeneratedKpiItem[]> {
     const client = this.getClient(apiKey);
+    const model = this.defaultModel();
 
     const aiQualityGuide = `
 このリクエストは「AI精度KPI（AI_QUALITY）」の生成です。
@@ -796,7 +822,7 @@ ${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
     lines.push(`上記のコンテキストに対するKPI候補を ${context.count} 件、JSON配列で提案してください。`);
 
     const response = await client.messages.create({
-      model: this.defaultModel(),
+      model,
       max_tokens: 8192,
       messages: [
         {
@@ -806,6 +832,7 @@ ${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
       ],
       system: systemPrompt,
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {

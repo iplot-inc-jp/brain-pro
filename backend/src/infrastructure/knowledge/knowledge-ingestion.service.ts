@@ -143,7 +143,16 @@ export class KnowledgeIngestionService {
           );
         }
         const input = this.buildExtractInput(kind, bytes, extractedText, file.filename);
-        extraction = await this.claude.extractKnowledge(input, apiKey, gate.model ?? undefined);
+        extraction = await this.claude.extractKnowledge(
+          input,
+          apiKey,
+          gate.model ?? undefined,
+          {
+            projectId: file.projectId,
+            area: 'KNOWLEDGE_EXTRACTION',
+            userId: batch?.createdById ?? null,
+          },
+        );
         file.update({ extractionResult: extraction as unknown as Prisma.InputJsonValue });
       } else {
         // AI OFF / OCR ブロック: Claude を呼ばず空抽出（文書ノードのみ作る）。

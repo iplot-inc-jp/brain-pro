@@ -63,7 +63,11 @@ export class ImportMermaidUseCase {
       throw new ValidationError('Anthropic APIキーが未設定です');
     }
 
-    const parsed = await this.claude.parseMermaidToObjectMap(mermaid, apiKey);
+    const parsed = await this.claude.parseMermaidToObjectMap(mermaid, apiKey, {
+      projectId: input.projectId,
+      area: 'MERMAID_OBJECT',
+      userId: input.userId,
+    });
 
     // 1. オブジェクトを get-or-create（グリッド配置・order 連番）
     let order = await this.repo.nextOrder(input.projectId);

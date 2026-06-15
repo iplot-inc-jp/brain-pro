@@ -155,15 +155,20 @@ export class GenerateKpisUseCase {
     };
 
     // 解析失敗時は1リトライ、それでも失敗なら ValidationError
+    const usageCtx = {
+      projectId: input.projectId,
+      area: 'KPI' as const,
+      userId: input.userId,
+    };
     let items: GeneratedKpiItem[];
     try {
-      items = await this.claudeService.generateKpis(context, apiKey);
+      items = await this.claudeService.generateKpis(context, apiKey, usageCtx);
     } catch (firstError) {
       this.logger.warn(
         `KPI生成の1回目が失敗。リトライします: ${(firstError as Error).message}`,
       );
       try {
-        items = await this.claudeService.generateKpis(context, apiKey);
+        items = await this.claudeService.generateKpis(context, apiKey, usageCtx);
       } catch {
         throw new ValidationError('AI応答の解析に失敗しました');
       }

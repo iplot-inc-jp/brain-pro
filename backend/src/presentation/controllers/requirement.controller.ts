@@ -353,7 +353,11 @@ export class RequirementController {
     }
 
     // Claude APIで要求を解析
-    const result = await this.claudeService.parseRequirements(dto.text, apiKey);
+    const result = await this.claudeService.parseRequirements(dto.text, apiKey, {
+      projectId: dto.projectId,
+      area: 'REQUIREMENT',
+      userId: user.id,
+    });
 
     // 解析結果をDBに保存
     const savedRequirements = await this.saveRequirements(
@@ -406,6 +410,7 @@ export class RequirementController {
       { title: requirement.title, description: requirement.description || '' },
       body.context || '',
       apiKey,
+      { projectId: requirement.projectId, area: 'REQUIREMENT', userId: user.id },
     );
 
     // 更新

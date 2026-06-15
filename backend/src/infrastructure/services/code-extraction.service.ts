@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  LlmUsageRecorder,
+  LlmUsageContext,
+} from './llm-usage-recorder.service';
 
 /**
  * 抽出結果の共通シェイプ（Build エージェント間で合意済み）。
@@ -31,6 +35,8 @@ export interface ExtractResult {
 @Injectable()
 export class CodeExtractionService {
   private readonly logger = new Logger(CodeExtractionService.name);
+
+  constructor(private readonly usageRecorder: LlmUsageRecorder) {}
 
   private getClient(apiKey: string): Anthropic {
     return new Anthropic({ apiKey });
@@ -78,6 +84,7 @@ RULES:
   async extractFromCode(
     files: { path: string; content: string }[],
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<ExtractResult> {
     if (!files.length) {
       return { apis: [], tables: [], roles: [] };
@@ -92,13 +99,14 @@ RULES:
 
     const userContent = `Extract the catalog from the following source files. 以下のソースファイルからカタログを抽出してください。\n\n${blocks}`;
 
-    return this.runExtraction(userContent, apiKey);
+    return this.runExtraction(userContent, apiKey, usage);
   }
 
   /** スキーマ貼り付けテキスト（Prisma/SQL等）から抽出する。 */
   async extractFromSchemaText(
     schemaText: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<ExtractResult> {
     if (!schemaText || !schemaText.trim()) {
       return { apis: [], tables: [], roles: [] };
@@ -106,21 +114,24 @@ RULES:
 
     const userContent = `Extract the catalog from the following schema text (e.g. Prisma schema, SQL DDL, or model definitions). 以下のスキーマテキストからカタログを抽出してください。\n\n===== SCHEMA =====\n${schemaText}`;
 
-    return this.runExtraction(userContent, apiKey);
+    return this.runExtraction(userContent, apiKey, usage);
   }
 
   private async runExtraction(
     userContent: string,
     apiKey: string,
+    usage?: LlmUsageContext,
   ): Promise<ExtractResult> {
     const client = this.getClient(apiKey);
+    const model = this.model();
 
     const response = await client.messages.create({
-      model: this.model(),
+      model,
       max_tokens: 8192,
       system: this.systemPrompt(),
       messages: [{ role: 'user', content: userContent }],
     });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {

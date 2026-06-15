@@ -461,6 +461,7 @@ export class IssueTreeController {
         ideationLenses: dto.ideationLenses ?? null,
       },
       apiKey,
+      { projectId: tree.projectId, area: 'ISSUE_SUGGEST', userId: user.id },
     );
 
     return {
