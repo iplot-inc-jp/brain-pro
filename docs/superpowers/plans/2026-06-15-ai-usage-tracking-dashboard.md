@@ -166,11 +166,12 @@ export interface ModelPricing {
 /** 既定（未知モデルのフォールバック）= Sonnet 相当。 */
 const DEFAULT_PRICING: ModelPricing = { inputPerMTok: 3, outputPerMTok: 15 };
 
-/** モデルID（前方一致）→ 単価。長いキー優先でマッチ。 */
+/** モデルID（前方一致）→ 単価（2026-06 時点・claude-api スキル準拠）。長いキー優先でマッチ。 */
 const MODEL_PRICING: Record<string, ModelPricing> = {
-  'claude-opus': { inputPerMTok: 15, outputPerMTok: 75 },
+  'claude-fable': { inputPerMTok: 10, outputPerMTok: 50 },
+  'claude-opus': { inputPerMTok: 5, outputPerMTok: 25 },
   'claude-sonnet': { inputPerMTok: 3, outputPerMTok: 15 },
-  'claude-haiku': { inputPerMTok: 0.8, outputPerMTok: 4 },
+  'claude-haiku': { inputPerMTok: 1, outputPerMTok: 5 },
 };
 
 /** モデルID から単価を引く（前方一致・最長一致優先・未知は既定）。 */
