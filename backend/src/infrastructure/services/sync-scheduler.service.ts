@@ -108,7 +108,12 @@ export class SyncSchedulerService {
     let skipped = 0;
     for (const conn of connections) {
       try {
-        const intervalMs = (conn.syncIntervalMinutes || 60) * 60_000;
+        // webhook 有効接続(webhookSecretEnc != null)は即時反映されるため、ポーリングは
+        // 取りこぼし補修の日次バックストップ(最低1440分)に間引く。webhook 無効接続は従来どおり。
+        const effectiveIntervalMinutes = conn.webhookSecretEnc
+          ? Math.max(conn.syncIntervalMinutes || 60, 1440)
+          : conn.syncIntervalMinutes || 60;
+        const intervalMs = effectiveIntervalMinutes * 60_000;
         const due =
           !conn.lastSyncedAt ||
           now - conn.lastSyncedAt.getTime() >= intervalMs;
