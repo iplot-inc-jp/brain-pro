@@ -1412,6 +1412,8 @@ model Attachment {
   caption   String?
   order     Int            @default(0)
   data      Bytes? // ファイル本体。serverless では DB 保存に使用。既存ローカル行は null=ディスク参照のまま
+  // Vercel Blob 公開URL。client直アップロード由来はこれを持ち data=null。取得/配信は data→blobUrl→url の順。
+  blobUrl   String?        @map("blob_url")
   createdAt DateTime       @default(now()) @map("created_at")
 
   informationTypeId String?  @map("information_type_id")
