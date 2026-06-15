@@ -450,6 +450,7 @@ import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-
 import {
   IngestionBatchProjectController,
   IngestionBatchByIdController,
+  MyIngestionBatchController,
 } from './presentation/controllers/ingestion.controller';
 import { IngestionFileController } from './presentation/controllers/ingestion-file.controller';
 import { IngestionUploadController } from './presentation/controllers/ingestion-upload.controller';
@@ -467,6 +468,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
 // Liveblocks リアルタイム・プレゼンス（トークン発行）
 import { LiveblocksController } from './presentation/controllers/liveblocks.controller';
 import { IssueLiveblocksTokenUseCase } from './application/use-cases/liveblocks/issue-liveblocks-token.use-case';
+import { GetAllAccessibleIngestionBatchesUseCase } from './application/use-cases/ingestion/get-all-accessible-ingestion-batches.use-case';
 import { LiveblocksTokenService } from './infrastructure/services/liveblocks-token.service';
 
 @Module({
@@ -587,6 +589,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // ナレッジグラフ バッチ取り込み（取り込み/ナレッジ/設定）
     IngestionBatchProjectController,
     IngestionBatchByIdController,
+    MyIngestionBatchController,
     IngestionFileController,
     IngestionUploadController,
     IngestionSourceController,
@@ -975,6 +978,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // Ingestion（取り込みバッチ/ファイル）
     CreateIngestionBatchUseCase,
     GetIngestionBatchesUseCase,
+    GetAllAccessibleIngestionBatchesUseCase,
     GetIngestionBatchDetailUseCase,
     ResumeBatchUseCase,
     CancelBatchUseCase,

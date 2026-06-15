@@ -43,6 +43,8 @@ import {
 } from '../decorators/current-user.decorator';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { GetAllAccessibleIngestionBatchesUseCase } from '../../application/use-cases/ingestion/get-all-accessible-ingestion-batches.use-case';
+import { IngestionBatchWithProjectOutput } from '../../application/use-cases/ingestion/ingestion-output';
 
 // ========== DTOs ==========
 
@@ -204,5 +206,22 @@ export class IngestionBatchByIdController {
   ): Promise<{ success: boolean }> {
     await this.cancelBatchUseCase.execute({ userId: user.id, id });
     return { success: true };
+  }
+}
+
+@ApiTags('取り込みバッチ')
+@ApiBearerAuth()
+@Controller('my')
+export class MyIngestionBatchController {
+  constructor(
+    private readonly getAllAccessibleIngestionBatchesUseCase: GetAllAccessibleIngestionBatchesUseCase,
+  ) {}
+
+  @Get('ingestion-batches')
+  @ApiOperation({ summary: '取り込みバッチ横断一覧（自分が閲覧可能な全プロジェクト）' })
+  async listAll(
+    @CurrentUser() user: CurrentUserPayload,
+  ): Promise<IngestionBatchWithProjectOutput[]> {
+    return this.getAllAccessibleIngestionBatchesUseCase.execute({ userId: user.id });
   }
 }
