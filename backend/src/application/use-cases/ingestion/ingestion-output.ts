@@ -69,6 +69,17 @@ export function toIngestionBatchOutput(
   };
 }
 
+export interface IngestionBatchWithProjectOutput extends IngestionBatchOutput {
+  projectName: string;
+}
+
+export function toIngestionBatchWithProjectOutput(
+  batch: IngestionBatch,
+  projectName: string,
+): IngestionBatchWithProjectOutput {
+  return { ...toIngestionBatchOutput(batch), projectName };
+}
+
 export function toIngestionFileOutput(
   file: IngestionFile,
 ): IngestionFileOutput {
