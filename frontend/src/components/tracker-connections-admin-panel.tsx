@@ -37,6 +37,8 @@ import {
   Check,
   RefreshCw,
   PowerOff,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -143,6 +145,10 @@ type WebhookState = {
   busy: boolean;
   error: string | null;
   copied: boolean;
+  /** 秘密入り URL を平文表示しているか（既定は伏せる）。 */
+  revealed: boolean;
+  /** URL 取得（getWebhookUrl）が失敗したか。true のとき「無効」ではなく「取得失敗」を表示する。 */
+  loadError: boolean;
 };
 
 const initialWebhookState: WebhookState = {
@@ -151,7 +157,21 @@ const initialWebhookState: WebhookState = {
   busy: false,
   error: null,
   copied: false,
+  revealed: false,
+  loadError: false,
 };
+
+/**
+ * Webhook URL の秘密部分（最後のパスセグメント）だけを伏せて表示する。
+ * 例: https://host/api/trackers/webhook/jira/<connId>/<secret> →
+ *     https://host/api/trackers/webhook/jira/<connId>/••••••••
+ * パスの形が想定外でも、末尾セグメントを丸める安全側のフォールバックにする。
+ */
+function maskWebhookUrl(url: string): string {
+  const idx = url.lastIndexOf('/');
+  if (idx < 0 || idx === url.length - 1) return '••••••••';
+  return `${url.slice(0, idx + 1)}••••••••`;
+}
 
 export function TrackerConnectionsAdminPanel({
   projectId,
@@ -235,12 +255,14 @@ export function TrackerConnectionsAdminPanel({
               loaded: true,
               url: res.url,
               busy: false,
+              loadError: false,
             },
           }));
         })
         .catch(() => {
           if (cancelled) return;
-          // 取得失敗（403 等）は「無効」扱いで読み込み済みにする（操作ボタンは表示）。
+          // 取得失敗（ネットワーク / 一時的 5xx 等）を「無効」と誤表示しない。
+          // loadError=true で「取得失敗」を表示し、本当に無効（url=null）と区別する。
           setWebhooks((prev) => ({
             ...prev,
             [c.id]: {
@@ -248,6 +270,7 @@ export function TrackerConnectionsAdminPanel({
               ...prev[c.id],
               loaded: true,
               busy: false,
+              loadError: true,
             },
           }));
         });
@@ -456,7 +479,12 @@ export function TrackerConnectionsAdminPanel({
     patchWebhook(id, { busy: true, error: null, copied: false });
     try {
       const res = await action();
-      patchWebhook(id, { url: res.url, busy: false, loaded: true });
+      patchWebhook(id, {
+        url: res.url,
+        busy: false,
+        loaded: true,
+        loadError: false,
+      });
     } catch (err) {
       patchWebhook(id, {
         busy: false,
@@ -1066,14 +1094,18 @@ export function TrackerConnectionsAdminPanel({
                                   className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${
                                     enabled
                                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                      : 'border-gray-200 bg-gray-50 text-gray-500'
+                                      : wh.loadError
+                                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                        : 'border-gray-200 bg-gray-50 text-gray-500'
                                   }`}
                                 >
                                   {!wh.loaded
                                     ? '読み込み中…'
                                     : enabled
                                       ? '有効'
-                                      : '無効'}
+                                      : wh.loadError
+                                        ? '取得失敗'
+                                        : '無効'}
                                 </span>
                               </span>
 
@@ -1126,19 +1158,48 @@ export function TrackerConnectionsAdminPanel({
                               </div>
                             </div>
 
-                            {/* URL コピー欄（有効時のみ） */}
+                            {/* URL コピー欄（有効時のみ）。秘密を含むため既定はマスクし、表示は明示操作で。 */}
                             {enabled && wh.url && (
                               <div className="mt-3 space-y-1.5">
                                 <div className="flex items-center gap-2">
                                   <code className="min-w-0 flex-1 break-all rounded border border-gray-200 bg-white px-2 py-1.5 font-mono text-xs text-gray-700">
-                                    {wh.url}
+                                    {wh.revealed
+                                      ? wh.url
+                                      : maskWebhookUrl(wh.url)}
                                   </code>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      patchWebhook(c.id, {
+                                        revealed: !wh.revealed,
+                                      })
+                                    }
+                                    className="flex-shrink-0 gap-1.5 text-gray-600"
+                                    title={
+                                      wh.revealed
+                                        ? '秘密を隠す'
+                                        : '秘密を表示する'
+                                    }
+                                  >
+                                    {wh.revealed ? (
+                                      <>
+                                        <EyeOff className="h-4 w-4" />
+                                        隠す
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Eye className="h-4 w-4" />
+                                        表示
+                                      </>
+                                    )}
+                                  </Button>
                                   <Button
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleCopyWebhookUrl(c)}
                                     className="flex-shrink-0 gap-1.5 border-gray-300 text-gray-700"
-                                    title="URL をコピー"
+                                    title="URL をコピー（表示せずにコピーできます）"
                                   >
                                     {wh.copied ? (
                                       <>
@@ -1157,7 +1218,7 @@ export function TrackerConnectionsAdminPanel({
                                   この URL を Jira/Backlog の Webhook 設定に貼り付けてください（課題の作成/更新/削除イベント）。
                                   <span className="font-medium text-amber-700">
                                     {' '}
-                                    URL には秘密が含まれます。
+                                    URL には秘密が含まれます（既定では伏せています。「表示」せずそのままコピーできます）。
                                   </span>
                                 </p>
                               </div>

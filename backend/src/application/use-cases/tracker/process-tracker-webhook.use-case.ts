@@ -64,7 +64,15 @@ export class ProcessTrackerWebhookUseCase {
     }
 
     // ===== token の timing-safe 照合 =====
-    const expected = this.crypto.decrypt(conn.webhookSecretEnc);
+    // 復号は token 検証の外（try より前）で行うが、秘密が壊れている / 別キーで暗号化されている
+    // 等で decrypt が例外を投げると 500 になり「接続が存在し webhook 有効」だと相手に示唆して
+    // しまう。情報を漏らさないよう、復号失敗も誤 token と同じ一律 401 に倒す。
+    let expected: string;
+    try {
+      expected = this.crypto.decrypt(conn.webhookSecretEnc);
+    } catch {
+      throw new UnauthorizedException();
+    }
     if (!this.tokenMatches(input.token, expected)) {
       throw new UnauthorizedException();
     }
@@ -72,7 +80,16 @@ export class ProcessTrackerWebhookUseCase {
     // ===== ここから先は検証済み。失敗してもログのみで握る（受信は 2xx を返す） =====
     try {
       const event = this.parseEvent(conn.provider, conn.projectKey, input.body);
-      if (event.kind === 'ignore' || !event.externalKey) {
+      if (event.kind === 'ignore') {
+        return;
+      }
+      if (!event.externalKey) {
+        // 取り込む/閉じるべきイベント（upsert/delete）なのに課題キーを特定できなかった＝
+        // ペイロード形式が想定外（Backlog で projectKey 不明 / Jira で issue.key 欠落 等）。
+        // 無言でスキップすると「削除されたのに Task が残る」等が検知不能になるため警告を残す。
+        this.logger.warn(
+          `webhook ${event.kind}: 課題キーを特定できませんでした conn=${conn.id} provider=${conn.provider}`,
+        );
         return;
       }
       if (event.kind === 'upsert') {

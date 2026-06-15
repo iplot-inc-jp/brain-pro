@@ -255,6 +255,61 @@ describe('ProcessTrackerWebhookUseCase', () => {
     expect(d.taskRepository.save).not.toHaveBeenCalled();
   });
 
+  it('秘密の復号に失敗（壊れた webhookSecretEnc）→ UnauthorizedException（500 にしない）', async () => {
+    const d = makeDeps({
+      connection: {
+        id: 'conn1',
+        projectId: 'p1',
+        provider: 'JIRA',
+        projectKey: 'ABC',
+        // 復号できない不正な暗号文 → crypto.decrypt が例外を投げる
+        webhookSecretEnc: 'not-a-valid-ciphertext',
+      },
+    });
+    const uc = makeUseCase(d);
+
+    await expect(
+      uc.execute({
+        provider: 'jira',
+        connectionId: 'conn1',
+        token: 'anything',
+        body: { webhookEvent: 'jira:issue_updated', issue: { key: 'ABC-1' } },
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(d.trackerImport.importSingleByKey).not.toHaveBeenCalled();
+  });
+
+  it('Backlog 削除(type=3) で課題キーを特定できない（projectKey も key_id も無い）→ warn のみで close しない', async () => {
+    const d = makeDeps({
+      secret: 'S3',
+      connection: {
+        id: 'conn3',
+        projectId: 'p3',
+        provider: 'BACKLOG',
+        projectKey: null, // 接続側 projectKey 無し
+        webhookSecretEnc: new CryptoService().encrypt('S3'),
+      },
+      existingTask: { id: 't3', changeStatus: jest.fn() },
+    });
+    const uc = makeUseCase(d);
+    const loggerWarn = jest.spyOn((uc as any).logger, 'warn');
+
+    await expect(
+      uc.execute({
+        provider: 'backlog',
+        connectionId: 'conn3',
+        token: tokenFor(d),
+        // project.projectKey も無く、接続側 projectKey も null → KEY を組めない
+        body: { type: 3, content: {} },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(loggerWarn).toHaveBeenCalled();
+    expect(d.taskRepository.findByProjectIdAndSourceKey).not.toHaveBeenCalled();
+    expect(d.taskRepository.save).not.toHaveBeenCalled();
+    expect(d.trackerImport.importSingleByKey).not.toHaveBeenCalled();
+  });
+
   it('import 中の例外はログのみで握る（受信側に例外を伝播しない）', async () => {
     const d = makeDeps({ secret: 'S1' });
     d.trackerImport.importSingleByKey.mockRejectedValueOnce(
