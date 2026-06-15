@@ -33,8 +33,10 @@ export function PageHeader({
           {backLabel}
         </Link>
       )}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
+      {/* タイトルとアクションは横並び。ただしアクションが多くて収まらない時は
+          タイトルを潰さず、アクション群がタイトルの下の行へ丸ごと回り込む（flex-wrap）。 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-x-4 sm:gap-y-3">
+        <div className="min-w-0 sm:flex-1 sm:basis-72">
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             {title}
             {help && <HelpTooltip text={help} />}
@@ -43,7 +45,11 @@ export function PageHeader({
             <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
           )}
         </div>
-        {actions && <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">{actions}</div>}
+        {actions && (
+          <div className="flex max-w-full flex-wrap items-center gap-2 sm:flex-shrink-0 sm:justify-end">
+            {actions}
+          </div>
+        )}
       </div>
     </div>
   );
