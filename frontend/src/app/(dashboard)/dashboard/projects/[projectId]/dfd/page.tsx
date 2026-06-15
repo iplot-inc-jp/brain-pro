@@ -217,6 +217,9 @@ export default function ProjectDfdPage() {
     [load],
   );
 
+  // データフロー追加（矢印を引く）。**楽観更新**で、サーバが返した実体（実IDの flow）を
+  // ローカル diagram.flows に追記し、ブロッキングな再取得（load）はしない＝矢印作成のたびに
+  // リロード/ちらつきしないようにする。失敗時のみ load() で再同期する。
   const handleAddFlow = useCallback(
     async (body: {
       sourceNodeId: string;
@@ -226,16 +229,30 @@ export default function ProjectDfdPage() {
       targetHandle?: string | null;
     }) => {
       if (!diagram) return;
-      await dfdApi.addFlow(diagram.id, body);
-      await load();
+      try {
+        const created = await dfdApi.addFlow(diagram.id, body);
+        setDiagram((prev) => (prev ? { ...prev, flows: [...prev.flows, created] } : prev));
+      } catch {
+        await load(); // 失敗時のみ再取得で再同期
+      }
     },
     [diagram, load],
   );
 
+  // データフロー更新（ラベル・情報種別・線形状・位置）。**楽観更新**で、サーバが返した
+  // 更新後の flow をローカル diagram.flows にマージし、ブロッキングな再取得（load）はしない。
+  // フロー更新はノード編集と違い他エンティティ（オブジェクト等）への波及がないため loadDataObjects も不要。
+  // 失敗時のみ load() で再同期する。
   const handleUpdateFlow = useCallback(
     async (id: string, patch: Partial<DfdFlowModel>) => {
-      await dfdApi.updateFlow(id, patch);
-      await load();
+      try {
+        const updated = await dfdApi.updateFlow(id, patch);
+        setDiagram((prev) =>
+          prev ? { ...prev, flows: prev.flows.map((f) => (f.id === id ? updated : f)) } : prev,
+        );
+      } catch {
+        await load(); // 失敗時のみ再取得で再同期
+      }
     },
     [load],
   );

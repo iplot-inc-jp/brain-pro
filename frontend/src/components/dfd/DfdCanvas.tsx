@@ -554,17 +554,18 @@ function DataFlowEdge({
   const onMoveLabel = data?.onMoveLabel;
   const onMoveInfo = data?.onMoveInfo;
 
-  // 形状に応じてパスを生成（既定は角ばった smoothstep）。
+  // 形状に応じてパスを生成（既定は曲線 bezier。未保存=null/undefined も bezier 扱い）。
   const pathParams = { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition };
   let edgePath: string;
   let labelX: number;
   let labelY: number;
-  if (data?.pathStyle === 'bezier') {
-    [edgePath, labelX, labelY] = getBezierPath(pathParams);
+  if (data?.pathStyle === 'smoothstep') {
+    [edgePath, labelX, labelY] = getSmoothStepPath(pathParams);
   } else if (data?.pathStyle === 'straight') {
     [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });
   } else {
-    [edgePath, labelX, labelY] = getSmoothStepPath(pathParams);
+    // 'bezier' および null/undefined（未保存）の既定。
+    [edgePath, labelX, labelY] = getBezierPath(pathParams);
   }
 
   // パス上の任意割合 t の座標を出す（detached path の getPointAtLength）。
@@ -1077,7 +1078,16 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           },
         };
       }),
-    [diagram.flows, selectedEdgeId, informationTypeById, props],
+    [
+      diagram.flows,
+      selectedEdgeId,
+      informationTypeById,
+      // props 全体ではなく rfEdges が実際に読む特定コールバックのみに依存を絞る
+      // （annotations/dataObjects など無関係な prop 変化での再構築を避ける）。
+      props.onUpdateFlow,
+      props.onReconnectFlow,
+      props.onDeleteFlow,
+    ],
   );
 
   useEffect(() => {
@@ -1620,7 +1630,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
                   { value: 'bezier', label: '曲線' },
                   { value: 'straight', label: '直線' },
                 ] as const).map((opt, i) => {
-                  const cur = selectedFlow.pathStyle ?? 'smoothstep';
+                  const cur = selectedFlow.pathStyle ?? 'bezier';
                   const active = cur === opt.value;
                   return (
                     <button
