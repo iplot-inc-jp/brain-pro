@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { createHmac, randomUUID } from 'node:crypto';
 import { assertSafeOutboundUrl } from './url-safety';
 import { BackgroundJob, Prisma } from '@prisma/client';
@@ -10,6 +10,7 @@ import { CryptoService } from './crypto.service';
 import { ImportMermaidUseCase } from '../../application/use-cases/data-object/import-mermaid.use-case';
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
 import { TrackerImportService } from './trackers/tracker-import.service';
+import { KnowledgeIngestionService } from '../knowledge/knowledge-ingestion.service';
 
 /**
  * 非同期バックグラウンドジョブの起票・実行サービス。
@@ -40,6 +41,9 @@ export class JobService {
     private readonly importMermaid: ImportMermaidUseCase,
     private readonly generateKpis: GenerateKpisUseCase,
     private readonly trackerImport: TrackerImportService,
+    // KnowledgeIngestionService ↔ JobService は相互参照（取り込みパイプラインが子ジョブを起票する）。
+    @Inject(forwardRef(() => KnowledgeIngestionService))
+    private readonly knowledgeIngestion: KnowledgeIngestionService,
   ) {}
 
   /**
@@ -374,6 +378,9 @@ export class JobService {
     'AI_MERMAID_FLOW',
     'AI_KPI',
     'AI_ISSUE_SUGGEST',
+    // ナレッジ取り込み（1ファイル=1ジョブ）。
+    'KG_INGEST_FILE',
+    'KG_EXPAND_ARCHIVE',
   ] as const;
 
   static isAllowedType(type: string): boolean {
@@ -481,6 +488,21 @@ export class JobService {
           (progress) => this.updateProgress(job.id, progress),
         );
         return { kind: 'TRACKER_IMPORT', ...result };
+      }
+
+      // ===== ナレッジ取り込みジョブ（1ファイル=1ジョブ） =====
+      case 'KG_INGEST_FILE': {
+        // FETCH→PREPROCESS→EXTRACT→MERGE。IngestionFile.status を各段で更新する。
+        const fileId = this.requireString(payload.fileId, 'payload.fileId');
+        const result = await this.knowledgeIngestion.processFile(fileId);
+        return { kind: 'KG_INGEST_FILE', fileId, ...result };
+      }
+
+      case 'KG_EXPAND_ARCHIVE': {
+        // ZIP を安全展開し、子 IngestionFile を作成＆ KG_INGEST_FILE を起票する。
+        const fileId = this.requireString(payload.fileId, 'payload.fileId');
+        const result = await this.knowledgeIngestion.expandArchive(fileId);
+        return { kind: 'KG_EXPAND_ARCHIVE', fileId, ...result };
       }
 
       // ===== Webhook 配信ジョブ（タスクイベントを外部=ipro-kun 等へ POST） =====

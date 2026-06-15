@@ -119,6 +119,39 @@ export interface GeneratedKpiItem {
   smartComment?: string | null;
 }
 
+/**
+ * ナレッジグラフ抽出（バッチ取り込みパイプラインの EXTRACT ステップ）の出力契約。
+ * spec §6「EXTRACT 出力契約」と一致する。from/to は tags か entities の label を指す。
+ */
+export interface KnowledgeExtraction {
+  /** 3行以内の要約 */
+  summary: string;
+  /** 主題タグ（簡潔な名詞句） */
+  tags: string[];
+  /** 固有物（実体） */
+  entities: Array<{ label: string; kind: string; description?: string }>;
+  /** ノード間の関係。from/to は tags か entities に現れる label */
+  relations: Array<{ from: string; to: string; label?: string }>;
+}
+
+/**
+ * extractKnowledge() への多モーダル入力。型別前処理（spec §6）の結果を渡し分ける：
+ * - PDF → document コンテンツブロック（base64）
+ * - 画像 → image コンテンツブロック（base64）
+ * - テキスト（Excel→Markdown表 / docx / text 等）→ text
+ * いずれか1つ以上を与える（全て空でも呼び出し側の責任で許容）。
+ */
+export interface ExtractInput {
+  /** テキスト系（Excel→Markdown表 / docx / text/md/json 等） */
+  text?: string;
+  /** PDF を base64 で（document ブロック） */
+  pdfBase64?: string;
+  /** 画像を base64 で（image ブロック）。複数ページ画像にも対応 */
+  images?: Array<{ base64: string; mimeType: string }>;
+  /** 元ファイル名（プロンプトに埋め込む） */
+  filename: string;
+}
+
 @Injectable()
 export class ClaudeService {
   private getClient(apiKey: string): Anthropic {
@@ -399,6 +432,137 @@ ${mermaid}`,
    */
   private defaultModel(): string {
     return process.env.EXTRACTION_MODEL || 'claude-sonnet-4-6';
+  }
+
+  /**
+   * Claude のテキスト応答から JSON オブジェクトを取り出す（既存メソッドと同じコードフェンス除去ロジックを共通化）。
+   * 1) ```json ... ``` フェンスがあれば中身を採用、2) それでも parse 失敗時は最初の '{' 〜 最後の '}' を抽出して再試行。
+   */
+  private extractJsonObject(text: string): any {
+    let jsonText = text;
+    const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1];
+    }
+    jsonText = jsonText.trim();
+
+    try {
+      return JSON.parse(jsonText);
+    } catch {
+      // フェンス無しで前後に説明文が混ざるケース：最初の '{' 〜 最後の '}' を抽出して再試行
+      const start = jsonText.indexOf('{');
+      const end = jsonText.lastIndexOf('}');
+      if (start < 0 || end <= start) {
+        throw new Error('ナレッジ抽出の解析に失敗しました（JSONオブジェクトが見つかりません）');
+      }
+      return JSON.parse(jsonText.slice(start, end + 1));
+    }
+  }
+
+  /**
+   * 文書（PDF / 画像 / テキスト）から、ナレッジグラフ要素（要約・自動タグ・実体・関係）を多モーダルで抽出する。
+   * バッチ取り込みパイプラインの EXTRACT ステップ（spec §6）から呼ばれる。
+   * 既存メソッドと同様、1回呼び出し＋コードフェンス除去＋JSON.parse。解析失敗時は throw（リトライは呼び出し側＝Job）。
+   *
+   * @param input  多モーダル入力（pdfBase64 / images / text を渡し分け）
+   * @param apiKey CompanyKeyService.resolveForProject で解決した API キー
+   * @param model  省略時は EXTRACTION_MODEL（既定 claude-sonnet-4-6）。品質重視なら opus に切替可
+   */
+  async extractKnowledge(
+    input: ExtractInput,
+    apiKey: string,
+    model?: string,
+  ): Promise<KnowledgeExtraction> {
+    const client = this.getClient(apiKey);
+
+    // 多モーダルコンテンツブロックを組み立てる（PDF=document / 画像=image / テキスト=text）。
+    // SDK の media_type は union 型で厳格なため、content は any[] で扱う（既存 messages.create 呼び出しと同等）。
+    const content: any[] = [];
+    if (input.pdfBase64) {
+      content.push({
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: input.pdfBase64,
+        },
+      });
+    }
+    for (const img of input.images ?? []) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mimeType,
+          data: img.base64,
+        },
+      });
+    }
+    if (input.text) {
+      // 過大なテキストはトークン保護のため上限でクリップ
+      content.push({ type: 'text', text: input.text.slice(0, 200_000) });
+    }
+    content.push({
+      type: 'text',
+      text: `上記は「${input.filename}」の内容です。日本語で、次のJSONのみを返してください（説明文・コードフェンス以外の文章は不要）：
+{
+  "summary": "3行以内の要約",
+  "tags": ["主題タグ（簡潔な名詞句）"],
+  "entities": [
+    { "label": "固有物の名前", "kind": "PERSON|SYSTEM|ORG|CONCEPT|PRODUCT|EVENT|LOCATION|TERM|OTHER", "description": "任意の説明" }
+  ],
+  "relations": [
+    { "from": "ラベル", "to": "ラベル", "label": "関係（例: 承認する/依存）" }
+  ]
+}`,
+    });
+
+    const systemPrompt = `あなたは文書からナレッジグラフ要素を抽出する専門家です。出力は指定されたJSONのみ。
+- tags / entities の label は簡潔な名詞句にする。
+- relations の from / to は必ず tags か entities に現れる label を使う。
+- 該当が無い配列は空配列で返す。
+- 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
+
+    const response = await client.messages.create({
+      model: model || this.defaultModel(),
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content }],
+    });
+
+    const textContent = response.content.find((c) => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    const parsed = this.extractJsonObject(textContent.text);
+    // LLM 出力は非文字列ノイズ（数値/null/オブジェクト）を含みうるため入口で除去する。
+    const tags: string[] = Array.isArray(parsed?.tags)
+      ? parsed.tags.filter((t: unknown): t is string => typeof t === 'string')
+      : [];
+    const entities = Array.isArray(parsed?.entities)
+      ? parsed.entities.filter(
+          (e: unknown): e is { label: string; kind: string; description?: string } =>
+            !!e &&
+            typeof e === 'object' &&
+            typeof (e as { label?: unknown }).label === 'string',
+        )
+      : [];
+    const relations = Array.isArray(parsed?.relations)
+      ? parsed.relations.filter(
+          (r: unknown): r is { from: string; to: string; label?: string } =>
+            !!r &&
+            typeof r === 'object' &&
+            typeof (r as { from?: unknown }).from === 'string' &&
+            typeof (r as { to?: unknown }).to === 'string',
+        )
+      : [];
+    return {
+      summary: typeof parsed?.summary === 'string' ? parsed.summary : '',
+      tags,
+      entities,
+      relations,
+    };
   }
 
   /**

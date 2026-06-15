@@ -43,6 +43,11 @@ import {
   TOBE_ROADMAP_REPOSITORY,
   ROADMAP_PHASE_REPOSITORY,
   KPI_REPOSITORY,
+  // Knowledge graph batch ingestion
+  INGESTION_BATCH_REPOSITORY,
+  INGESTION_FILE_REPOSITORY,
+  KNOWLEDGE_REPOSITORY,
+  PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
 } from './domain';
@@ -235,6 +240,24 @@ import {
   SetKpiInformationTypesUseCase,
   GetFlowIoSummaryUseCase,
   GenerateKpisUseCase,
+  // Ingestion（取り込みバッチ/ファイル）
+  CreateIngestionBatchUseCase,
+  GetIngestionBatchesUseCase,
+  GetIngestionBatchDetailUseCase,
+  ResumeBatchUseCase,
+  CancelBatchUseCase,
+  RetryFileUseCase,
+  SkipFileUseCase,
+  // Knowledge（ナレッジグラフ read + node/document 編集）
+  GetKnowledgeGraphUseCase,
+  GetKnowledgeNodeUseCase,
+  SearchKnowledgeUseCase,
+  UpdateKnowledgeNodeUseCase,
+  DeleteKnowledgeNodeUseCase,
+  UpdateDocumentPositionUseCase,
+  // KnowledgeSettings（課金ガード設定）
+  GetOrCreateSettingsUseCase,
+  UpdateSettingsUseCase,
 } from './application';
 
 // Infrastructure
@@ -277,6 +300,11 @@ import {
   TobeRoadmapRepositoryImpl,
   RoadmapPhaseRepositoryImpl,
   KpiRepositoryImpl,
+  // Knowledge graph batch ingestion
+  IngestionBatchRepositoryImpl,
+  IngestionFileRepositoryImpl,
+  KnowledgeRepositoryImpl,
+  ProjectKnowledgeSettingsRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
   ProjectAccessService,
@@ -398,6 +426,23 @@ import {
   ProjectJobController,
   JobByIdController,
 } from './presentation/controllers/job.controller';
+// ナレッジグラフ バッチ取り込み
+import { BlobStorageService } from './infrastructure/services/blob-storage.service';
+import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
+import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
+import {
+  IngestionBatchProjectController,
+  IngestionBatchByIdController,
+} from './presentation/controllers/ingestion.controller';
+import { IngestionFileController } from './presentation/controllers/ingestion-file.controller';
+import { IngestionUploadController } from './presentation/controllers/ingestion-upload.controller';
+import { IngestionSourceController } from './presentation/controllers/ingestion-source.controller';
+import {
+  KnowledgeProjectController,
+  KnowledgeNodeController,
+  KnowledgeDocumentController,
+} from './presentation/controllers/knowledge.controller';
+import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
 
 @Module({
   imports: [
@@ -510,6 +555,16 @@ import {
     WebhookController,
     // 外部トラッカー（Backlog/Jira）移行・同期
     TrackerConnectionController,
+    // ナレッジグラフ バッチ取り込み（取り込み/ナレッジ/設定）
+    IngestionBatchProjectController,
+    IngestionBatchByIdController,
+    IngestionFileController,
+    IngestionUploadController,
+    IngestionSourceController,
+    KnowledgeProjectController,
+    KnowledgeNodeController,
+    KnowledgeDocumentController,
+    KnowledgeSettingsController,
   ],
   providers: [
     // ========== Domain Service Implementations ==========
@@ -670,6 +725,23 @@ import {
     {
       provide: KPI_REPOSITORY,
       useClass: KpiRepositoryImpl,
+    },
+    // ========== Knowledge Graph Batch Ingestion ==========
+    {
+      provide: INGESTION_BATCH_REPOSITORY,
+      useClass: IngestionBatchRepositoryImpl,
+    },
+    {
+      provide: INGESTION_FILE_REPOSITORY,
+      useClass: IngestionFileRepositoryImpl,
+    },
+    {
+      provide: KNOWLEDGE_REPOSITORY,
+      useClass: KnowledgeRepositoryImpl,
+    },
+    {
+      provide: PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
+      useClass: ProjectKnowledgeSettingsRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -859,6 +931,24 @@ import {
     SetKpiInformationTypesUseCase,
     GetFlowIoSummaryUseCase,
     GenerateKpisUseCase,
+    // Ingestion（取り込みバッチ/ファイル）
+    CreateIngestionBatchUseCase,
+    GetIngestionBatchesUseCase,
+    GetIngestionBatchDetailUseCase,
+    ResumeBatchUseCase,
+    CancelBatchUseCase,
+    RetryFileUseCase,
+    SkipFileUseCase,
+    // Knowledge（ナレッジグラフ read + node/document 編集）
+    GetKnowledgeGraphUseCase,
+    GetKnowledgeNodeUseCase,
+    SearchKnowledgeUseCase,
+    UpdateKnowledgeNodeUseCase,
+    DeleteKnowledgeNodeUseCase,
+    UpdateDocumentPositionUseCase,
+    // KnowledgeSettings（課金ガード設定）
+    GetOrCreateSettingsUseCase,
+    UpdateSettingsUseCase,
 
     // ========== Services ==========
     ProjectAccessService,
@@ -876,6 +966,10 @@ import {
     JobService,
     TaskWebhookService,
     TrackerImportService,
+    // ナレッジグラフ バッチ取り込み（Blob 保管 / 型別抽出 / 1ファイルパイプライン）
+    BlobStorageService,
+    FileExtractionService,
+    KnowledgeIngestionService,
 
     // ========== Global Guards ==========
     {

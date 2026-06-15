@@ -40,3 +40,8 @@ export * from './tobe-vision.entity';
 export * from './tobe-roadmap.entity';
 export * from './roadmap-phase.entity';
 export * from './kpi.entity';
+export * from './ingestion-batch.entity';
+export * from './ingestion-file.entity';
+export * from './knowledge-node.entity';
+export * from './knowledge-document.entity';
+export * from './project-knowledge-settings.entity';

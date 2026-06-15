@@ -30,4 +30,7 @@ export * from './tobe-vision';
 export * from './tobe-roadmap';
 export * from './roadmap-phase';
 export * from './kpi';
+export * from './ingestion';
+export * from './knowledge';
+export * from './knowledge-settings';
 

@@ -39,9 +39,13 @@
     "@types/uuid": "^9.0.7",
     "@upstash/qstash": "^2.11.0",
     "@upstash/redis": "^1.38.0",
+    "@vercel/blob": "^2.4.0",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "fflate": "^0.8.3",
+    "mammoth": "^1.12.0",
+    "multer": "^2.1.1",
     "mysql2": "^3.22.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -53,7 +57,8 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@nestjs/schematics": "^10.1.0",

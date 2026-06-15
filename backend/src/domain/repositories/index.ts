@@ -35,3 +35,7 @@ export * from './tobe-vision.repository';
 export * from './tobe-roadmap.repository';
 export * from './roadmap-phase.repository';
 export * from './kpi.repository';
+export * from './ingestion-batch.repository';
+export * from './ingestion-file.repository';
+export * from './knowledge.repository';
+export * from './project-knowledge-settings.repository';

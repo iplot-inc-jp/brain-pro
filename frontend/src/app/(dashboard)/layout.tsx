@@ -43,6 +43,8 @@ import {
   Boxes,
   Table2,
   Sparkles,
+  Brain,
+  FileStack,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -646,6 +648,14 @@ export default function DashboardLayout({
           { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
           { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
+        ],
+      },
+      {
+        label: 'ナレッジ',
+        items: [
+          { name: '取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
+          { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
+          { name: '設定', href: `${base}/knowledge/settings`, icon: Settings },
         ],
       },
       {

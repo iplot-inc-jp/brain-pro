@@ -33,3 +33,7 @@ export * from './kpi.controller';
 export * from './project-bundle.controller';
 export * from './entity-json.controller';
 export * from './feature-io.controller';
+export * from './ingestion.controller';
+export * from './ingestion-file.controller';
+export * from './knowledge.controller';
+export * from './knowledge-settings.controller';
