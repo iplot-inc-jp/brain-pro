@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Liveblocks } from '@liveblocks/node';
 
 export interface MintTokenParams {
@@ -15,7 +15,6 @@ export interface MintTokenParams {
  */
 @Injectable()
 export class LiveblocksTokenService {
-  private readonly logger = new Logger(LiveblocksTokenService.name);
   private client: Liveblocks | null = null;
 
   get isConfigured(): boolean {
