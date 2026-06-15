@@ -575,6 +575,12 @@ export class AttachmentController {
       return;
     }
 
+    // client直アップロード: Blob 公開URLへ 302 リダイレクト（関数を通さず最速）
+    if (row.blobUrl) {
+      res.redirect(302, row.blobUrl);
+      return;
+    }
+
     // 旧方式フォールバック: 既存ローカルデータ（ディスク保存）互換
     const sanitized = sanitizeFilename(row.filename);
     const diskPath = path.join(UPLOAD_DIR, `${row.id}-${sanitized}`);

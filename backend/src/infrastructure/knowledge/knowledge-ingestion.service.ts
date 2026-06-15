@@ -443,7 +443,7 @@ export class KnowledgeIngestionService {
     // 他プロジェクトの attachmentId を sourceRef に詰めても projectId 不一致で見つからない。
     const att = await this.prisma.attachment.findFirst({
       where: { id: file.sourceRef, projectId: file.projectId },
-      select: { data: true, url: true, mimeType: true },
+      select: { data: true, blobUrl: true, url: true, mimeType: true },
     });
     if (!att) {
       throw new Error(
@@ -452,6 +452,11 @@ export class KnowledgeIngestionService {
     }
     if (att.data) {
       return { bytes: Buffer.from(att.data), mimeType: att.mimeType };
+    }
+    // client直アップロード由来: Vercel Blob 公開URLから読む（read は Blob 公開ホストのみ許可）。
+    if (att.blobUrl) {
+      const bytes = await this.blob.read(att.blobUrl);
+      return { bytes, mimeType: att.mimeType };
     }
     // ディスク参照（既存ローカル行）。url は `/uploads/...` 配信パス。
     // サーバ導出パス（DB 由来）なので readUploadFile（UPLOAD_DIR 限定）で読む。
