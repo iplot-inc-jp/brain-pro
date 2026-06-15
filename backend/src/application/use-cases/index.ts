@@ -34,4 +34,5 @@ export * from './ingestion';
 export * from './knowledge';
 export * from './knowledge-settings';
 export * from './tracker';
+export * from './llm-usage';
 

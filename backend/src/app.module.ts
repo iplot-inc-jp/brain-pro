@@ -123,6 +123,8 @@ import {
   ManageTrackerWebhookUseCase,
   // 外部トラッカー Webhook 受信（token検証→単一import / 削除=クローズ）
   ProcessTrackerWebhookUseCase,
+  // AI使用量サマリ（モデル別/領域別/概算コスト）
+  GetLlmUsageSummaryUseCase,
   // Task Comment
   CreateTaskCommentUseCase,
   GetTaskCommentsUseCase,
@@ -433,6 +435,7 @@ import { TrackerImportService } from './infrastructure/services/trackers/tracker
 import { WebhookController } from './presentation/controllers/webhook.controller';
 import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
 import { TrackerWebhookController } from './presentation/controllers/tracker-webhook.controller';
+import { LlmUsageController } from './presentation/controllers/llm-usage.controller';
 import {
   JobWorkerController,
   ProjectJobController,
@@ -573,6 +576,7 @@ import { DriveController } from './presentation/controllers/drive.controller';
     TrackerConnectionController,
     // 外部トラッカー Webhook 秘密の管理（admin）
     TrackerWebhookController,
+    LlmUsageController,
     // ナレッジグラフ バッチ取り込み（取り込み/ナレッジ/設定）
     IngestionBatchProjectController,
     IngestionBatchByIdController,
@@ -835,6 +839,8 @@ import { DriveController } from './presentation/controllers/drive.controller';
     ManageTrackerWebhookUseCase,
     // 外部トラッカー Webhook 受信処理
     ProcessTrackerWebhookUseCase,
+    // AI使用量サマリ
+    GetLlmUsageSummaryUseCase,
     // Task Comment
     CreateTaskCommentUseCase,
     GetTaskCommentsUseCase,
