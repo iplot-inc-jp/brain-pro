@@ -858,6 +858,31 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [isFullscreen]);
 
+  // 選択中のオブジェクト（ノード）/ 矢印（エッジ）を Backspace・Delete で削除。
+  // ReactFlow 既定の deleteKeyCode はローカル状態だけ消えて永続化されない（desync）ため
+  // 無効化し（下の deleteKeyCode={null}）、ここで onDeleteNode/onDeleteFlow を呼んで永続削除する。
+  // テキスト入力中（input/textarea/contentEditable）は誤爆しないよう無視する。
+  const { onDeleteNode, onDeleteFlow } = props;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+      if (selectedNodeId && onDeleteNode) {
+        e.preventDefault();
+        void onDeleteNode(selectedNodeId);
+        setSelectedNodeId(null);
+      } else if (selectedEdgeId && onDeleteFlow) {
+        e.preventDefault();
+        void onDeleteFlow(selectedEdgeId);
+        setSelectedEdgeId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedNodeId, selectedEdgeId, onDeleteNode, onDeleteFlow]);
+
   // 全画面切替の前後でビューを合わせ直す（拡大/縮小どちらでも fitView）。
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 120);
@@ -1290,6 +1315,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
           onConnectStart={onConnectStart}
           onReconnect={onReconnect}
           onNodesChange={onNodesChange}
+          deleteKeyCode={null}
           nodesDraggable
           nodesConnectable
           elementsSelectable
