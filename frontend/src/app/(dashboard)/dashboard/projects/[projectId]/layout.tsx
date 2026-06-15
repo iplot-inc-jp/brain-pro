@@ -1,15 +1,21 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, usePathname } from 'next/navigation'
+import { ClientSideSuspense } from '@liveblocks/react'
 import { useProjectAccess } from '@/hooks/use-project-access'
 import { ReadOnlyProvider, ReadOnlyBanner } from '@/components/read-only-context'
+import { RoomProvider, roomIdForProject } from '@/lib/liveblocks.config'
+import { WhoIsOnline } from '@/components/presence/WhoIsOnline'
+import { LiveCursors } from '@/components/presence/LiveCursors'
+import { PresencePageSync } from '@/components/presence/PresencePageSync'
 
 /**
  * プロジェクト配下（/dashboard/projects/[projectId]/...）共通レイアウト。
  *
- * - my-access から実効権限を取得し ReadOnlyContext で配下に供給する。
- * - canEdit=false のとき、各ページ上部に「閲覧専用」バナーを固定表示する。
- * - ナビゲーション・表示はそのまま（閲覧は可能）。編集操作のみ各ページで不可化する。
+ * - my-access から実効権限を取得し ReadOnlyContext で配下に供給する（閲覧専用バナー）。
+ * - Liveblocks RoomProvider（room=project:{projectId}）で全サブページにプレゼンスを付与。
+ *   オンライン表示（WhoIsOnline）とライブカーソル（LiveCursors）を1回だけ設置する。
+ *   トークン取得に失敗（秘密鍵未設定/401）してもページは通常表示される（グレースフルデグレード）。
  */
 export default function ProjectScopedLayout({
   children,
@@ -18,12 +24,39 @@ export default function ProjectScopedLayout({
 }) {
   const params = useParams()
   const projectId = (params?.projectId as string) ?? null
+  const pathname = usePathname()
   const { level, canEdit, loading } = useProjectAccess(projectId)
+
+  const body = (
+    <>
+      <ReadOnlyBanner />
+      {children}
+    </>
+  )
+
+  if (!projectId) {
+    return <ReadOnlyProvider value={{ canEdit, level, loading }}>{body}</ReadOnlyProvider>
+  }
 
   return (
     <ReadOnlyProvider value={{ canEdit, level, loading }}>
-      <ReadOnlyBanner />
-      {children}
+      <RoomProvider
+        id={roomIdForProject(projectId)}
+        initialPresence={{ page: pathname, cursor: null, space: 'screen' }}
+      >
+        <ClientSideSuspense fallback={null}>
+          {() => (
+            <>
+              <div className="fixed right-4 top-16 z-40">
+                <WhoIsOnline />
+              </div>
+              <PresencePageSync />
+              <LiveCursors />
+            </>
+          )}
+        </ClientSideSuspense>
+        {body}
+      </RoomProvider>
     </ReadOnlyProvider>
   )
 }
