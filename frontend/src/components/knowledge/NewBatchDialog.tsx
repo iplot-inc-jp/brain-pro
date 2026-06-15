@@ -35,7 +35,6 @@ import { HelpTooltip } from '@/components/ui/help-tooltip'
 import { uploadProjectFile } from '@/lib/upload'
 import {
   Loader2,
-  X,
   FileArchive,
   FileText,
   Folder,
@@ -43,7 +42,6 @@ import {
   RefreshCw,
   ChevronRight,
   HardDrive,
-  Upload as UploadIcon,
 } from 'lucide-react'
 import {
   ingestionApi,
@@ -106,7 +104,7 @@ export function NewBatchDialog({
   // 事前選択の id 群（配列の参照変化で effect が暴発しないよう安定キーで扱う）。
   const initialAttKey = (initialAttachmentIds ?? []).join(',')
   // ソース選択タブ（事前選択があれば「既存添付」を開く）。
-  const [tab, setTab] = useState<string>('upload')
+  const [tab, setTab] = useState<string>('materials')
   const [uploads, setUploads] = useState<StagedUpload[]>([])
   const [attachments, setAttachments] = useState<SelectableAttachment[]>([])
   const [selectedAttIds, setSelectedAttIds] = useState<Set<string>>(new Set())
@@ -143,7 +141,7 @@ export function NewBatchDialog({
     // 共有プール導線で渡った既存添付を事前選択し、「既存添付」タブを開く。
     const preselect = initialAttKey ? initialAttKey.split(',') : []
     setSelectedAttIds(new Set(preselect))
-    setTab(preselect.length > 0 ? 'attachment' : 'upload')
+    setTab('materials')
     setError(null)
     setAiExtractionEnabled(settings?.aiExtractionEnabled ?? true)
     setOcrEnabled(settings?.ocrEnabled ?? true)
@@ -312,7 +310,7 @@ export function NewBatchDialog({
           for (const id of ids) next.add(id)
           return next
         })
-        setTab('attachment')
+        setTab('materials')
       } catch (e) {
         setError(e instanceof Error ? e.message : 'アップロードに失敗しました')
       } finally {
@@ -321,10 +319,6 @@ export function NewBatchDialog({
     },
     [projectId, loadAttachments],
   )
-
-  const removeUpload = (idx: number) => {
-    setUploads((prev) => prev.filter((_, i) => i !== idx))
-  }
 
   const toggleAttachment = (id: string) => {
     setSelectedAttIds((prev) => {
@@ -422,13 +416,9 @@ export function NewBatchDialog({
           {/* ソース選択（事前選択があれば「既存添付」タブを開く） */}
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
-              <TabsTrigger value="upload">
-                <UploadIcon className="h-3.5 w-3.5 mr-1.5" />
-                アップロード
-              </TabsTrigger>
-              <TabsTrigger value="attachment">
+              <TabsTrigger value="materials">
                 <Paperclip className="h-3.5 w-3.5 mr-1.5" />
-                既存添付から選択
+                資料
               </TabsTrigger>
               <TabsTrigger value="drive">
                 <HardDrive className="h-3.5 w-3.5 mr-1.5" />
@@ -436,65 +426,29 @@ export function NewBatchDialog({
               </TabsTrigger>
             </TabsList>
 
-            {/* 取り込み元（ソース）の説明 */}
-            <p className="flex items-center gap-1 pt-2 text-xs text-muted-foreground">
-              取り込む素材（ファイル）の集め方を選びます。
-              <HelpTooltip text="アップロード=PC上のファイルを新規アップロード（ZIPは自動展開）。既存添付から選択=このプロジェクトに既にある添付ファイルを再利用。Google Drive=連携済みなら Drive のファイルを取り込み。どれを選んでも AI でナレッジグラフ化されます。" />
-            </p>
+            {/* 資料: 新規アップロード（ドロップ）＋プロジェクト共通の資料一覧から選択（共有プール） */}
+            <TabsContent value="materials" className="space-y-3 pt-2">
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                取り込む資料を追加・選択します（プロジェクト共通）。
+                <HelpTooltip text="上のエリアにドロップ／クリックで新規アップロードできます（ZIP は自動展開）。アップロードしたファイルや、このプロジェクトの他の場所（背景・目的の関連資料、タスク添付、業務フロー添付、情報種別の具体データ など）にある資料が下の一覧に出るので、取り込むものにチェックを入れてください。" />
+              </p>
 
-            {/* アップロード（ZIP 可・複数） */}
-            <TabsContent value="upload" className="space-y-3 pt-2">
               <FileDropZone
                 onFiles={handleFiles}
                 accept={ACCEPT}
                 multiple
                 busy={uploading}
-                className="h-28"
+                className="h-24"
               >
                 <div className="text-center text-sm text-muted-foreground">
-                  ファイルをドロップ、またはクリックして選択
+                  ファイルをドロップ、またはクリックして新規アップロード
                   <div className="text-xs mt-1 opacity-70">
                     PDF / 画像 / Excel / Word / テキスト / ZIP（複数可）
                   </div>
                 </div>
               </FileDropZone>
 
-              {uploads.length > 0 && (
-                <ul className="space-y-1 max-h-40 overflow-y-auto">
-                  {uploads.map((u, i) => (
-                    <li
-                      key={`${u.blobUrl}-${i}`}
-                      className="flex items-center gap-2 text-sm rounded-md border border-border px-2 py-1.5"
-                    >
-                      {u.isArchive || isArchiveFile(u.filename, u.mimeType) ? (
-                        <FileArchive className="h-4 w-4 flex-shrink-0 text-amber-500" />
-                      ) : (
-                        <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="truncate flex-1">{u.filename}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatBytes(u.size)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeUpload(i)}
-                        className="text-muted-foreground hover:text-destructive"
-                        aria-label="削除"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </TabsContent>
-
-            {/* 既存添付から選択 */}
-            <TabsContent value="attachment" className="space-y-2 pt-2">
-              <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                このプロジェクトに既にある添付ファイルから選びます。
-                <HelpTooltip text="「既存添付」= このプロジェクトのどこかに既にアップロード済みのファイル（背景・目的ページの関連資料、タスクの添付、業務フローの添付、情報種別の具体データ など）。アップロードし直さずに、そのままナレッジ取り込みの素材にできます。" />
-              </p>
+              {/* プロジェクトの資料一覧（アップロード分もここに加わる）。取り込むものにチェック。 */}
               {loadingAtt ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground py-6 justify-center">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -502,10 +456,9 @@ export function NewBatchDialog({
                 </div>
               ) : attachments.length === 0 ? (
                 <div className="text-sm text-muted-foreground py-6 text-center space-y-1">
-                  <div>選択できる添付ファイルがありません。</div>
+                  <div>取り込める資料がまだありません。</div>
                   <div className="text-xs">
-                    このプロジェクトにはまだ添付がありません。「アップロード」タブから追加するか、
-                    背景・目的ページなどで資料を添付してください。
+                    上のエリアからアップロードするか、背景・目的ページなどで資料を添付してください。
                   </div>
                 </div>
               ) : (
