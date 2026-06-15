@@ -171,10 +171,12 @@ export default function ObjectMapPage() {
         positionY: 80 + Math.floor(count / 4) * 150,
         order: count,
       });
-      await refresh();
+      // 楽観: サーバ返却の実体を即追加（全体 refresh しない＝即反映）
+      setGraph((g) => (g ? { ...g, objects: [...g.objects, created] } : g));
       setSelectedObjectId(created.id);
     } catch (err) {
       showError(err, 'オブジェクトの作成に失敗しました');
+      await refresh(); // 失敗時のみ再取得で巻き戻し
     }
   }, [graph, projectId, refresh, showError]);
 
@@ -184,10 +186,14 @@ export default function ObjectMapPage() {
       patch: { name?: string; description?: string | null; color?: string | null },
     ) => {
       try {
-        await dataObjectApi.updateObject(id, patch);
-        await refresh();
+        const updated = await dataObjectApi.updateObject(id, patch);
+        // 楽観: サーバ返却の実体をマージ（全体 refresh しない＝即反映）
+        setGraph((g) =>
+          g ? { ...g, objects: g.objects.map((o) => (o.id === id ? updated : o)) } : g,
+        );
       } catch (err) {
         showError(err, 'オブジェクトの更新に失敗しました');
+        await refresh(); // 失敗時のみ再取得で巻き戻し
       }
     },
     [refresh, showError],
@@ -255,7 +261,7 @@ export default function ObjectMapPage() {
         return;
       }
       try {
-        await dataObjectApi.createRelation(projectId, {
+        const created = await dataObjectApi.createRelation(projectId, {
           sourceObjectId,
           targetObjectId,
           cardinality: cardinality ?? 'ONE_TO_MANY',
@@ -263,9 +269,11 @@ export default function ObjectMapPage() {
           sourceHandle: sourceHandle ?? null,
           targetHandle: targetHandle ?? null,
         });
-        await refresh();
+        // 楽観: サーバ返却の実体（実ID）を即追加（全体 refresh しない＝即反映）
+        setGraph((g) => (g ? { ...g, relations: [...g.relations, created] } : g));
       } catch (err) {
         showError(err, '関係線の作成に失敗しました');
+        await refresh(); // 失敗時のみ再取得で巻き戻し
       }
     },
     [graph, projectId, toast, refresh, showError],
@@ -285,10 +293,14 @@ export default function ObjectMapPage() {
       },
     ) => {
       try {
-        await dataObjectApi.updateRelation(id, patch);
-        await refresh();
+        const updated = await dataObjectApi.updateRelation(id, patch);
+        // 楽観: サーバ返却の実体をマージ（全体 refresh しない＝即反映）
+        setGraph((g) =>
+          g ? { ...g, relations: g.relations.map((r) => (r.id === id ? updated : r)) } : g,
+        );
       } catch (err) {
         showError(err, '関係線の更新に失敗しました');
+        await refresh(); // 失敗時のみ再取得で巻き戻し
       }
     },
     [refresh, showError],
