@@ -419,6 +419,10 @@ import { SubProjectController } from './presentation/controllers/sub-project.con
 import { AnalysisController } from './presentation/controllers/analysis.controller';
 import { GapLedgerController } from './presentation/controllers/gap-ledger.controller';
 import { CruoaController } from './presentation/controllers/cruoa.controller';
+import {
+  OverviewMatrixController,
+  OverviewMatrixByIdController,
+} from './presentation/controllers/overview-matrix.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -524,6 +528,9 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     AnalysisController,
     GapLedgerController,
     CruoaController,
+    // 俯瞰思考（N軸 俯瞰マトリクスビルダー）
+    OverviewMatrixController,
+    OverviewMatrixByIdController,
     DfdController,
     DataObjectController,
     InformationTypeController,

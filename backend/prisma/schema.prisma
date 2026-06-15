@@ -282,6 +282,7 @@ model Project {
   knowledgeRelations      KnowledgeRelation[]
   driveConnections        DriveConnection[]
   llmUsageLogs            LlmUsageLog[]
+  overviewMatrices        OverviewMatrix[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -2738,4 +2739,66 @@ model LlmUsageLog {
   @@index([projectId, area])
   @@index([projectId, model])
   @@map("llm_usage_logs")
+}
+
+// ===========================================
+// 俯瞰思考（汎用 N軸 俯瞰マトリクス。v1 最大3軸。CRUOA/RACI と併存）
+// ===========================================
+model OverviewMatrix {
+  id String @id @default(uuid())
+  projectId String @map("project_id")
+  name String
+  purpose String? @db.Text
+  cellMode String @default("TEXT")        // TEXT | TAGS | SYMBOL
+  tagOptions Json? @map("tag_options")    // [{key,label,color}]（TAGS/SYMBOL用）
+  order Int @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  axes OverviewMatrixAxis[]
+  cells OverviewMatrixCell[]
+  @@index([projectId])
+  @@map("overview_matrices")
+}
+model OverviewMatrixAxis {
+  id String @id @default(uuid())
+  matrixId String @map("matrix_id")
+  axisIndex Int @map("axis_index")        // 0=行,1=列,2=第3軸
+  name String
+  side String @default("COL")             // 'ROW' | 'COL'（第3軸の結合方向）
+  createdAt DateTime @default(now()) @map("created_at")
+  matrix OverviewMatrix @relation(fields: [matrixId], references: [id], onDelete: Cascade)
+  items OverviewMatrixAxisItem[]
+  @@unique([matrixId, axisIndex])
+  @@index([matrixId])
+  @@map("overview_matrix_axes")
+}
+model OverviewMatrixAxisItem {
+  id String @id @default(uuid())
+  axisId String @map("axis_id")
+  label String
+  order Int @default(0)
+  sourceType String @default("FREE") @map("source_type")  // FREE|ROLE|DATA_OBJECT|TABLE|SYSTEM|STATUS
+  sourceId String? @map("source_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  axis OverviewMatrixAxis @relation(fields: [axisId], references: [id], onDelete: Cascade)
+  @@index([axisId])
+  @@map("overview_matrix_axis_items")
+}
+model OverviewMatrixCell {
+  id String @id @default(uuid())
+  matrixId String @map("matrix_id")
+  rowItemId String @map("row_item_id")
+  colItemId String @map("col_item_id")
+  layerItemId String? @map("layer_item_id")   // 第3軸（2軸時null）
+  value String? @db.Text                       // TEXT本文 / "C/R/U" / 記号
+  note String? @db.Text
+  isApplicable Boolean @default(true) @map("is_applicable")
+  reason String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  matrix OverviewMatrix @relation(fields: [matrixId], references: [id], onDelete: Cascade)
+  @@unique([matrixId, rowItemId, colItemId, layerItemId])
+  @@index([matrixId])
+  @@map("overview_matrix_cells")
 }
