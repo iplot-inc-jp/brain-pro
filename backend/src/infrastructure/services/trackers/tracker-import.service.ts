@@ -13,8 +13,8 @@ import {
 import { PrismaService } from '../../persistence/prisma/prisma.service';
 import { CryptoService } from '../crypto.service';
 import { NormalizedComment, NormalizedIssue } from './types';
-import { backlogListIssues } from './backlog-api';
-import { jiraListIssues } from './jira-api';
+import { backlogGetIssue, backlogListIssues } from './backlog-api';
+import { jiraGetIssue, jiraListIssues } from './jira-api';
 
 /** TRACKER_IMPORT ジョブの結果サマリ（result に記録 / フロントが表示）。 */
 export interface TrackerImportResult {
@@ -129,61 +129,16 @@ export class TrackerImportService {
     const total = issues.length || 1;
     for (let i = 0; i < issues.length; i++) {
       const issue = issues[i];
-      const sourceKey = this.buildSourceKey(conn.provider, issue.externalKey);
       try {
-        const existing = await this.taskRepository.findByProjectIdAndSourceKey(
+        // 1 件の NormalizedIssue を Task に upsert（sourceKey 冪等。親/Epic は後段パス）。
+        const { taskId, created, commentsCreated } = await this.upsertIssue(
           conn.projectId,
-          sourceKey,
+          conn.provider,
+          issue,
         );
-
-        const status = mapStatus(issue.status, conn.provider);
-        const priority = mapPriority(issue.priority, conn.provider);
-        const issueType = mapIssueType(issue.issueType);
-
-        let taskId: string;
-        if (existing) {
-          // 既存タスクを更新（親/Epic は後段パスで設定するためここでは触らない）。
-          existing.update({
-            title: issue.title,
-            description: issue.description,
-            status,
-            priority,
-            issueType,
-            storyPoints: issue.storyPoints ?? null,
-            sprint: issue.sprint ?? null,
-            assigneeName: issue.assigneeName,
-            startDate: parseDate(issue.startDate),
-            dueDate: parseDate(issue.dueDate),
-            estimatedHours: issue.estimatedHours,
-            actualHours: issue.actualHours,
-          });
-          await this.taskRepository.save(existing);
-          taskId = existing.id;
-          result.updated++;
-        } else {
-          taskId = this.taskRepository.generateId();
-          const task = Task.create(
-            {
-              projectId: conn.projectId,
-              sourceKey,
-              title: issue.title,
-              description: issue.description,
-              status,
-              priority,
-              issueType,
-              storyPoints: issue.storyPoints ?? null,
-              sprint: issue.sprint ?? null,
-              assigneeName: issue.assigneeName,
-              startDate: parseDate(issue.startDate),
-              dueDate: parseDate(issue.dueDate),
-              estimatedHours: issue.estimatedHours,
-              actualHours: issue.actualHours,
-            },
-            taskId,
-          );
-          await this.taskRepository.save(task);
-          result.created++;
-        }
+        if (created) result.created++;
+        else result.updated++;
+        result.commentsCreated += commentsCreated;
 
         keyToTaskId.set(issue.externalKey, taskId);
         linkPlan.push({
@@ -192,14 +147,6 @@ export class TrackerImportService {
           parentExternalKey: issue.parentExternalKey,
           epicExternalKey: issue.epicExternalKey ?? null,
         });
-
-        // コメント取込（重複を避けて追記）。
-        if (issue.comments && issue.comments.length > 0) {
-          result.commentsCreated += await this.upsertComments(
-            taskId,
-            issue.comments,
-          );
-        }
       } catch (e) {
         result.skipped++;
         result.errors.push(
@@ -318,6 +265,177 @@ export class TrackerImportService {
   /** "BACKLOG:IPLOT-12" 形式の由来キー。 */
   private buildSourceKey(provider: string, externalKey: string): string {
     return `${provider}:${externalKey}`;
+  }
+
+  /**
+   * 1 件の NormalizedIssue を Task に upsert する（sourceKey で冪等）。
+   * 既存があれば update、無ければ create。親/Epic リンクはここでは触らず後段パス（run）/
+   * importSingleByKey 側で解決する。コメントは重複回避で追記する。
+   * @returns 作成/更新の別と、追記したコメント件数（taskId は親/Epic 解決に使う）。
+   */
+  private async upsertIssue(
+    projectId: string,
+    provider: string,
+    issue: NormalizedIssue,
+  ): Promise<{ taskId: string; created: boolean; commentsCreated: number }> {
+    const sourceKey = this.buildSourceKey(provider, issue.externalKey);
+    const existing = await this.taskRepository.findByProjectIdAndSourceKey(
+      projectId,
+      sourceKey,
+    );
+
+    const status = mapStatus(issue.status, provider);
+    const priority = mapPriority(issue.priority, provider);
+    const issueType = mapIssueType(issue.issueType);
+
+    let taskId: string;
+    let created: boolean;
+    if (existing) {
+      // 既存タスクを更新（親/Epic は後段パスで設定するためここでは触らない）。
+      existing.update({
+        title: issue.title,
+        description: issue.description,
+        status,
+        priority,
+        issueType,
+        storyPoints: issue.storyPoints ?? null,
+        sprint: issue.sprint ?? null,
+        assigneeName: issue.assigneeName,
+        startDate: parseDate(issue.startDate),
+        dueDate: parseDate(issue.dueDate),
+        estimatedHours: issue.estimatedHours,
+        actualHours: issue.actualHours,
+      });
+      await this.taskRepository.save(existing);
+      taskId = existing.id;
+      created = false;
+    } else {
+      taskId = this.taskRepository.generateId();
+      const task = Task.create(
+        {
+          projectId,
+          sourceKey,
+          title: issue.title,
+          description: issue.description,
+          status,
+          priority,
+          issueType,
+          storyPoints: issue.storyPoints ?? null,
+          sprint: issue.sprint ?? null,
+          assigneeName: issue.assigneeName,
+          startDate: parseDate(issue.startDate),
+          dueDate: parseDate(issue.dueDate),
+          estimatedHours: issue.estimatedHours,
+          actualHours: issue.actualHours,
+        },
+        taskId,
+      );
+      await this.taskRepository.save(task);
+      created = true;
+    }
+
+    // コメント取込（重複を避けて追記）。
+    let commentsCreated = 0;
+    if (issue.comments && issue.comments.length > 0) {
+      commentsCreated = await this.upsertComments(taskId, issue.comments);
+    }
+
+    return { taskId, created, commentsCreated };
+  }
+
+  /**
+   * webhook 受信時に「変更された 1 課題だけ」を既存の正規化 + upsert 経路で取り込む。
+   * 接続の provider/host/credential/projectKey を使い、その 1 key に絞って外部 API を呼ぶ。
+   * 取得できた NormalizedIssue を connection.projectId に upsert（sourceKey 冪等）し、
+   * 親/Epic は既存 Task から sourceKey で引けたら張る（取込集合は 1 件なので新規には作らない）。
+   *
+   * @param connectionId 接続レコード ID
+   * @param externalKey 取り込む課題の外部キー（例 "ABC-12" / "IPLOT-3"）
+   * @returns 'upserted'=取り込んだ / 'not_found'=外部に該当課題が無かった
+   */
+  async importSingleByKey(
+    connectionId: string,
+    externalKey: string,
+  ): Promise<'upserted' | 'not_found'> {
+    const conn = await this.prisma.issueTrackerConnection.findUnique({
+      where: { id: connectionId },
+    });
+    if (!conn) {
+      throw new Error(`トラッカー接続が見つかりません: ${connectionId}`);
+    }
+
+    const credential = this.crypto.decrypt(conn.credentialEnc);
+
+    // ===== 1. その 1 key に絞って外部 API から取得（正規化済み） =====
+    let issue: NormalizedIssue | null;
+    if (conn.provider === 'BACKLOG') {
+      issue = await backlogGetIssue(conn.host, credential, externalKey, {
+        includeComments: true,
+      });
+    } else if (conn.provider === 'JIRA') {
+      if (!conn.email) {
+        throw new Error('Jira 接続には認証メールアドレス(email)が必要です');
+      }
+      issue = await jiraGetIssue(conn.host, conn.email, credential, externalKey, {
+        includeComments: true,
+      });
+    } else {
+      throw new Error(`未対応のプロバイダです: ${conn.provider}`);
+    }
+
+    if (!issue) return 'not_found';
+
+    // ===== 2. upsert（sourceKey 冪等。既存あれば update、無ければ create） =====
+    const { taskId } = await this.upsertIssue(
+      conn.projectId,
+      conn.provider,
+      issue,
+    );
+
+    // ===== 3. 親/Epic を既存 Task から sourceKey で解決（単一なので新規には作らない） =====
+    // lastSyncedAt は更新しない（webhook の単発取込であり、差分ポーリングの取りこぼし補修
+    // 範囲を狭めないため。最終同期時刻は run() のフル/差分同期が担う）。
+    await this.relinkSingle(conn.projectId, conn.provider, taskId, issue);
+
+    return 'upserted';
+  }
+
+  /**
+   * 単一 import 時の親/Epic 解決。取込集合が 1 件なので、親/Epic は既存 Task を
+   * sourceKey で引けた場合のみ張る（無ければ親/Epic なしのまま＝安全側）。
+   * full import の親解除ロジックとは異なり、webhook は差分的なので明示クリアはしない。
+   */
+  private async relinkSingle(
+    projectId: string,
+    provider: string,
+    taskId: string,
+    issue: NormalizedIssue,
+  ): Promise<void> {
+    const resolve = async (key: string | null | undefined) => {
+      if (!key) return null;
+      const t = await this.taskRepository.findByProjectIdAndSourceKey(
+        projectId,
+        this.buildSourceKey(provider, key),
+      );
+      return t && t.id !== taskId ? t.id : null;
+    };
+
+    const parentId = await resolve(issue.parentExternalKey);
+    const epicId = await resolve(issue.epicExternalKey);
+    if (parentId === null && epicId === null) return;
+
+    const task = await this.taskRepository.findById(taskId);
+    if (!task) return;
+    let changed = false;
+    if (parentId !== null && task.parentId !== parentId) {
+      task.reparent(parentId);
+      changed = true;
+    }
+    if (epicId !== null && task.epicId !== epicId) {
+      task.update({ epicId });
+      changed = true;
+    }
+    if (changed) await this.taskRepository.save(task);
   }
 
   /**

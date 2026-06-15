@@ -253,28 +253,94 @@ export async function backlogListIssues(
       }
     }
 
-    issues.push({
-      externalKey: r.issueKey,
-      title: r.summary ?? '(no title)',
-      description: r.description ?? null,
-      status: r.status?.name ?? null,
-      priority: r.priority?.name ?? null,
-      assigneeName: r.assignee?.name ?? null,
-      startDate: r.startDate ?? null,
-      dueDate: r.dueDate ?? null,
-      estimatedHours:
-        typeof r.estimatedHours === 'number' ? r.estimatedHours : null,
-      actualHours: typeof r.actualHours === 'number' ? r.actualHours : null,
-      parentExternalKey,
-      issueType: r.issueType?.name ?? null,
-      // Backlog API は Epic Link / Story Points / Sprint の標準提供が無いため null。
-      epicExternalKey: null,
-      storyPoints: null,
-      sprint: null,
-      comments,
-    });
+    issues.push(normalizeBacklogIssue(r, parentExternalKey, comments));
   }
   return issues;
+}
+
+/**
+ * 1 件の生 Backlog 課題を NormalizedIssue に畳む。
+ * backlogListIssues / backlogGetIssue（webhook の単一取得）で共通利用する。
+ * parentExternalKey は呼び出し側で解決済みのものを受け取る（list は id→key マップ、
+ * single は親 1 件を追加 fetch して解決）。
+ */
+function normalizeBacklogIssue(
+  r: BacklogIssueRaw,
+  parentExternalKey: string | null,
+  comments: NormalizedComment[] | undefined,
+): NormalizedIssue {
+  return {
+    externalKey: r.issueKey ?? '',
+    title: r.summary ?? '(no title)',
+    description: r.description ?? null,
+    status: r.status?.name ?? null,
+    priority: r.priority?.name ?? null,
+    assigneeName: r.assignee?.name ?? null,
+    startDate: r.startDate ?? null,
+    dueDate: r.dueDate ?? null,
+    estimatedHours:
+      typeof r.estimatedHours === 'number' ? r.estimatedHours : null,
+    actualHours: typeof r.actualHours === 'number' ? r.actualHours : null,
+    parentExternalKey,
+    issueType: r.issueType?.name ?? null,
+    // Backlog API は Epic Link / Story Points / Sprint の標準提供が無いため null。
+    epicExternalKey: null,
+    storyPoints: null,
+    sprint: null,
+    comments,
+  };
+}
+
+/**
+ * 単一課題を取得して NormalizedIssue を返す（webhook 受信時の 1 課題 import 用）。
+ * GET /api/v2/issues/{idOrKey} で 1 件 fetch し、backlogListIssues と同じ正規化を施す。
+ * 親（parentIssueId）がある場合は親 1 件を追加 fetch して issueKey を解決する。
+ * 課題が存在しない（404）場合は null を返す（削除済み/権限外）。
+ */
+export async function backlogGetIssue(
+  host: string,
+  apiKey: string,
+  issueKey: string,
+  opts: { includeComments?: boolean } = {},
+): Promise<NormalizedIssue | null> {
+  let raw: BacklogIssueRaw;
+  try {
+    raw = await bget<BacklogIssueRaw>(
+      host,
+      apiKey,
+      `/issues/${encodeURIComponent(issueKey)}`,
+    );
+  } catch (e) {
+    // 404（存在しない/削除済み）は not_found 扱いで null。それ以外は呼び出し側に伝播。
+    if (/Backlog API 404/.test((e as Error)?.message ?? '')) return null;
+    throw e;
+  }
+  if (!raw?.issueKey) return null;
+
+  // 親課題キーを解決（parentIssueId → issueKey は別 fetch が必要）。失敗時は親なし。
+  let parentExternalKey: string | null = null;
+  if (raw.parentIssueId != null) {
+    try {
+      const parent = await bget<BacklogIssueRaw>(
+        host,
+        apiKey,
+        `/issues/${raw.parentIssueId}`,
+      );
+      parentExternalKey = parent?.issueKey ?? null;
+    } catch {
+      parentExternalKey = null;
+    }
+  }
+
+  let comments: NormalizedComment[] | undefined;
+  if (opts.includeComments) {
+    try {
+      comments = await fetchComments(host, apiKey, raw.issueKey);
+    } catch {
+      comments = undefined;
+    }
+  }
+  return normalizeBacklogIssue(raw, parentExternalKey, comments);
 }
 
 /** updatedSince を Backlog 形式（YYYY-MM-DD）に丸める。ISO 日時もこの形に落とす。 */

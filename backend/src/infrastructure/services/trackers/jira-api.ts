@@ -406,10 +406,6 @@ export async function jiraListIssues(
   const issues: NormalizedIssue[] = [];
   for (const r of raws.slice(0, maxIssues)) {
     if (!r.key) continue;
-    const f = r.fields ?? {};
-    const est = f.timetracking?.originalEstimateSeconds;
-    const spent = f.timetracking?.timeSpentSeconds;
-
     let comments: NormalizedComment[] | undefined;
     if (opts.includeComments) {
       try {
@@ -418,41 +414,111 @@ export async function jiraListIssues(
         comments = undefined;
       }
     }
-
-    const epicExternalKey = extractEpicExternalKey(f);
-    let parentExternalKey = f.parent?.key ?? null;
-    // team-managed では Epic を parent で表すため、parent.key が Epic Link として既に
-    // 採られている場合は parentExternalKey 側を外す（同一 Epic を parentId/epicId 両方に
-    // 二重リンクしない）。parent は Epic Link としてのみ扱う。
-    if (
-      parentExternalKey &&
-      epicExternalKey &&
-      parentExternalKey === epicExternalKey
-    ) {
-      parentExternalKey = null;
-    }
-
-    issues.push({
-      externalKey: r.key,
-      title: f.summary ?? '(no title)',
-      description: cleanText(f.description),
-      status: f.status?.name ?? null,
-      priority: f.priority?.name ?? null,
-      assigneeName: f.assignee?.displayName ?? null,
-      // Jira 標準には開始日が無いため null（カスタムフィールド差があるため扱わない）。
-      startDate: null,
-      dueDate: f.duedate ?? null,
-      estimatedHours: typeof est === 'number' ? roundHours(est / 3600) : null,
-      actualHours: typeof spent === 'number' ? roundHours(spent / 3600) : null,
-      parentExternalKey,
-      issueType: f.issuetype?.name ?? null,
-      epicExternalKey,
-      storyPoints: extractStoryPoints(f),
-      sprint: extractSprint(f),
-      comments,
-    });
+    issues.push(normalizeJiraIssue(r, comments));
   }
   return issues;
+}
+
+/**
+ * 1 件の生 Jira 課題（key + fields）を NormalizedIssue に畳む。
+ * jiraListIssues / jiraGetIssue（webhook の単一取得）で共通利用する。
+ *   - timetracking から originalEstimate/timeSpent を時間に換算。
+ *   - parent.key を parentExternalKey に写す（subtask の親）。team-managed は Epic を
+ *     parent で表すため、Epic Link と一致する parent は二重リンク回避で外す。
+ */
+function normalizeJiraIssue(
+  r: JiraIssueRaw,
+  comments: NormalizedComment[] | undefined,
+): NormalizedIssue {
+  const f = r.fields ?? {};
+  const est = f.timetracking?.originalEstimateSeconds;
+  const spent = f.timetracking?.timeSpentSeconds;
+
+  const epicExternalKey = extractEpicExternalKey(f);
+  let parentExternalKey = f.parent?.key ?? null;
+  // team-managed では Epic を parent で表すため、parent.key が Epic Link として既に
+  // 採られている場合は parentExternalKey 側を外す（同一 Epic を parentId/epicId 両方に
+  // 二重リンクしない）。parent は Epic Link としてのみ扱う。
+  if (
+    parentExternalKey &&
+    epicExternalKey &&
+    parentExternalKey === epicExternalKey
+  ) {
+    parentExternalKey = null;
+  }
+
+  return {
+    externalKey: r.key ?? '',
+    title: f.summary ?? '(no title)',
+    description: cleanText(f.description),
+    status: f.status?.name ?? null,
+    priority: f.priority?.name ?? null,
+    assigneeName: f.assignee?.displayName ?? null,
+    // Jira 標準には開始日が無いため null（カスタムフィールド差があるため扱わない）。
+    startDate: null,
+    dueDate: f.duedate ?? null,
+    estimatedHours: typeof est === 'number' ? roundHours(est / 3600) : null,
+    actualHours: typeof spent === 'number' ? roundHours(spent / 3600) : null,
+    parentExternalKey,
+    issueType: f.issuetype?.name ?? null,
+    epicExternalKey,
+    storyPoints: extractStoryPoints(f),
+    sprint: extractSprint(f),
+    comments,
+  };
+}
+
+/**
+ * 単一課題を取得して NormalizedIssue を返す（webhook 受信時の 1 課題 import 用）。
+ * GET /rest/api/3/issue/{key} で 1 件 fetch し、jiraListIssues と同じ正規化を施す。
+ * 課題が存在しない（404）場合は null を返す（削除済み/権限外）。
+ */
+export async function jiraGetIssue(
+  siteUrl: string,
+  email: string,
+  apiToken: string,
+  issueKey: string,
+  opts: { includeComments?: boolean } = {},
+): Promise<NormalizedIssue | null> {
+  const fields = [
+    'summary',
+    'description',
+    'status',
+    'priority',
+    'assignee',
+    'duedate',
+    'parent',
+    'issuetype',
+    'timetracking',
+    'created',
+    'updated',
+    ...AGILE_CUSTOM_FIELDS,
+  ];
+  let raw: JiraIssueRaw;
+  try {
+    raw = await jget<JiraIssueRaw>(
+      siteUrl,
+      email,
+      apiToken,
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}`,
+      { fields: fields.join(',') },
+    );
+  } catch (e) {
+    // 404（存在しない/削除済み）は not_found 扱いで null。それ以外は呼び出し側に伝播。
+    if (/Jira API 404/.test((e as Error)?.message ?? '')) return null;
+    throw e;
+  }
+  if (!raw?.key) return null;
+
+  let comments: NormalizedComment[] | undefined;
+  if (opts.includeComments) {
+    try {
+      comments = await fetchComments(siteUrl, email, apiToken, raw.key);
+    } catch {
+      comments = undefined;
+    }
+  }
+  return normalizeJiraIssue(raw, comments);
 }
 
 /** 秒→時間換算の丸め（小数 2 桁）。 */
