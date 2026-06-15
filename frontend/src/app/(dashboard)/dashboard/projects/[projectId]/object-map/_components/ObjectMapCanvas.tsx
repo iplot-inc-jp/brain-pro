@@ -501,6 +501,24 @@ export function ObjectMapCanvas({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // ===== Backspace / Delete で選択中の矢印（関係）を削除 =====
+  // 矢印クリックで開く編集ウィンドウが canvas からはみ出て削除ボタンを押せない時の代替手段。
+  // テキスト入力中（input/textarea/contentEditable）は誤爆しないよう無視する。readOnly 時は no-op。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+      if (!edgeEdit) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+      e.preventDefault();
+      void onDeleteRelation(edgeEdit.id);
+      setEdgeEdit(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [edgeEdit, onDeleteRelation]);
+
   // ===== ノードドラッグ =====
   const handleNodePointerDown = useCallback(
     (e: ReactPointerEvent<SVGGElement>, obj: DataObjectDto) => {
