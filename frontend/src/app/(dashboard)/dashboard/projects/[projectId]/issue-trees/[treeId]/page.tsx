@@ -1482,6 +1482,41 @@ function IssueTreeMindMap() {
     [treeId, getHeaders, fetchTree, canEdit],
   );
 
+  // 範囲選択(矩形/Shift+クリック)した複数ノードをまとめて削除する。
+  // deleteNode と同じ DELETE /nodes/:id を id ごとに順次叩く。親を消すと子も
+  // カスケード削除されるため、選択に含まれる子が後で 404 を返しても成功扱いにする。
+  const deleteMultipleNodes = useCallback(
+    async (ids: string[]) => {
+      if (!canEdit) return;
+      if (ids.length === 0) return;
+      const message =
+        ids.length === 1
+          ? 'このノードと配下の子ノードを削除します。よろしいですか？'
+          : `${ids.length}個のノードと配下の子ノードを削除します。よろしいですか？`;
+      if (!window.confirm(message)) return;
+      setBusy(true);
+      setActionError(null);
+      try {
+        const headers = getHeaders();
+        for (const id of ids) {
+          const res = await fetch(`${API_URL}/api/issue-trees/${treeId}/nodes/${id}`, {
+            method: 'DELETE',
+            headers,
+          });
+          // 親のカスケード削除で既に消えた子は 404 になり得る → 成功扱い。
+          if (!res.ok && res.status !== 404) throw new Error('ノードの削除に失敗しました');
+        }
+        setSelectedId(null);
+        await fetchTree();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : 'ノードの削除に失敗しました');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [treeId, getHeaders, fetchTree, canEdit],
+  );
+
   // 親リンクを外す（＝子ノードをルート直下へ移す / デタッチ）。
   // 既存の PUT /nodes/:nodeId { parentId: null } を再利用する非破壊操作。
   // ノードや配下のサブツリーは消さない（“削除”ではなく“切り離し”）。
@@ -1863,8 +1898,16 @@ function IssueTreeMindMap() {
       if (ed?.detachable && ed.childNodeId) detachNode(ed.childNodeId);
       return;
     }
+    // 矩形/Shift+クリックで選択中の(仮想ルートを除く)全ノードを優先して削除。
+    const selectedIds = dragNodes
+      .filter((n) => n.selected && n.id !== ROOT_ID)
+      .map((n) => n.id);
+    if (selectedIds.length > 0) {
+      void deleteMultipleNodes(selectedIds);
+      return;
+    }
     if (selectedId) deleteNode(selectedId);
-  }, [busy, selectedEdgeId, rfEdges, selectedId, detachNode, deleteNode]);
+  }, [busy, selectedEdgeId, rfEdges, dragNodes, selectedId, detachNode, deleteNode, deleteMultipleNodes]);
 
   // キーボードショートカット
   // Shift+/（?） … 操作方法 / N … 論点を追加 / Delete・Backspace … 選択ノードを削除 /
