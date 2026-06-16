@@ -34,6 +34,9 @@ import {
   Link as LinkIcon,
   Trash2,
   Edit,
+  AlertCircle,
+  Brain,
+  Paperclip,
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
@@ -42,6 +45,22 @@ import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { EditGate } from '@/components/edit-gate';
+import { FileDropZone } from '@/components/ui/file-drop-zone';
+import {
+  projectAttachmentApi,
+  type ProjectAttachment,
+} from '@/lib/project-attachments';
+import { uploadProjectFile } from '@/lib/upload';
+
+// このページの関連資料を識別するフォルダタグ（共有プールを「要求定義」だけに絞り込む）。
+const MATERIAL_FOLDER = '要求定義';
+
+/** ファイルサイズの簡易表示（B / KB / MB） */
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size}B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(0)}KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -93,6 +112,12 @@ export default function RequirementsPage() {
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
+  // 関連資料（プロジェクト直下の共有プール。folder='要求定義' で絞り込み表示）
+  const [attachments, setAttachments] = useState<ProjectAttachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(true);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+
   // AI変換
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
   const [aiInput, setAiInput] = useState('');
@@ -135,6 +160,66 @@ export default function RequirementsPage() {
   useEffect(() => {
     fetchRequirements();
   }, [fetchRequirements]);
+
+  // 関連資料の取得（共有プールを folder='要求定義' で絞り込み）
+  const fetchAttachments = useCallback(async () => {
+    setAttachmentsLoading(true);
+    setAttachmentError(null);
+    try {
+      const list = await projectAttachmentApi.list(projectId);
+      setAttachments(list.filter((a) => a.folder === MATERIAL_FOLDER));
+    } catch (e) {
+      setAttachmentError(
+        e instanceof Error ? e.message : '関連資料の取得に失敗しました',
+      );
+    } finally {
+      setAttachmentsLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void fetchAttachments();
+  }, [fetchAttachments]);
+
+  // 複数ファイルを逐次アップロード（folder='要求定義' タグ付き＝共有プール／ナレッジ取り込み対象）
+  const uploadAttachments = useCallback(
+    async (files: File[]) => {
+      setAttachmentUploading(true);
+      setAttachmentError(null);
+      const failed: string[] = [];
+      for (const file of files) {
+        try {
+          // 共有プール: client直Blob（大ファイル可）→ 失敗/未設定時はサーバ経由(4MB)へフォールバック。
+          // folder で「要求定義」タグを付け、このページの一覧に表示する。
+          await uploadProjectFile(projectId, file, { folder: MATERIAL_FOLDER });
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      try {
+        const list = await projectAttachmentApi.list(projectId);
+        setAttachments(list.filter((a) => a.folder === MATERIAL_FOLDER));
+      } catch {
+        // 一覧の再取得に失敗してもアップロード自体の結果表示は維持する
+      }
+      if (failed.length > 0) {
+        setAttachmentError(`アップロードに失敗しました: ${failed.join('、')}`);
+      }
+      setAttachmentUploading(false);
+    },
+    [projectId],
+  );
+
+  const deleteAttachment = useCallback(async (attachment: ProjectAttachment) => {
+    if (!window.confirm(`「${attachment.filename}」を削除しますか？`)) return;
+    setAttachmentError(null);
+    try {
+      await projectAttachmentApi.remove(attachment.id);
+      setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+    } catch (e) {
+      setAttachmentError(e instanceof Error ? e.message : '削除に失敗しました');
+    }
+  }, []);
 
   // AI変換実行
   const handleAiParse = async () => {
@@ -463,6 +548,133 @@ export default function RequirementsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* 関連資料（プロジェクト直下の共有プール。folder='要求定義' タグ付き。アップロード即保存） */}
+      <Card className="bg-white border-gray-200">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#050f3e]">
+              <Paperclip className="h-4 w-4 text-primary" />
+              関連資料
+            </h2>
+            <span className="text-xs text-gray-400">
+              要件メモ・参考資料など（全形式・複数可）
+            </span>
+          </div>
+
+          {/* ナレッジと共通の資料プールである旨の明示＋取り込みページ導線 */}
+          <p className="flex flex-wrap items-center gap-1 text-xs text-gray-500">
+            <Brain className="h-3.5 w-3.5 shrink-0 text-primary" />
+            ここの資料は<span className="font-medium text-[#050f3e]">ナレッジの取り込み元</span>と共通です。各資料の
+            <Brain className="inline h-3 w-3" />
+            ボタン、または
+            <Link
+              href={`/dashboard/projects/${projectId}/knowledge/ingestion`}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              ナレッジ取り込み
+            </Link>
+            からナレッジ化できます。
+          </p>
+
+          {/* ドラッグ&ドロップ（クリックでファイル選択も可）。複数可・逐次アップロード */}
+          <EditGate dim={false}>
+            <FileDropZone
+              onFiles={(files) => void uploadAttachments(files)}
+              busy={attachmentUploading}
+              className="py-3"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Paperclip className="h-3.5 w-3.5 text-gray-400" />
+                ファイルをドラッグ＆ドロップ、またはクリックして選択
+              </span>
+            </FileDropZone>
+          </EditGate>
+
+          {attachmentError && (
+            <p className="flex items-center gap-1 text-xs text-red-600">
+              <AlertCircle className="h-3 w-3 shrink-0" />
+              {attachmentError}
+            </p>
+          )}
+
+          {attachmentsLoading ? (
+            <div className="flex items-center gap-2 py-2 text-xs text-gray-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              読み込み中…
+            </div>
+          ) : attachments.length === 0 ? (
+            <p className="py-1 text-xs text-gray-400">
+              関連資料はまだありません。アップロードした資料はナレッジ取り込みの対象（共有プール）になります。
+            </p>
+          ) : (
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+              {attachments.map((a) => {
+                const isImage = a.kind === 'IMAGE' || a.mimeType.startsWith('image/');
+                return (
+                  <li key={a.id} className="rounded border border-gray-200 bg-white p-1.5">
+                    <a
+                      href={projectAttachmentApi.fileUrl(a.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block"
+                      title={a.filename}
+                    >
+                      {isImage ? (
+                        // 画像はサムネイル表示（クリックで原寸を別タブ表示）
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={projectAttachmentApi.fileUrl(a.id)}
+                          alt={a.filename}
+                          className="h-24 w-full rounded bg-gray-100 object-cover"
+                        />
+                      ) : (
+                        // PDF 等はファイル名リンク
+                        <span className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded bg-gray-50 px-2 text-center">
+                          <FileText className="h-6 w-6 text-gray-400" />
+                          <span className="line-clamp-2 break-all text-[11px] text-blue-600 underline">
+                            {a.filename}
+                          </span>
+                        </span>
+                      )}
+                    </a>
+                    <div className="mt-1 flex items-center justify-between gap-1">
+                      <span
+                        className="min-w-0 flex-1 truncate text-[11px] text-gray-500"
+                        title={a.filename}
+                      >
+                        {a.filename}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-gray-400">
+                        {formatBytes(a.size)}
+                      </span>
+                      <Link
+                        href={`/dashboard/projects/${projectId}/knowledge/ingestion?attach=${a.id}`}
+                        className="shrink-0 rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-primary"
+                        title="この資料をナレッジに取り込む"
+                        aria-label={`${a.filename} をナレッジに取り込む`}
+                      >
+                        <Brain className="h-3.5 w-3.5" />
+                      </Link>
+                      <EditGate dim={false}>
+                        <button
+                          type="button"
+                          onClick={() => void deleteAttachment(a)}
+                          className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          title="削除"
+                          aria-label={`${a.filename} を削除`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </EditGate>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
       </EditGate>
 
       {/* AI生成ダイアログ */}
