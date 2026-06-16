@@ -109,6 +109,8 @@ export interface CreateKpiInput {
   name: string;
   category?: KpiCategoryValue;
   flowId?: string | null;
+  asisFlowId?: string | null;
+  tobeFlowId?: string | null;
   systemId?: string | null;
   description?: string | null;
   definition?: string | null;
@@ -144,10 +146,14 @@ export class CreateKpiUseCase {
 
     // 空文字の参照IDは null（未指定）に正規化してから検証・保存する
     const flowId = normalizeRefId(input.flowId) ?? null;
+    const asisFlowId = normalizeRefId(input.asisFlowId) ?? null;
+    const tobeFlowId = normalizeRefId(input.tobeFlowId) ?? null;
     const systemId = normalizeRefId(input.systemId) ?? null;
     const ownerRoleId = normalizeRefId(input.ownerRoleId) ?? null;
 
     if (flowId) await assertFlowInProject(this.repo, flowId, input.projectId);
+    if (asisFlowId) await assertFlowInProject(this.repo, asisFlowId, input.projectId);
+    if (tobeFlowId) await assertFlowInProject(this.repo, tobeFlowId, input.projectId);
     if (systemId) await assertSystemInProject(this.repo, systemId, input.projectId);
     if (ownerRoleId) await assertRoleInProject(this.repo, ownerRoleId, input.projectId);
 
@@ -158,6 +164,8 @@ export class CreateKpiUseCase {
         name: input.name,
         category: input.category,
         flowId,
+        asisFlowId,
+        tobeFlowId,
         systemId,
         description: input.description ?? null,
         definition: input.definition ?? null,
@@ -197,6 +205,8 @@ export interface UpdateKpiInput {
   name?: string;
   category?: KpiCategoryValue;
   flowId?: string | null;
+  asisFlowId?: string | null;
+  tobeFlowId?: string | null;
   systemId?: string | null;
   description?: string | null;
   definition?: string | null;
@@ -234,16 +244,22 @@ export class UpdateKpiUseCase {
 
     // 空文字の参照IDは null（解除）に正規化。undefined は「変更なし」のまま
     const flowId = normalizeRefId(input.flowId);
+    const asisFlowId = normalizeRefId(input.asisFlowId);
+    const tobeFlowId = normalizeRefId(input.tobeFlowId);
     const systemId = normalizeRefId(input.systemId);
     const ownerRoleId = normalizeRefId(input.ownerRoleId);
 
     if (flowId) await assertFlowInProject(this.repo, flowId, kpi.projectId);
+    if (asisFlowId) await assertFlowInProject(this.repo, asisFlowId, kpi.projectId);
+    if (tobeFlowId) await assertFlowInProject(this.repo, tobeFlowId, kpi.projectId);
     if (systemId) await assertSystemInProject(this.repo, systemId, kpi.projectId);
     if (ownerRoleId) await assertRoleInProject(this.repo, ownerRoleId, kpi.projectId);
 
     if (input.name !== undefined) kpi.updateName(input.name);
     if (input.category !== undefined) kpi.updateCategory(input.category);
     if (flowId !== undefined) kpi.updateFlowId(flowId);
+    if (asisFlowId !== undefined) kpi.updateAsisFlowId(asisFlowId);
+    if (tobeFlowId !== undefined) kpi.updateTobeFlowId(tobeFlowId);
     if (systemId !== undefined) kpi.updateSystemId(systemId);
     if (input.description !== undefined) kpi.updateDescription(input.description);
     if (input.definition !== undefined) kpi.updateDefinition(input.definition);

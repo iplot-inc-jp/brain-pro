@@ -13,7 +13,7 @@
  * 参照マスタは共有フック useKpiMasters に集約。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Server,
@@ -38,10 +38,6 @@ import {
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { EditGate } from '@/components/edit-gate';
-import {
-  BackgroundJobsPanel,
-  type BackgroundJobsPanelHandle,
-} from '@/components/background-jobs-panel';
 import { kpiApi, type KpiDirection, type KpiDto } from '@/lib/kpis';
 import { useKpiMasters } from '../ai-create/_components/use-kpi-masters';
 import { KpiList } from '../ai-create/_components/kpi-list';
@@ -152,12 +148,6 @@ export default function AiAccuracyPage() {
 
   // 直前にプリセット追加・AI生成されたKPI（一覧でハイライト）
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
-
-  // バックグラウンド処理一覧（KPI生成ジョブ起票後に refresh する）
-  const jobsPanelRef = useRef<BackgroundJobsPanelHandle | null>(null);
-  const handleJobEnqueued = useCallback(() => {
-    jobsPanelRef.current?.refresh();
-  }, []);
 
   // ===== プリセット追加 UI 用の状態（systemId/flowId/IO 依存を保持する） =====
   const [systemId, setSystemId] = useState('');
@@ -448,9 +438,6 @@ export default function AiAccuracyPage() {
         />
       </EditGate>
 
-      {/* ===== バックグラウンド処理一覧（KPI生成などのAIジョブ） ===== */}
-      <BackgroundJobsPanel ref={jobsPanelRef} projectId={projectId} />
-
       {/* AI生成ダイアログ（対象システム → AI精度指標下書き生成） */}
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>
         <DialogContent className="max-w-3xl">
@@ -470,7 +457,6 @@ export default function AiAccuracyPage() {
               flows={flows}
               systems={systems}
               onGenerated={handleGenerated}
-              onJobEnqueued={handleJobEnqueued}
             />
           </EditGate>
         </DialogContent>

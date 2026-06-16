@@ -49,6 +49,7 @@ import {
   BarChart3,
   Goal,
   Gauge,
+  Activity,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -692,6 +693,7 @@ export default function DashboardLayout({
       {
         label: '設定',
         items: [
+          { name: '処理状況', href: `${base}/jobs`, icon: Activity },
           { name: 'AI使用量', href: `${base}/ai-usage`, icon: BarChart3 },
           { name: '設定', href: `${base}/settings`, icon: Settings },
           { name: 'メンバー権限', href: `${base}/members`, icon: Users },

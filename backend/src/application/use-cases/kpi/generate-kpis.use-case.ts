@@ -228,6 +228,8 @@ export class GenerateKpisUseCase {
         kpi,
         informationTypes: infoTypeRefs,
         flowName,
+        asisFlowName: null,
+        tobeFlowName: null,
         systemName,
         ownerRoleName: null,
       }),

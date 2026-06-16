@@ -19,6 +19,8 @@ export interface KpiOutput {
   projectId: string;
   category: KpiCategoryValue;
   flowId: string | null;
+  asisFlowId: string | null;
+  tobeFlowId: string | null;
   systemId: string | null;
   name: string;
   description: string | null;
@@ -42,8 +44,12 @@ export interface KpiOutput {
   order: number;
   /** 測定対象の情報種別 */
   informationTypes: KpiInformationTypeOutput[];
-  /** 対象業務フロー名（解決済み） */
+  /** 対象業務フロー名（解決済み。生成の元フロー用・後方互換） */
   flowName: string | null;
+  /** ASIS業務フロー名（解決済み） */
+  asisFlowName: string | null;
+  /** TOBE業務フロー名（解決済み） */
+  tobeFlowName: string | null;
   /** 対象システム名（解決済み） */
   systemName: string | null;
   /** 責任者ロール名（解決済み） */
@@ -59,6 +65,8 @@ export function toKpiOutput(row: KpiListRow): KpiOutput {
     projectId: k.projectId,
     category: k.category,
     flowId: k.flowId,
+    asisFlowId: k.asisFlowId,
+    tobeFlowId: k.tobeFlowId,
     systemId: k.systemId,
     name: k.name,
     description: k.description,
@@ -82,6 +90,8 @@ export function toKpiOutput(row: KpiListRow): KpiOutput {
     order: k.order,
     informationTypes: row.informationTypes,
     flowName: row.flowName,
+    asisFlowName: row.asisFlowName,
+    tobeFlowName: row.tobeFlowName,
     systemName: row.systemName,
     ownerRoleName: row.ownerRoleName,
     createdAt: k.createdAt.toISOString(),

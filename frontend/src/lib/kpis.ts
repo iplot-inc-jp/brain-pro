@@ -83,6 +83,10 @@ export interface KpiDto {
   projectId: string;
   category: KpiCategory;
   flowId: string | null;
+  /** ASIS業務フロー（任意） */
+  asisFlowId: string | null;
+  /** TOBE業務フロー（任意） */
+  tobeFlowId: string | null;
   systemId: string | null;
   name: string;
   description: string | null;
@@ -111,6 +115,10 @@ export interface KpiDto {
   informationTypes: KpiInformationTypeRefDto[];
   /** 対象業務フロー名（解決済み） */
   flowName: string | null;
+  /** ASIS業務フロー名（解決済み） */
+  asisFlowName: string | null;
+  /** TOBE業務フロー名（解決済み） */
+  tobeFlowName: string | null;
   /** 対象システム名（解決済み） */
   systemName: string | null;
   /** 責任者ロール名（解決済み） */
@@ -124,6 +132,8 @@ export interface KpiUpsertBody {
   name?: string;
   category?: KpiCategory;
   flowId?: string | null;
+  asisFlowId?: string | null;
+  tobeFlowId?: string | null;
   systemId?: string | null;
   description?: string | null;
   definition?: string | null;

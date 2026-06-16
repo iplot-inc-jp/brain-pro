@@ -33,6 +33,8 @@ class CreateKpiDto {
   @IsString() name!: string;
   @IsOptional() @IsIn([...KPI_CATEGORIES]) category?: KpiCategoryValue;
   @IsOptional() @IsString() flowId?: string | null;
+  @IsOptional() @IsString() asisFlowId?: string | null;
+  @IsOptional() @IsString() tobeFlowId?: string | null;
   @IsOptional() @IsString() systemId?: string | null;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional() @IsString() definition?: string | null;
@@ -58,6 +60,8 @@ class UpdateKpiDto {
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsIn([...KPI_CATEGORIES]) category?: KpiCategoryValue;
   @IsOptional() @IsString() flowId?: string | null;
+  @IsOptional() @IsString() asisFlowId?: string | null;
+  @IsOptional() @IsString() tobeFlowId?: string | null;
   @IsOptional() @IsString() systemId?: string | null;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional() @IsString() definition?: string | null;

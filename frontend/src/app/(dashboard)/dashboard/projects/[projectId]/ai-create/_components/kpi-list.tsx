@@ -362,10 +362,27 @@ function KpiCard({
         )}
       </div>
 
-      {/* 4行目: 対象（フロー/システム）・測定対象IO */}
-      {(kpi.flowName || kpi.systemName || kpi.informationTypes.length > 0) && (
+      {/* 4行目: 対象（ASIS/TOBE業務フロー・システム）・測定対象IO */}
+      {(kpi.asisFlowName ||
+        kpi.tobeFlowName ||
+        kpi.flowName ||
+        kpi.systemName ||
+        kpi.informationTypes.length > 0) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {kpi.flowName && (
+          {kpi.asisFlowName && (
+            <span className="inline-flex items-center gap-0.5 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700">
+              <GitBranch className="h-2.5 w-2.5" />
+              ASIS: {kpi.asisFlowName}
+            </span>
+          )}
+          {kpi.tobeFlowName && (
+            <span className="inline-flex items-center gap-0.5 rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] text-teal-700">
+              <GitBranch className="h-2.5 w-2.5" />
+              TOBE: {kpi.tobeFlowName}
+            </span>
+          )}
+          {/* 後方互換: ASIS/TOBE のいずれも未設定のときだけ従来の対象フロー名を表示 */}
+          {!kpi.asisFlowName && !kpi.tobeFlowName && kpi.flowName && (
             <span className="inline-flex items-center gap-0.5 rounded border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-700">
               <GitBranch className="h-2.5 w-2.5" />
               {kpi.flowName}

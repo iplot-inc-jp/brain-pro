@@ -14,6 +14,8 @@ export interface KpiListRow {
   kpi: Kpi;
   informationTypes: KpiInfoTypeRef[];
   flowName: string | null;
+  asisFlowName: string | null;
+  tobeFlowName: string | null;
   systemName: string | null;
   ownerRoleName: string | null;
 }

@@ -24,6 +24,8 @@ interface KpiRecord {
   projectId: string;
   category: string;
   flowId: string | null;
+  asisFlowId: string | null;
+  tobeFlowId: string | null;
   systemId: string | null;
   name: string;
   description: string | null;
@@ -58,6 +60,8 @@ const KPI_ROW_INCLUDE = {
     orderBy: { createdAt: 'asc' as const },
   },
   flow: { select: { name: true } },
+  asisFlow: { select: { name: true } },
+  tobeFlow: { select: { name: true } },
   system: { select: { name: true } },
   ownerRole: { select: { name: true } },
 };
@@ -67,6 +71,8 @@ type KpiRowRecord = KpiRecord & {
     informationType: { id: string; name: string; category: string };
   }>;
   flow: { name: string } | null;
+  asisFlow: { name: string } | null;
+  tobeFlow: { name: string } | null;
   system: { name: string } | null;
   ownerRole: { name: string } | null;
 };
@@ -81,6 +87,8 @@ export class KpiRepositoryImpl implements IKpiRepository {
       projectId: r.projectId,
       category: r.category as KpiCategoryValue,
       flowId: r.flowId,
+      asisFlowId: r.asisFlowId,
+      tobeFlowId: r.tobeFlowId,
       systemId: r.systemId,
       name: r.name,
       description: r.description,
@@ -116,6 +124,8 @@ export class KpiRepositoryImpl implements IKpiRepository {
         category: l.informationType.category,
       })),
       flowName: r.flow?.name ?? null,
+      asisFlowName: r.asisFlow?.name ?? null,
+      tobeFlowName: r.tobeFlow?.name ?? null,
       systemName: r.system?.name ?? null,
       ownerRoleName: r.ownerRole?.name ?? null,
     };
@@ -162,6 +172,8 @@ export class KpiRepositoryImpl implements IKpiRepository {
       projectId: kpi.projectId,
       category: kpi.category,
       flowId: kpi.flowId,
+      asisFlowId: kpi.asisFlowId,
+      tobeFlowId: kpi.tobeFlowId,
       systemId: kpi.systemId,
       name: kpi.name,
       description: kpi.description,

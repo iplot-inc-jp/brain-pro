@@ -29,6 +29,8 @@ export interface CreateKpiProps {
   name: string;
   category?: KpiCategoryValue;
   flowId?: string | null;
+  asisFlowId?: string | null;
+  tobeFlowId?: string | null;
   systemId?: string | null;
   description?: string | null;
   definition?: string | null;
@@ -56,6 +58,8 @@ export interface ReconstructKpiProps {
   projectId: string;
   category: KpiCategoryValue;
   flowId: string | null;
+  asisFlowId: string | null;
+  tobeFlowId: string | null;
   systemId: string | null;
   name: string;
   description: string | null;
@@ -90,6 +94,8 @@ export class Kpi extends BaseEntity {
   private readonly _projectId: string;
   private _category: KpiCategoryValue;
   private _flowId: string | null;
+  private _asisFlowId: string | null;
+  private _tobeFlowId: string | null;
   private _systemId: string | null;
   private _name: string;
   private _description: string | null;
@@ -117,6 +123,8 @@ export class Kpi extends BaseEntity {
     this._projectId = props.projectId;
     this._category = props.category;
     this._flowId = props.flowId;
+    this._asisFlowId = props.asisFlowId;
+    this._tobeFlowId = props.tobeFlowId;
     this._systemId = props.systemId;
     this._name = props.name;
     this._description = props.description;
@@ -150,6 +158,8 @@ export class Kpi extends BaseEntity {
       projectId: props.projectId,
       category: props.category ?? 'BUSINESS',
       flowId: props.flowId ?? null,
+      asisFlowId: props.asisFlowId ?? null,
+      tobeFlowId: props.tobeFlowId ?? null,
       systemId: props.systemId ?? null,
       name,
       description: props.description ?? null,
@@ -194,6 +204,16 @@ export class Kpi extends BaseEntity {
 
   updateFlowId(flowId: string | null): void {
     this._flowId = flowId ?? null;
+    this.touch();
+  }
+
+  updateAsisFlowId(flowId: string | null): void {
+    this._asisFlowId = flowId ?? null;
+    this.touch();
+  }
+
+  updateTobeFlowId(flowId: string | null): void {
+    this._tobeFlowId = flowId ?? null;
     this.touch();
   }
 
@@ -295,6 +315,8 @@ export class Kpi extends BaseEntity {
   get projectId(): string { return this._projectId; }
   get category(): KpiCategoryValue { return this._category; }
   get flowId(): string | null { return this._flowId; }
+  get asisFlowId(): string | null { return this._asisFlowId; }
+  get tobeFlowId(): string | null { return this._tobeFlowId; }
   get systemId(): string | null { return this._systemId; }
   get name(): string { return this._name; }
   get description(): string | null { return this._description; }

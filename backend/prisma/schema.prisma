@@ -458,8 +458,12 @@ model BusinessFlow {
   asisTobeVisions     TobeVision[]             @relation("TobeVisionAsisFlow")
   // この業務フローに紐づく添付ファイル
   attachments         Attachment[]             @relation("FlowAttachments")
-  // この業務フローを対象に作成された KPI
-  kpis                Kpi[]
+  // この業務フローを対象に作成された KPI（生成の元フロー用・後方互換）
+  kpis                Kpi[]                    @relation("KpiFlow")
+  // この業務フローを ASIS として紐づける KPI
+  kpisAsis            Kpi[]                    @relation("KpiAsisFlow")
+  // この業務フローを TOBE として紐づける KPI
+  kpisTobe            Kpi[]                    @relation("KpiTobeFlow")
 
   @@map("business_flows")
 }
@@ -663,8 +667,12 @@ model Kpi {
   projectId   String   @map("project_id")
   // 業務KPI / AI精度KPI の区分
   category    KpiCategory @default(BUSINESS)
-  // 対象業務フロー（任意。主に業務KPI）
+  // 対象業務フロー（任意。主に業務KPI。生成の「元フロー」用・後方互換で保持）
   flowId      String?  @map("flow_id")
+  // ASIS 業務フロー（任意。1KPIにASIS/TOBEを両方紐づけ可能）
+  asisFlowId  String?  @map("asis_flow_id")
+  // TOBE 業務フロー（任意。1KPIにASIS/TOBEを両方紐づけ可能）
+  tobeFlowId  String?  @map("tobe_flow_id")
   // 対象システム（任意。主にAI精度KPI: どのAI/システムの精度か）
   systemId    String?  @map("system_id")
   name        String
@@ -695,7 +703,9 @@ model Kpi {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   project   Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  flow      BusinessFlow? @relation(fields: [flowId], references: [id], onDelete: SetNull)
+  flow      BusinessFlow? @relation("KpiFlow", fields: [flowId], references: [id], onDelete: SetNull)
+  asisFlow  BusinessFlow? @relation("KpiAsisFlow", fields: [asisFlowId], references: [id], onDelete: SetNull)
+  tobeFlow  BusinessFlow? @relation("KpiTobeFlow", fields: [tobeFlowId], references: [id], onDelete: SetNull)
   system    System?       @relation(fields: [systemId], references: [id], onDelete: SetNull)
   ownerRole Role?         @relation(fields: [ownerRoleId], references: [id], onDelete: SetNull)
   // 測定対象の INPUT/OUTPUT（情報種別。複数）

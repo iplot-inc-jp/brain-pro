@@ -86,7 +86,9 @@ export function KpiEditModal({
   const [category, setCategory] = useState<KpiCategory>(
     kpi?.category ?? lockedCategory ?? 'BUSINESS',
   );
-  const [flowId, setFlowId] = useState(kpi?.flowId ?? '');
+  // 既存 flowId はモーダルでは編集しない（保存時に保持するため値だけ控える）。
+  const [asisFlowId, setAsisFlowId] = useState(kpi?.asisFlowId ?? '');
+  const [tobeFlowId, setTobeFlowId] = useState(kpi?.tobeFlowId ?? '');
   const [systemId, setSystemId] = useState(kpi?.systemId ?? '');
   const [description, setDescription] = useState(kpi?.description ?? '');
   const [definition, setDefinition] = useState(kpi?.definition ?? '');
@@ -140,7 +142,10 @@ export function KpiEditModal({
       const body: KpiUpsertBody = {
         name: trimmedName,
         category,
-        flowId: flowId || null,
+        // flowId はモーダルでは編集しない。既存値をそのまま保持（更新で消さない）。
+        flowId: kpi?.flowId ?? null,
+        asisFlowId: asisFlowId || null,
+        tobeFlowId: tobeFlowId || null,
         systemId: systemId || null,
         description: description.trim() || null,
         definition: definition.trim() || null,
@@ -195,7 +200,8 @@ export function KpiEditModal({
     projectId,
     name,
     category,
-    flowId,
+    asisFlowId,
+    tobeFlowId,
     systemId,
     description,
     definition,
@@ -256,32 +262,42 @@ export function KpiEditModal({
             </div>
           </div>
 
-          {/* 対象フロー / システム / 責任者 */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* ASIS業務フロー / TOBE業務フロー */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label className="text-xs">対象フロー</Label>
-              <select value={flowId} onChange={(e) => setFlowId(e.target.value)} className={selectClass}>
-                <option value="">なし</option>
-                {asisFlows.length > 0 && (
-                  <optgroup label="ASIS">
-                    {asisFlows.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {tobeFlows.length > 0 && (
-                  <optgroup label="TOBE">
-                    {tobeFlows.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
+              <Label className="text-xs">ASIS業務フロー</Label>
+              <select
+                value={asisFlowId}
+                onChange={(e) => setAsisFlowId(e.target.value)}
+                className={selectClass}
+              >
+                <option value="">指定なし</option>
+                {asisFlows.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
               </select>
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">TOBE業務フロー</Label>
+              <select
+                value={tobeFlowId}
+                onChange={(e) => setTobeFlowId(e.target.value)}
+                className={selectClass}
+              >
+                <option value="">指定なし</option>
+                {tobeFlows.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 対象システム / 責任者 */}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">対象システム</Label>
               <select
