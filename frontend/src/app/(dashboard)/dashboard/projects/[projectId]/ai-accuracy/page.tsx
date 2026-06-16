@@ -6,14 +6,14 @@
  * システムのAI精度指標（category=AI_QUALITY: 認識精度・自動化率など）の
  * 一覧・手動作成・編集・採用を行う。手動作成は KpiEditModal のほか、
  * 「プリセットから追加」（AI不要・ワンクリックで下書き追加）も提供する。
- * AI生成は「AI下書き」(/ai-create) に集約しているため、本ページに生成タブは無い。
+ * さらに「AIで生成」（対象システムから精度指標を AI で下書き生成）を本ページに統合している。
+ * AI生成はダイアログ内の AiQualityKpiTab で行い、生成成功時は一覧（loadKpis）を再取得して反映する。
  *
  * KPI の取得・作成・更新・削除はすべて @/lib/kpis の kpiApi 経由。
  * 参照マスタは共有フック useKpiMasters に集約。
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   Server,
@@ -27,15 +27,28 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import { EditGate } from '@/components/edit-gate';
+import {
+  BackgroundJobsPanel,
+  type BackgroundJobsPanelHandle,
+} from '@/components/background-jobs-panel';
 import { kpiApi, type KpiDirection, type KpiDto } from '@/lib/kpis';
 import { useKpiMasters } from '../ai-create/_components/use-kpi-masters';
 import { KpiList } from '../ai-create/_components/kpi-list';
 import { KpiEditModal } from '../ai-create/_components/kpi-edit-modal';
 import { FlowSelect } from '../ai-create/_components/flow-select';
 import { IoSummaryTable } from '../ai-create/_components/io-summary-table';
+import { AiQualityKpiTab } from '../ai-create/_components/ai-quality-kpi-tab';
 import type { IoSummaryItemDto } from '@/lib/kpis';
 
 /** 精度指標プリセット。definition / unit / direction を定義済みで、AIを使わず下書き追加する。 */
@@ -134,8 +147,17 @@ export default function AiAccuracyPage() {
   // 手動作成モーダルの開閉
   const [creating, setCreating] = useState(false);
 
-  // 直前にプリセット追加されたKPI（一覧でハイライト）
+  // AI生成ダイアログの開閉
+  const [aiOpen, setAiOpen] = useState(false);
+
+  // 直前にプリセット追加・AI生成されたKPI（一覧でハイライト）
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+
+  // バックグラウンド処理一覧（KPI生成ジョブ起票後に refresh する）
+  const jobsPanelRef = useRef<BackgroundJobsPanelHandle | null>(null);
+  const handleJobEnqueued = useCallback(() => {
+    jobsPanelRef.current?.refresh();
+  }, []);
 
   // ===== プリセット追加 UI 用の状態（systemId/flowId/IO 依存を保持する） =====
   const [systemId, setSystemId] = useState('');
@@ -162,6 +184,15 @@ export default function AiAccuracyPage() {
   useEffect(() => {
     void loadKpis();
   }, [loadKpis]);
+
+  // AI生成成功時：生成された下書きを一覧へ反映し、ハイライトする。
+  const handleGenerated = useCallback(
+    (created: KpiDto[]) => {
+      setHighlightIds(new Set(created.map((k) => k.id)));
+      void loadKpis();
+    },
+    [loadKpis],
+  );
 
   // 任意のフロー選択 → io-summary を取得（測定対象IOの候補）
   useEffect(() => {
@@ -239,17 +270,27 @@ export default function AiAccuracyPage() {
       <PageHeader
         title="AI精度指標"
         description="システムのAI精度指標（認識精度・自動化率など）を作成・採用します。"
-        help="「プリセットから追加」でよく使う精度指標をワンクリック追加できます。「＋手動で追加」で自由に作成し、各カードをクリックすると全項目を編集できます。AIで下書きを作るには「AI下書き」ページを使ってください。"
+        help="「AIで生成」で対象システムから精度指標の下書きをAI生成できます。「プリセットから追加」でよく使う精度指標をワンクリック追加、「＋手動で追加」で自由に作成でき、各カードをクリックすると全項目を編集できます。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
         actions={
           <>
+            <EditGate dim={false}>
+              <Button
+                size="sm"
+                onClick={() => setAiOpen(true)}
+                className="bg-violet-600 hover:bg-violet-700"
+              >
+                <Sparkles className="mr-1 h-4 w-4" />
+                AIで生成
+              </Button>
+            </EditGate>
             <HowToPanel
               steps={[
-                '「プリセットから追加」で対象システムを選び、精度指標（認識精度・自動化率など）をワンクリックで下書き追加できます。',
+                '「AIで生成」で対象システムを選び、追加指示を添えて精度指標（認識精度・自動化率など）の下書きをAIで生成できます。',
+                '「プリセットから追加」で対象システムを選び、精度指標をワンクリックで下書き追加できます。',
                 '「＋手動で追加」で自由にAI精度指標を新規作成します（区分はAI精度指標に固定）。',
                 '各カードをクリックすると、SMART採点・対象システム/IO紐づけを含め全項目を編集できます。',
-                'AIで下書きを作りたいときは「AI下書き」ページの「AI精度指標」タブから生成してください。',
               ]}
             />
             <FeatureSectionIo
@@ -262,19 +303,6 @@ export default function AiAccuracyPage() {
           </>
         }
       />
-
-      {/* AI生成への導線 */}
-      <p className="flex items-center gap-1.5 text-xs text-gray-500">
-        <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-        AIでAI精度指標の下書きを作りたいときは
-        <Link
-          href={`/dashboard/projects/${projectId}/ai-create`}
-          className="font-medium text-violet-600 hover:underline"
-        >
-          AI下書き
-        </Link>
-        ページをご利用ください。
-      </p>
 
       {/* プリセットから追加（AI不要） */}
       <EditGate dim={false}>
@@ -419,6 +447,34 @@ export default function AiAccuracyPage() {
           onCreateNew={() => setCreating(true)}
         />
       </EditGate>
+
+      {/* ===== バックグラウンド処理一覧（KPI生成などのAIジョブ） ===== */}
+      <BackgroundJobsPanel ref={jobsPanelRef} projectId={projectId} />
+
+      {/* AI生成ダイアログ（対象システム → AI精度指標下書き生成） */}
+      <Dialog open={aiOpen} onOpenChange={setAiOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4 text-violet-600" />
+              AIでAI精度指標を生成
+            </DialogTitle>
+            <DialogDescription>
+              対象システムを選び、精度指標（認識精度・自動化率など）の下書きをAIで生成します。
+              生成した下書きはこのページのKPI一覧に追加されます。
+            </DialogDescription>
+          </DialogHeader>
+          <EditGate dim={false}>
+            <AiQualityKpiTab
+              projectId={projectId}
+              flows={flows}
+              systems={systems}
+              onGenerated={handleGenerated}
+              onJobEnqueued={handleJobEnqueued}
+            />
+          </EditGate>
+        </DialogContent>
+      </Dialog>
 
       {/* 手動作成モーダル（新規作成・区分はAI精度指標に固定） */}
       {creating && (

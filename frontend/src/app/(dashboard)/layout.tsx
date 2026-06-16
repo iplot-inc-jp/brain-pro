@@ -44,7 +44,6 @@ import {
   Boxes,
   Table2,
   TableProperties,
-  Sparkles,
   Brain,
   FileStack,
   BarChart3,
@@ -670,7 +669,6 @@ export default function DashboardLayout({
           { name: '俯瞰思考', href: `${base}/overview-matrix`, icon: TableProperties },
           { name: '業務KPI', href: `${base}/business-kpi`, icon: Goal },
           { name: 'AI精度指標', href: `${base}/ai-accuracy`, icon: Gauge },
-          { name: 'AI下書き', href: `${base}/ai-create`, icon: Sparkles },
         ],
       },
       {
