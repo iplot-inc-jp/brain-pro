@@ -10,10 +10,12 @@ import {
   Query,
   Inject,
   HttpException,
+  HttpCode,
   HttpStatus,
+  BadRequestException,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty, ApiParam } from '@nestjs/swagger';
 import {
   IsString,
   IsOptional,
@@ -136,6 +138,13 @@ class UpdateBusinessFlowDto {
   @IsOptional()
   @IsObject()
   laneHeights?: Record<string, number>;
+}
+
+class SetFlowStakeholdersDto {
+  @ApiProperty({ description: '担当者(ステークホルダー)IDの配列（置き換え）', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  stakeholderIds: string[];
 }
 
 class CreateFlowNodeDto {
@@ -765,7 +774,66 @@ export class BusinessFlowController {
   @ApiOperation({ summary: 'プロジェクトの全フロー一覧を取得（階層含む）' })
   async getAllFlows(@Param('projectId') projectId: string) {
     const flows = await this.flowRepository.findByProjectId(projectId);
-    return flows.map((f) => this.toResponse(f));
+    const rows = await this.prisma.flowStakeholder.findMany({
+      where: { flow: { projectId } },
+      include: { stakeholder: { select: { id: true, name: true } } },
+      orderBy: { order: 'asc' },
+    });
+    const byFlow = new Map<string, { stakeholderId: string; name: string; order: number }[]>();
+    for (const r of rows) {
+      const arr = byFlow.get(r.flowId) ?? [];
+      arr.push({ stakeholderId: r.stakeholderId, name: r.stakeholder.name, order: r.order });
+      byFlow.set(r.flowId, arr);
+    }
+    return flows.map((f) => ({ ...this.toResponse(f), assignees: byFlow.get(f.id) ?? [] }));
+  }
+
+  @Put(':flowId/stakeholders')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '業務フローの担当者(ステークホルダー)を設定（置き替え）' })
+  @ApiParam({ name: 'flowId', description: '業務フローID' })
+  async setStakeholders(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Body() dto: SetFlowStakeholdersDto,
+  ) {
+    const flow = await this.assertFlowMembership(flowId, user.id, 'edit');
+    const uniqueIds = Array.from(new Set(dto.stakeholderIds ?? []));
+    if (uniqueIds.length > 0) {
+      const found = await this.prisma.stakeholder.findMany({
+        where: { id: { in: uniqueIds }, projectId: flow.projectId },
+        select: { id: true },
+      });
+      if (found.length !== uniqueIds.length) {
+        throw new BadRequestException('担当者に無効なステークホルダーが含まれています');
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.flowStakeholder.deleteMany({ where: { flowId } }),
+      ...(uniqueIds.length > 0
+        ? [
+            this.prisma.flowStakeholder.createMany({
+              data: uniqueIds.map((stakeholderId, i) => ({ flowId, stakeholderId, order: i })),
+              skipDuplicates: true,
+            }),
+          ]
+        : []),
+    ]);
+    return { assignees: await this.loadFlowAssignees(flowId) };
+  }
+
+  /** 業務フローの担当者一覧（order 昇順, name 解決済み）。 */
+  private async loadFlowAssignees(flowId: string) {
+    const rows = await this.prisma.flowStakeholder.findMany({
+      where: { flowId },
+      include: { stakeholder: { select: { id: true, name: true } } },
+      orderBy: { order: 'asc' },
+    });
+    return rows.map((r) => ({
+      stakeholderId: r.stakeholderId,
+      name: r.stakeholder.name,
+      order: r.order,
+    }));
   }
 
   @Get('project/:projectId/tree')
@@ -835,6 +903,8 @@ export class BusinessFlowController {
 
     // パンくず用の親フロー階層を取得
     const breadcrumbs = await this.getBreadcrumbs(flow);
+
+    const assignees = await this.loadFlowAssignees(id);
 
     return {
       ...this.toResponse(flow),
@@ -919,6 +989,7 @@ export class BusinessFlowController {
       })),
       children: children.map((c) => this.toResponse(c)),
       breadcrumbs,
+      assignees,
     };
   }
 
