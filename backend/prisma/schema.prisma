@@ -468,6 +468,7 @@ model BusinessFlow {
   kpisAsis            Kpi[]                    @relation("KpiAsisFlow")
   // この業務フローを TOBE として紐づける KPI
   kpisTobe            Kpi[]                    @relation("KpiTobeFlow")
+  assignees           FlowStakeholder[]
 
   @@map("business_flows")
 }
@@ -1866,6 +1867,7 @@ model Stakeholder {
   sponsoredCharters     ProjectCharter[]        @relation("CharterSponsor")
   approvedChangeRequests ChangeRequest[]        @relation("ChangeApprover")
   adoptionStatuses      AdoptionStatus[]
+  flowAssignments       FlowStakeholder[]
 
   @@map("stakeholders")
 }
@@ -2926,4 +2928,21 @@ model KnowledgeNodeLink {
   @@index([projectId])
   @@index([diagramKind, diagramNodeId])
   @@map("knowledge_node_links")
+}
+
+// 業務フローの担当者（ステークホルダー多対多）。MeetingStakeholder と同型。
+model FlowStakeholder {
+  id            String   @id @default(uuid())
+  flowId        String   @map("flow_id")
+  stakeholderId String   @map("stakeholder_id")
+  order         Int      @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  flow        BusinessFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  stakeholder Stakeholder  @relation(fields: [stakeholderId], references: [id], onDelete: Cascade)
+
+  @@unique([flowId, stakeholderId])
+  @@index([flowId])
+  @@index([stakeholderId])
+  @@map("flow_stakeholders")
 }
