@@ -55,6 +55,8 @@ export default function BusinessListPage() {
   const [openPicker, setOpenPicker] = useState<string | null>(null);
   const [openTobe, setOpenTobe] = useState<Record<string, boolean>>({});
   const [openGap, setOpenGap] = useState<Record<string, boolean>>({});
+  // 担当者保存中の行（連打レース防止＝保存完了まで同じ行の操作を無効化）。
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
@@ -89,10 +91,10 @@ export default function BusinessListPage() {
   );
   const hasStakeholders = stakeholders.length > 0;
 
-  // ソート accessor（未割当の担当者は末尾、件数は数値比較）。
+  // ソート accessor（未割当の担当者は null で常に末尾＝昇順/降順とも、件数は数値比較）。
   const sortAccessors = useMemo(
     () => ({
-      assignee: (r: BusinessListRow) => r.asis.assignees?.[0]?.name ?? '￿',
+      assignee: (r: BusinessListRow) => r.asis.assignees?.[0]?.name ?? null,
       name: (r: BusinessListRow) => r.asis.name,
       tobeCount: (r: BusinessListRow) => r.tobes.length,
       gapCount: (r: BusinessListRow) => r.gaps.length,
@@ -107,6 +109,9 @@ export default function BusinessListPage() {
 
   // 担当者トグル（楽観更新 → 保存、失敗時は reload で巻き戻す）。
   const toggleAssignee = async (row: BusinessListRow, stakeholderId: string) => {
+    // 同じ行の保存中は連打を無視（replace-all の取りこぼし防止）。
+    if (savingId === row.asis.id) return;
+    setSavingId(row.asis.id);
     const cur = (row.asis.assignees ?? []).map((a) => a.stakeholderId);
     const nextIds = cur.includes(stakeholderId)
       ? cur.filter((x) => x !== stakeholderId)
@@ -138,7 +143,10 @@ export default function BusinessListPage() {
         ),
       );
     } catch {
+      setError('担当者の保存に失敗しました');
       await reload();
+    } finally {
+      setSavingId((cur) => (cur === row.asis.id ? null : cur));
     }
   };
 
@@ -283,7 +291,7 @@ export default function BusinessListPage() {
                                     openPicker === r.asis.id ? null : r.asis.id,
                                   )
                                 }
-                                disabled={!hasStakeholders}
+                                disabled={!hasStakeholders || savingId === r.asis.id}
                                 className="flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <Users className="h-3 w-3" />
@@ -310,6 +318,7 @@ export default function BusinessListPage() {
                                           <input
                                             type="checkbox"
                                             checked={checked}
+                                            disabled={savingId === r.asis.id}
                                             onChange={() =>
                                               toggleAssignee(r, s.id)
                                             }
