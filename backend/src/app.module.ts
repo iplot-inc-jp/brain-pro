@@ -476,6 +476,7 @@ import {
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
 // ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
 import { DriveService } from './infrastructure/knowledge/drive.service';
+import { DiagramKgBridgeService } from './infrastructure/knowledge/diagram-kg-bridge.service';
 import { DriveController } from './presentation/controllers/drive.controller';
 // Liveblocks リアルタイム・プレゼンス（トークン発行）
 import { LiveblocksController } from './presentation/controllers/liveblocks.controller';
@@ -1048,6 +1049,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     KnowledgeIngestionService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
+    // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）
+    DiagramKgBridgeService,
 
     // ========== Global Guards ==========
     {
