@@ -60,4 +60,14 @@ export class DiagramKgBridgeService {
     }
     return { documentId: doc.id };
   }
+
+  async unregisterAttachmentDocumentIfOrphaned(projectId: string, attachmentId: string): Promise<void> {
+    const remaining = await this.prisma.nodeAttachment.count({
+      where: { projectId, attachmentId },
+    });
+    if (remaining > 0) return;
+    await this.prisma.knowledgeDocument.deleteMany({
+      where: { projectId, sourceType: 'ATTACHMENT', sourceRef: attachmentId },
+    });
+  }
 }

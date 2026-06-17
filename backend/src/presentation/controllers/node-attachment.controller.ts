@@ -136,6 +136,7 @@ export class NodeAttachmentByIdController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projectAccess: ProjectAccessService,
+    private readonly bridge: DiagramKgBridgeService,
   ) {}
 
   private async assert(id: string, userId: string, required: 'view' | 'edit') {
@@ -160,6 +161,12 @@ export class NodeAttachmentByIdController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
     await this.assert(id, user.id, 'edit');
+    const row = await this.prisma.nodeAttachment.findUnique({ where: { id }, select: { projectId: true, attachmentId: true } });
     await this.prisma.nodeAttachment.delete({ where: { id } });
+    try {
+      if (row) await this.bridge.unregisterAttachmentDocumentIfOrphaned(row.projectId, row.attachmentId);
+    } catch (e) {
+      console.warn('[node-attachment] KG cleanup failed', e);
+    }
   }
 }

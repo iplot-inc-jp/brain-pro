@@ -1,5 +1,5 @@
 // node-attachment.controller.spec.ts
-import { NodeAttachmentController } from './node-attachment.controller';
+import { NodeAttachmentController, NodeAttachmentByIdController } from './node-attachment.controller';
 
 const ATT = { id: 'a1', filename: 'spec.pdf', displayName: null, mimeType: 'application/pdf', kind: 'PDF', size: 9, url: '/api/attachments/a1/file', pageRange: null, blobUrl: 'https://x/a.pdf' };
 
@@ -11,7 +11,9 @@ function makePrisma(overrides: any = {}) {
     nodeAttachment: {
       findMany: jest.fn(async () => []),
       findFirst: jest.fn(async () => null), // 冪等チェック（既定は既存なし）
+      findUnique: jest.fn(async () => ({ projectId: 'p1', attachmentId: 'a1' })), // remove() が projectId/attachmentId をロード
       create: jest.fn(async ({ data }: any) => ({ id: 'na1', order: 0, caption: null, ...data, attachment: ATT })),
+      delete: jest.fn(async () => ({})),
     },
     ...overrides,
   } as any;
@@ -19,7 +21,34 @@ function makePrisma(overrides: any = {}) {
 const bridge = () => ({
   ensureEntityForNode: jest.fn(async () => ({ knowledgeNodeId: 'kn1' })),
   registerAttachmentDocument: jest.fn(async () => ({ documentId: 'doc1' })),
+  unregisterAttachmentDocumentIfOrphaned: jest.fn(async () => undefined),
 }) as any;
+
+function makeProjectAccess() {
+  return { assertProjectAccess: jest.fn(async () => undefined) } as any;
+}
+
+describe('NodeAttachmentByIdController.remove', () => {
+  it('calls bridge.unregisterAttachmentDocumentIfOrphaned after deleting the row', async () => {
+    const prisma = makePrisma();
+    const b = bridge();
+    const pa = makeProjectAccess();
+    const c = new NodeAttachmentByIdController(prisma, pa, b);
+    await c.remove({ id: 'user1' } as any, 'na1');
+    expect(prisma.nodeAttachment.delete).toHaveBeenCalledWith({ where: { id: 'na1' } });
+    expect(b.unregisterAttachmentDocumentIfOrphaned).toHaveBeenCalledWith('p1', 'a1');
+  });
+
+  it('does not throw if bridge.unregisterAttachmentDocumentIfOrphaned rejects (best-effort)', async () => {
+    const prisma = makePrisma();
+    const b = bridge();
+    b.unregisterAttachmentDocumentIfOrphaned.mockRejectedValue(new Error('KG down'));
+    const pa = makeProjectAccess();
+    const c = new NodeAttachmentByIdController(prisma, pa, b);
+    // should not throw even if KG cleanup fails
+    await expect(c.remove({ id: 'user1' } as any, 'na1')).resolves.toBeUndefined();
+  });
+});
 
 describe('NodeAttachmentController.create', () => {
   it('creates the join row and auto-registers the attachment into the KG', async () => {

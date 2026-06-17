@@ -9,8 +9,10 @@ function makePrisma() {
       findFirst: jest.fn(async () => null),
       create: jest.fn(async ({ data }: any) => ({ id: 'doc1', ...data })),
       update: jest.fn(async ({ data }: any) => ({ id: 'doc1', ...data })),
+      deleteMany: jest.fn(async () => ({ count: 1 })),
     },
     knowledgeMention: { createMany: jest.fn(async () => ({ count: 1 })) },
+    nodeAttachment: { count: jest.fn(async () => 0) },
   } as any;
 }
 
@@ -44,6 +46,28 @@ describe('DiagramKgBridgeService', () => {
     expect(prisma.knowledgeMention.createMany).toHaveBeenCalledWith({
       data: [{ projectId: 'p1', documentId: 'doc1', nodeId: 'kn1' }],
       skipDuplicates: true,
+    });
+  });
+
+  describe('unregisterAttachmentDocumentIfOrphaned', () => {
+    it('deletes the KnowledgeDocument when no NodeAttachments remain (count===0)', async () => {
+      const prisma = makePrisma();
+      prisma.nodeAttachment.count.mockResolvedValue(0);
+      const svc = new DiagramKgBridgeService(prisma);
+      await svc.unregisterAttachmentDocumentIfOrphaned('p1', 'a1');
+      expect(prisma.nodeAttachment.count).toHaveBeenCalledWith({ where: { projectId: 'p1', attachmentId: 'a1' } });
+      expect(prisma.knowledgeDocument.deleteMany).toHaveBeenCalledWith({
+        where: { projectId: 'p1', sourceType: 'ATTACHMENT', sourceRef: 'a1' },
+      });
+    });
+
+    it('does NOT delete the KnowledgeDocument when other NodeAttachments still reference it (count>0)', async () => {
+      const prisma = makePrisma();
+      prisma.nodeAttachment.count.mockResolvedValue(1);
+      const svc = new DiagramKgBridgeService(prisma);
+      await svc.unregisterAttachmentDocumentIfOrphaned('p1', 'a1');
+      expect(prisma.nodeAttachment.count).toHaveBeenCalledWith({ where: { projectId: 'p1', attachmentId: 'a1' } });
+      expect(prisma.knowledgeDocument.deleteMany).not.toHaveBeenCalled();
     });
   });
 });
