@@ -427,6 +427,10 @@ import {
   ImageBoardController,
   ImageBoardByIdController,
 } from './presentation/controllers/image-board.controller';
+import {
+  DiagramElementController,
+  DiagramElementByIdController,
+} from './presentation/controllers/diagram-element.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -538,6 +542,9 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // 業務イメージ（スライド）ボード
     ImageBoardController,
     ImageBoardByIdController,
+    // 図要素（FLOW/DFD/OBJECT_MAP 共通 movable canvas 要素）
+    DiagramElementController,
+    DiagramElementByIdController,
     DfdController,
     DataObjectController,
     InformationTypeController,
