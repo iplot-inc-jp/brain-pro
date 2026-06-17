@@ -10,6 +10,7 @@ function makePrisma(overrides: any = {}) {
     attachment: { findFirst: jest.fn(async () => ATT) },
     nodeAttachment: {
       findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null), // 冪等チェック（既定は既存なし）
       create: jest.fn(async ({ data }: any) => ({ id: 'na1', order: 0, caption: null, ...data, attachment: ATT })),
     },
     ...overrides,
@@ -48,5 +49,29 @@ describe('NodeAttachmentController.create', () => {
     ).rejects.toThrow();
     expect(prisma.nodeAttachment.create).not.toHaveBeenCalled();
     expect(b.registerAttachmentDocument).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent: re-attaching the same attachment returns the existing row without a second create', async () => {
+    const prisma = makePrisma({
+      nodeAttachment: {
+        findFirst: jest.fn(async () => ({ id: 'na-existing', projectId: 'p1', nodeKind: 'FLOW_NODE', nodeId: 'fn1', attachmentId: 'a1', order: 0, caption: null, attachment: ATT })),
+        create: jest.fn(),
+      },
+    });
+    const b = bridge();
+    const c = new NodeAttachmentController(prisma, b);
+    const out = await c.create('p1', { nodeKind: 'FLOW_NODE', nodeId: 'fn1', attachmentId: 'a1' } as any);
+    expect(out.id).toBe('na-existing');
+    expect(prisma.nodeAttachment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('NodeAttachmentController.list', () => {
+  it('returns [] for an invalid nodeKind query without hitting Prisma (no 500)', async () => {
+    const prisma = makePrisma();
+    const c = new NodeAttachmentController(prisma, bridge());
+    const out = await c.list('p1', 'GARBAGE' as any, 'fn1');
+    expect(out).toEqual([]);
+    expect(prisma.nodeAttachment.findMany).not.toHaveBeenCalled();
   });
 });

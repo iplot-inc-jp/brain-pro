@@ -43,6 +43,14 @@ describe('DiagramElementController', () => {
     });
   });
 
+  it('returns [] for an invalid diagramKind query without hitting Prisma (no 500)', async () => {
+    const prisma = makePrisma();
+    const c = new DiagramElementController(prisma);
+    const out = await c.list('p1', 'GARBAGE' as any, 'f1');
+    expect(out).toEqual([]);
+    expect(prisma.diagramElement.findMany).not.toHaveBeenCalled();
+  });
+
   it('rejects a diagramId belonging to another project (cross-tenant)', async () => {
     const prisma = makePrisma({
       businessFlow: { findUnique: jest.fn(async () => ({ projectId: 'OTHER' })) },

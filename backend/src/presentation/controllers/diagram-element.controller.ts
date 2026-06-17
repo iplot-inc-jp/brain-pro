@@ -91,7 +91,8 @@ export class DiagramElementController {
     @Query('diagramKind') diagramKind: (typeof DIAGRAM_KINDS)[number],
     @Query('diagramId') diagramId: string,
   ) {
-    if (!diagramKind || !diagramId) return [];
+    // 不正/未指定の query では Prisma が enum 不一致で 500 を投げるため、空配列で返す。
+    if (!DIAGRAM_KINDS.includes(diagramKind) || !diagramId) return [];
     const rows = await this.prisma.diagramElement.findMany({
       where: { projectId, diagramKind, diagramId },
       orderBy: [{ z: 'asc' }, { createdAt: 'asc' }],
