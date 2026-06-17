@@ -481,6 +481,7 @@ import { KnowledgeSettingsController } from './presentation/controllers/knowledg
 // ナレッジグラフ Google Drive ソースアダプタ（Phase 3）
 import { DriveService } from './infrastructure/knowledge/drive.service';
 import { DiagramKgBridgeService } from './infrastructure/knowledge/diagram-kg-bridge.service';
+import { DiagramCleanupService } from './infrastructure/knowledge/diagram-cleanup.service';
 import { DriveController } from './presentation/controllers/drive.controller';
 // Liveblocks リアルタイム・プレゼンス（トークン発行）
 import { LiveblocksController } from './presentation/controllers/liveblocks.controller';
@@ -1058,6 +1059,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     DriveService,
     // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）
     DiagramKgBridgeService,
+    // KGクリーンアップ（ノード削除時に NodeAttachment / KnowledgeNodeLink の孤立行を削除）
+    DiagramCleanupService,
 
     // ========== Global Guards ==========
     {

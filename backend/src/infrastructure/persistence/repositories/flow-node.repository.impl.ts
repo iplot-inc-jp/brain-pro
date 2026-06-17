@@ -66,6 +66,8 @@ export class PrismaFlowNodeRepository implements IFlowNodeRepository {
 
   async delete(id: string): Promise<void> {
     await this.prisma.flowNode.delete({ where: { id } });
+    await this.prisma.nodeAttachment.deleteMany({ where: { nodeKind: 'FLOW_NODE', nodeId: id } });
+    await this.prisma.knowledgeNodeLink.deleteMany({ where: { diagramKind: 'FLOW', diagramNodeId: id } });
   }
 
   private toDomain(record: {

@@ -9,6 +9,7 @@ import {
 import { authorizeProject } from './data-object-authz';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DataObjectOutput, toDataObjectOutput } from './data-object.output';
+import { DiagramCleanupService } from '../../../infrastructure/knowledge/diagram-cleanup.service';
 
 /** 指定 subProjectId が存在し同一プロジェクトに属することを検証（null はスキップ） */
 async function assertSubProjectInProject(
@@ -150,6 +151,7 @@ export class DeleteDataObjectUseCase {
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly cleanup: DiagramCleanupService,
   ) {}
 
   async execute(input: DeleteDataObjectInput): Promise<void> {
@@ -157,5 +159,6 @@ export class DeleteDataObjectUseCase {
     if (!object) throw new EntityNotFoundError('DataObject', input.id);
     await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.userId, this.projectAccess, 'edit');
     await this.repo.delete(input.id);
+    await this.cleanup.cleanupNode('DATA_OBJECT', input.id);
   }
 }

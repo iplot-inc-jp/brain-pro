@@ -11,6 +11,7 @@ import { DfdNodeKindValue } from '../../../domain/entities/dfd-node.entity';
 import { authorizeDiagram } from './dfd-authz';
 import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DfdNodeOutput, toDfdNodeOutput } from './dfd.output';
+import { DiagramCleanupService } from '../../../infrastructure/knowledge/diagram-cleanup.service';
 
 /** dataObjectId の参照先が存在し、図と同一プロジェクトに属することを検証する */
 async function assertDataObjectInProject(
@@ -184,6 +185,7 @@ export class DeleteDfdNodeUseCase {
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly cleanup: DiagramCleanupService,
   ) {}
 
   async execute(input: DeleteDfdNodeInput): Promise<void> {
@@ -193,5 +195,6 @@ export class DeleteDfdNodeUseCase {
     }
     await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId, this.projectAccess, 'edit');
     await this.repo.deleteNode(input.id);
+    await this.cleanup.cleanupNode('DFD_NODE', input.id);
   }
 }
