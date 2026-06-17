@@ -51,6 +51,7 @@ import {
   Goal,
   Gauge,
   Activity,
+  ListChecks,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -644,6 +645,7 @@ export default function DashboardLayout({
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
           { name: '業務イメージボード', href: `${base}/image-board`, icon: Presentation },
           { name: '業務定義シート', href: `${base}/business-definition`, icon: FileSpreadsheet },
+          { name: '業務一覧', href: `${base}/business-list`, icon: ListChecks },
         ],
       },
       {
