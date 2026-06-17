@@ -2,9 +2,10 @@
 
 /**
  * 業務イメージ（スライド）ボード ページ。
- * 図形/矢印/テキスト/画像/手書きを自由配置して ASIS/TOBE の業務の流れを
+ * 図形/矢印/テキスト/画像/手書きを自由配置して 業務の流れを
  * 「1枚のスライド」でラフに描く補完ツール（構造化図 DFD/swimlane/object-map の手前）。
  * キャンバスは Excalidraw を埋め込み、ボード単位で scene(JSON) を保存する。
+ * ボード一覧は 領域（SubProject）ごとの折りたたみフォルダでグルーピングする。
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -23,13 +24,18 @@ import {
   Image as ImageIcon,
   Check,
   CloudOff,
+  ChevronRight,
+  ChevronDown,
+  Folder,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   imageBoardApi,
-  type ImageBoardKind,
   type ImageBoardSummary,
   type ImageBoardDto,
 } from '@/lib/image-board';
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import type { SaveState } from './_components/ExcalidrawBoard';
 
 // Excalidraw は window 依存なので ssr:false で動的読込（このページ専用）。
@@ -42,18 +48,16 @@ const ExcalidrawBoard = dynamic(() => import('./_components/ExcalidrawBoard'), {
   ),
 });
 
-const KIND_TABS: { value: ImageBoardKind; label: string; color: string }[] = [
-  { value: 'ASIS', label: '現状（ASIS）', color: '#d97706' },
-  { value: 'TOBE', label: 'あるべき姿（TOBE）', color: '#059669' },
-];
+/** 未分類グループの擬似キー（subProjectId=null をまとめる）。 */
+const UNGROUPED = '__ungrouped__';
 
 export default function ImageBoardPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const { canEdit } = useReadOnly();
 
-  const [kind, setKind] = useState<ImageBoardKind>('ASIS');
   const [boards, setBoards] = useState<ImageBoardSummary[]>([]);
+  const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -61,18 +65,28 @@ export default function ImageBoardPage() {
   const [board, setBoard] = useState<ImageBoardDto | null>(null);
   const [loadingBoard, setLoadingBoard] = useState(false);
 
-  const [creating, setCreating] = useState(false);
+  // どのフォルダで作成中か（領域ID or UNGROUPED）。null=未作成。
+  const [creatingIn, setCreatingIn] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [titleDraft, setTitleDraft] = useState('');
 
-  // ボード一覧（kind 単位）。先頭を自動選択。
+  // 折りたたみ状態（フォルダキー→折りたたみ中なら true）。既定は展開。
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // ボード一覧 + 領域マスタ。先頭ボードを自動選択。
   const loadList = useCallback(
     async (selectAfter?: string) => {
       setLoadingList(true);
       setListError(null);
       try {
-        const list = await imageBoardApi.list(projectId, kind);
+        const [list, subs] = await Promise.all([
+          imageBoardApi.list(projectId),
+          subProjectApi.list(projectId),
+        ]);
         setBoards(list);
+        setSubProjects(subs);
         setSelectedId((prev) => {
           if (selectAfter) return selectAfter;
           if (prev && list.some((b) => b.id === prev)) return prev;
@@ -84,7 +98,7 @@ export default function ImageBoardPage() {
         setLoadingList(false);
       }
     },
-    [projectId, kind],
+    [projectId],
   );
 
   useEffect(() => {
@@ -118,20 +132,84 @@ export default function ImageBoardPage() {
     };
   }, [selectedId]);
 
-  const handleCreate = useCallback(async () => {
-    setCreating(true);
-    try {
-      const created = await imageBoardApi.create(projectId, {
-        kind,
-        title: '無題のボード',
-      });
-      await loadList(created.id);
-    } catch {
-      /* noop（一覧エラーは loadList が拾う） */
-    } finally {
-      setCreating(false);
+  // Escape でフルスクリーン解除（入力中は無視）。
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        el?.isContentEditable
+      ) {
+        return;
+      }
+      setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isFullscreen]);
+
+  // 領域マスタを order→name でソート（フラット）。
+  const sortedSubProjects = useMemo(
+    () =>
+      [...subProjects].sort(
+        (a, b) => a.order - b.order || a.name.localeCompare(b.name, 'ja'),
+      ),
+    [subProjects],
+  );
+
+  // フォルダキー → ボード配列（領域別 + 未分類）。
+  const boardsByFolder = useMemo(() => {
+    const map = new Map<string, ImageBoardSummary[]>();
+    for (const b of boards) {
+      const key = b.subProjectId ?? UNGROUPED;
+      const arr = map.get(key);
+      if (arr) arr.push(b);
+      else map.set(key, [b]);
     }
-  }, [projectId, kind, loadList]);
+    map.forEach((arr) => {
+      arr.sort(
+        (a, b) => a.order - b.order || a.title.localeCompare(b.title, 'ja'),
+      );
+    });
+    return map;
+  }, [boards]);
+
+  // 表示するフォルダ（全領域 + 未分類は中身がある時のみ）。
+  const folders = useMemo(() => {
+    const list: { key: string; name: string }[] = sortedSubProjects.map((s) => ({
+      key: s.id,
+      name: s.name,
+    }));
+    if ((boardsByFolder.get(UNGROUPED)?.length ?? 0) > 0) {
+      list.push({ key: UNGROUPED, name: '未分類' });
+    }
+    return list;
+  }, [sortedSubProjects, boardsByFolder]);
+
+  const handleCreate = useCallback(
+    async (folderKey: string) => {
+      setCreatingIn(folderKey);
+      try {
+        const subProjectId = folderKey === UNGROUPED ? null : folderKey;
+        const created = await imageBoardApi.create(projectId, {
+          title: '無題のボード',
+          subProjectId,
+        });
+        // 作成先フォルダは確実に展開しておく。
+        setCollapsed((c) => ({ ...c, [folderKey]: false }));
+        await loadList(created.id);
+      } catch {
+        /* noop（一覧エラーは loadList が拾う） */
+      } finally {
+        setCreatingIn(null);
+      }
+    },
+    [projectId, loadList],
+  );
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -145,6 +223,20 @@ export default function ImageBoardPage() {
       }
     },
     [selectedId, loadList],
+  );
+
+  // 領域の移動（select 変更）。value='' は未分類。
+  const handleMove = useCallback(
+    async (id: string, value: string) => {
+      const subProjectId = value === UNGROUPED ? null : value;
+      try {
+        await imageBoardApi.update(id, { subProjectId });
+        await loadList(id);
+      } catch {
+        /* noop */
+      }
+    },
+    [loadList],
   );
 
   const commitTitle = useCallback(async () => {
@@ -162,7 +254,11 @@ export default function ImageBoardPage() {
     }
   }, [board, titleDraft]);
 
-  const tab = useMemo(() => KIND_TABS.find((t) => t.value === kind)!, [kind]);
+  const toggleFolder = useCallback((key: string) => {
+    setCollapsed((c) => ({ ...c, [key]: !c[key] }));
+  }, []);
+
+  const hasAnyBoard = boards.length > 0;
 
   return (
     <div className="space-y-4">
@@ -173,57 +269,18 @@ export default function ImageBoardPage() {
             業務イメージボード
           </span>
         }
-        description="図形・アイコン・テキスト・矢印・画像を自由配置して、ASIS/TOBE の業務の流れを1枚のスライドとしてラフに描きます。構造化図（業務フロー/DFD/オブジェクト関係性マップ）の手前のラフ下書きとして使います。"
+        description="図形・アイコン・テキスト・矢印・画像を自由配置して、業務の流れを1枚のスライドとしてラフに描きます。構造化図（業務フロー/DFD/オブジェクト関係性マップ）の手前のラフ下書きとして使います。ボードは領域ごとのフォルダで整理できます。"
         backHref={`/dashboard/projects/${projectId}`}
         backLabel="プロジェクトへ戻る"
       />
 
-      {/* ASIS/TOBE タブ */}
-      <div className="flex items-center gap-2 border-b border-gray-200">
-        {KIND_TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setKind(t.value)}
-            className={cn(
-              'relative px-4 py-2 text-sm font-semibold transition-colors',
-              kind === t.value
-                ? 'text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-            {kind === t.value && (
-              <span
-                className="absolute inset-x-0 -bottom-px h-0.5"
-                style={{ backgroundColor: t.color }}
-              />
-            )}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex h-[calc(100vh-260px)] min-h-[520px] gap-3">
-        {/* 左: ボード一覧 */}
-        <div className="flex w-60 flex-shrink-0 flex-col rounded-lg border border-gray-200 bg-white">
+      <div className="flex h-[calc(100vh-200px)] min-h-[520px] gap-3">
+        {/* 左: ボード一覧（領域フォルダでグルーピング） */}
+        <div className="flex w-64 flex-shrink-0 flex-col rounded-lg border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
             <span className="text-xs font-semibold text-muted-foreground">
-              {tab.label} のボード
+              ボード一覧（領域別）
             </span>
-            {canEdit && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2"
-                onClick={handleCreate}
-                disabled={creating}
-              >
-                {creating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-              </Button>
-            )}
           </div>
           <div className="flex-1 overflow-y-auto p-2">
             {loadingList ? (
@@ -232,73 +289,160 @@ export default function ImageBoardPage() {
               </div>
             ) : listError ? (
               <p className="px-2 py-4 text-xs text-red-600">{listError}</p>
-            ) : boards.length === 0 ? (
+            ) : folders.length === 0 ? (
               <div className="px-2 py-8 text-center">
                 <ImageIcon className="mx-auto h-8 w-8 text-gray-300" />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  まだボードがありません
+                  領域がありません。先に領域マスタを登録してください。
                 </p>
                 {canEdit && (
                   <Button
                     size="sm"
                     variant="outline"
                     className="mt-3"
-                    onClick={handleCreate}
-                    disabled={creating}
+                    onClick={() => handleCreate(UNGROUPED)}
+                    disabled={creatingIn !== null}
                   >
                     <Plus className="mr-1 h-4 w-4" />
-                    ボードを作成
+                    未分類でボードを作成
                   </Button>
                 )}
               </div>
             ) : (
-              <ul className="space-y-1">
-                {boards.map((b) => (
-                  <li key={b.id}>
-                    <div
-                      className={cn(
-                        'group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm',
-                        b.id === selectedId
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'hover:bg-gray-50',
-                      )}
-                    >
-                      <button
-                        className="min-w-0 flex-1 truncate text-left"
-                        onClick={() => setSelectedId(b.id)}
-                        title={b.title || '無題のボード'}
-                      >
-                        {b.title || '無題のボード'}
-                      </button>
-                      {canEdit && (
+              <div className="space-y-1">
+                {!hasAnyBoard && (
+                  <p className="px-1 pb-2 text-[11px] text-muted-foreground">
+                    まだボードがありません。領域の「＋」から作成してください。
+                  </p>
+                )}
+                {folders.map((folder) => {
+                  const folderBoards = boardsByFolder.get(folder.key) ?? [];
+                  const isCollapsed = collapsed[folder.key] ?? false;
+                  return (
+                    <div key={folder.key}>
+                      {/* フォルダヘッダー */}
+                      <div className="group flex items-center gap-1 rounded-md px-1 py-1 hover:bg-gray-50">
                         <button
-                          className="flex-shrink-0 text-gray-300 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-                          onClick={() => handleDelete(b.id)}
-                          title="削除"
+                          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                          onClick={() => toggleFolder(folder.key)}
+                          title={folder.name}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          {isCollapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+                          )}
+                          <Folder className="h-3.5 w-3.5 flex-shrink-0 text-blue-500" />
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-700">
+                            {folder.name}
+                          </span>
+                          <span className="flex-shrink-0 text-[11px] text-muted-foreground">
+                            {folderBoards.length}
+                          </span>
                         </button>
+                        {canEdit && (
+                          <button
+                            className="flex-shrink-0 rounded p-0.5 text-gray-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                            onClick={() => handleCreate(folder.key)}
+                            disabled={creatingIn !== null}
+                            title={`${folder.name} にボードを作成`}
+                          >
+                            {creatingIn === folder.key ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Plus className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* フォルダ内のボード */}
+                      {!isCollapsed && (
+                        <ul className="mb-1 ml-3 space-y-0.5 border-l border-gray-100 pl-2">
+                          {folderBoards.length === 0 ? (
+                            <li className="px-1 py-1 text-[11px] text-muted-foreground">
+                              （ボードなし）
+                            </li>
+                          ) : (
+                            folderBoards.map((b) => (
+                              <li key={b.id}>
+                                <div
+                                  className={cn(
+                                    'group flex items-center gap-1 rounded-md px-2 py-1 text-sm',
+                                    b.id === selectedId
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'hover:bg-gray-50',
+                                  )}
+                                >
+                                  <button
+                                    className="min-w-0 flex-1 truncate text-left"
+                                    onClick={() => setSelectedId(b.id)}
+                                    title={b.title || '無題のボード'}
+                                  >
+                                    {b.title || '無題のボード'}
+                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      className="flex-shrink-0 text-gray-300 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                                      onClick={() => handleDelete(b.id)}
+                                      title="削除"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                                {/* 領域の移動 */}
+                                {canEdit && (
+                                  <div className="px-2 pb-1">
+                                    <select
+                                      value={b.subProjectId ?? UNGROUPED}
+                                      onChange={(e) =>
+                                        handleMove(b.id, e.target.value)
+                                      }
+                                      className="w-full rounded border border-gray-200 bg-white px-1 py-0.5 text-[11px] text-muted-foreground focus:border-blue-400 focus:outline-none"
+                                      title="領域を移動"
+                                    >
+                                      {sortedSubProjects.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.name}
+                                        </option>
+                                      ))}
+                                      <option value={UNGROUPED}>未分類</option>
+                                    </select>
+                                  </div>
+                                )}
+                              </li>
+                            ))
+                          )}
+                        </ul>
                       )}
                     </div>
-                  </li>
-                ))}
-              </ul>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
 
         {/* 右: キャンバス */}
-        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div
+          className={cn(
+            'relative flex min-w-0 flex-1 flex-col overflow-hidden border border-gray-200 bg-white',
+            isFullscreen
+              ? 'fixed inset-0 z-50 rounded-none'
+              : 'rounded-lg',
+          )}
+        >
           {!selectedId ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <Presentation className="h-10 w-10 text-gray-300" />
               <p className="mt-3 text-sm text-muted-foreground">
-                左からボードを選ぶか、新しいボードを作成してください。
+                左からボードを選ぶか、領域の「＋」で新しいボードを作成してください。
               </p>
             </div>
           ) : (
             <>
-              {/* ボードヘッダー（タイトル編集 + 保存状態） */}
+              {/* ボードヘッダー（タイトル編集 + 保存状態 + フルスクリーン） */}
               <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
                 <Input
                   value={titleDraft}
@@ -309,9 +453,22 @@ export default function ImageBoardPage() {
                   className="h-8 max-w-xs border-transparent text-sm font-semibold focus-visible:border-input"
                 />
                 <SaveStateBadge state={saveState} readOnly={!canEdit} />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto h-8 w-8 flex-shrink-0 p-0"
+                  onClick={() => setIsFullscreen((v) => !v)}
+                  title={isFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
+                >
+                  {isFullscreen ? (
+                    <Minimize2 className="h-4 w-4" />
+                  ) : (
+                    <Maximize2 className="h-4 w-4" />
+                  )}
+                </Button>
               </div>
 
-              {/* Excalidraw 本体（ボード切替で remount） */}
+              {/* Excalidraw 本体（ボード切替で remount。ラッパーを広げると自動で全画面化） */}
               <div className="relative min-h-0 flex-1">
                 {loadingBoard || !board ? (
                   <div className="flex h-full items-center justify-center bg-slate-50">

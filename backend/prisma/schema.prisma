@@ -1358,6 +1358,7 @@ model SubProject {
   meetingLinks     MeetingSubProject[]
   dataObjects            DataObject[]
   dataObjectAnnotations  DataObjectAnnotation[]
+  imageBoards            ImageBoard[]
 
   @@map("sub_projects")
 }
@@ -2856,7 +2857,10 @@ enum DiagramNodeKind {
 model ImageBoard {
   id        String         @id @default(uuid())
   projectId String         @map("project_id")
+  // kind は後方互換で温存（UI 未使用）。分類は subProjectId（領域）で行う。
   kind      ImageBoardKind @default(ASIS)
+  // 領域（SubProject）によるフォルダ分け。null=未分類。
+  subProjectId String?     @map("sub_project_id")
   title     String         @default("")
   order     Int            @default(0)
   // Excalidraw のシーン（{ elements, appState, files }）をそのまま保持する。
@@ -2864,7 +2868,8 @@ model ImageBoard {
   createdAt DateTime       @default(now()) @map("created_at")
   updatedAt DateTime       @updatedAt @map("updated_at")
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject? @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
   @@map("image_boards")

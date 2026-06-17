@@ -23,6 +23,8 @@ export interface ImageBoardSummary {
   id: string;
   projectId: string;
   kind: ImageBoardKind;
+  /** 領域（SubProject）ID。null=未分類。 */
+  subProjectId: string | null;
   title: string;
   order: number;
   updatedAt: string;
@@ -33,6 +35,7 @@ export interface ImageBoardDto {
   id: string;
   projectId: string;
   kind: ImageBoardKind;
+  subProjectId: string | null;
   title: string;
   order: number;
   scene: ImageBoardScene;
@@ -41,20 +44,19 @@ export interface ImageBoardDto {
 }
 
 export const imageBoardApi = {
-  /** プロジェクトのボード一覧（kind フィルタ可）。 */
-  async list(projectId: string, kind?: ImageBoardKind): Promise<ImageBoardSummary[]> {
-    const qs = kind ? `?kind=${kind}` : '';
-    const res = await fetch(`${API_URL}/api/projects/${projectId}/image-boards${qs}`, {
+  /** プロジェクトの全ボード一覧（領域別はフロントでグルーピング）。 */
+  async list(projectId: string): Promise<ImageBoardSummary[]> {
+    const res = await fetch(`${API_URL}/api/projects/${projectId}/image-boards`, {
       headers: headers(),
     });
     if (!res.ok) throw new Error('ボード一覧の取得に失敗しました');
     return res.json();
   },
 
-  /** ボード新規作成。 */
+  /** ボード新規作成（subProjectId=領域。null/未指定=未分類）。 */
   async create(
     projectId: string,
-    body: { kind?: ImageBoardKind; title?: string; order?: number },
+    body: { title?: string; subProjectId?: string | null; order?: number },
   ): Promise<ImageBoardDto> {
     const res = await fetch(`${API_URL}/api/projects/${projectId}/image-boards`, {
       method: 'POST',
@@ -74,10 +76,15 @@ export const imageBoardApi = {
     return res.json();
   },
 
-  /** ボード更新（title/kind/order/scene）。scene 保存はここを debounce して呼ぶ。 */
+  /** ボード更新（title/subProjectId/order/scene）。scene 保存はここを debounce して呼ぶ。subProjectId=null で未分類へ。 */
   async update(
     boardId: string,
-    patch: { title?: string; kind?: ImageBoardKind; order?: number; scene?: ImageBoardScene },
+    patch: {
+      title?: string;
+      subProjectId?: string | null;
+      order?: number;
+      scene?: ImageBoardScene;
+    },
   ): Promise<ImageBoardDto> {
     const res = await fetch(`${API_URL}/api/image-boards/${boardId}`, {
       method: 'PATCH',

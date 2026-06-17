@@ -245,13 +245,20 @@ export default function ProjectDfdPage() {
   // 失敗時のみ load() で再同期する。
   const handleUpdateFlow = useCallback(
     async (id: string, patch: Partial<DfdFlowModel>) => {
+      // 楽観更新: 先にローカルへ patch を反映（線/pathStyle 変更がサーバ往復を待たず即座に画面へ出る）。
+      setDiagram((prev) =>
+        prev
+          ? { ...prev, flows: prev.flows.map((f) => (f.id === id ? { ...f, ...patch } : f)) }
+          : prev,
+      );
       try {
         const updated = await dfdApi.updateFlow(id, patch);
+        // サーバ確定値で整合（情報種別名の解決など）。
         setDiagram((prev) =>
           prev ? { ...prev, flows: prev.flows.map((f) => (f.id === id ? updated : f)) } : prev,
         );
       } catch {
-        await load(); // 失敗時のみ再取得で再同期
+        await load(); // 失敗時のみ再取得で巻き戻し
       }
     },
     [load],

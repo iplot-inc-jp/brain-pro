@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, ListChecks, Users, GitCompare } from 'lucide-react';
@@ -51,10 +52,9 @@ export default function BusinessListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 行内のポップオーバ・展開状態（ASIS フローID で管理）。
+  // 担当者ピッカーのポップオーバ（開いている行ID と表示座標）。
   const [openPicker, setOpenPicker] = useState<string | null>(null);
-  const [openTobe, setOpenTobe] = useState<Record<string, boolean>>({});
-  const [openGap, setOpenGap] = useState<Record<string, boolean>>({});
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
   // 担当者保存中の行（連打レース防止＝保存完了まで同じ行の操作を無効化）。
   const [savingId, setSavingId] = useState<string | null>(null);
 
@@ -240,8 +240,6 @@ export default function BusinessListPage() {
                 <tbody>
                   {sorted.map((r, i) => {
                     const assignees = r.asis.assignees ?? [];
-                    const tobeExpanded = !!openTobe[r.asis.id];
-                    const gapExpanded = !!openGap[r.asis.id];
                     return (
                       <tr
                         key={r.asis.id}
@@ -283,61 +281,81 @@ export default function BusinessListPage() {
                             ))}
                           </div>
                           {canEdit && (
-                            <div className="relative mt-1">
+                            <div className="mt-1">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setOpenPicker(
-                                    openPicker === r.asis.id ? null : r.asis.id,
-                                  )
-                                }
+                                onClick={(e) => {
+                                  if (openPicker === r.asis.id) {
+                                    setOpenPicker(null);
+                                    return;
+                                  }
+                                  const rect =
+                                    e.currentTarget.getBoundingClientRect();
+                                  setPickerPos({
+                                    top: rect.bottom + 4,
+                                    left: rect.left,
+                                  });
+                                  setOpenPicker(r.asis.id);
+                                }}
                                 disabled={!hasStakeholders || savingId === r.asis.id}
                                 className="flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 <Users className="h-3 w-3" />
                                 選択
                               </button>
-                              {openPicker === r.asis.id && hasStakeholders && (
-                                <>
-                                  <button
-                                    type="button"
-                                    aria-label="閉じる"
-                                    onClick={() => setOpenPicker(null)}
-                                    className="fixed inset-0 z-10 cursor-default"
-                                  />
-                                  <div className="absolute z-20 mt-1 max-h-56 w-60 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg">
-                                    {stakeholders.map((s) => {
-                                      const checked = assignees.some(
-                                        (a) => a.stakeholderId === s.id,
-                                      );
-                                      return (
-                                        <label
-                                          key={s.id}
-                                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50"
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            disabled={savingId === r.asis.id}
-                                            onChange={() =>
-                                              toggleAssignee(r, s.id)
-                                            }
-                                            className="h-3.5 w-3.5"
-                                          />
-                                          <span className="flex-1 text-gray-800">
-                                            {s.name}
-                                          </span>
-                                          {s.role && (
-                                            <span className="rounded bg-gray-100 px-1 text-[10px] text-gray-500">
-                                              {s.role}
+                              {/* ポップオーバは portal + fixed で表 overflow のクリップを回避 */}
+                              {openPicker === r.asis.id &&
+                                hasStakeholders &&
+                                pickerPos &&
+                                createPortal(
+                                  <>
+                                    <button
+                                      type="button"
+                                      aria-label="閉じる"
+                                      onClick={() => setOpenPicker(null)}
+                                      className="fixed inset-0 z-40 cursor-default"
+                                    />
+                                    <div
+                                      style={{
+                                        position: 'fixed',
+                                        top: pickerPos.top,
+                                        left: pickerPos.left,
+                                      }}
+                                      className="z-50 max-h-56 w-60 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg"
+                                    >
+                                      {stakeholders.map((s) => {
+                                        const checked = assignees.some(
+                                          (a) => a.stakeholderId === s.id,
+                                        );
+                                        return (
+                                          <label
+                                            key={s.id}
+                                            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={checked}
+                                              disabled={savingId === r.asis.id}
+                                              onChange={() =>
+                                                toggleAssignee(r, s.id)
+                                              }
+                                              className="h-3.5 w-3.5"
+                                            />
+                                            <span className="flex-1 text-gray-800">
+                                              {s.name}
                                             </span>
-                                          )}
-                                        </label>
-                                      );
-                                    })}
-                                  </div>
-                                </>
-                              )}
+                                            {s.role && (
+                                              <span className="rounded bg-gray-100 px-1 text-[10px] text-gray-500">
+                                                {s.role}
+                                              </span>
+                                            )}
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  </>,
+                                  document.body,
+                                )}
                               {!hasStakeholders && (
                                 <p className="mt-1 text-[10px] text-gray-400">
                                   ステークホルダー未登録
@@ -357,90 +375,66 @@ export default function BusinessListPage() {
                           </Link>
                         </td>
 
-                        {/* 対応TOBE（件数バッジ → 行内展開） */}
+                        {/* 対応TOBE（常に具体名を表示） */}
                         <td className="px-3 py-2 align-top">
                           {r.tobes.length === 0 ? (
                             <span className="text-gray-400">—</span>
                           ) : (
                             <div className="space-y-1">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setOpenTobe((prev) => ({
-                                    ...prev,
-                                    [r.asis.id]: !prev[r.asis.id],
-                                  }))
-                                }
-                                className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 hover:bg-emerald-200"
-                              >
+                              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
                                 {r.tobes.length} 件
-                              </button>
-                              {tobeExpanded && (
-                                <ul className="space-y-0.5">
-                                  {r.tobes.map((t) => (
-                                    <li key={t.id}>
-                                      <Link
-                                        href={`/dashboard/projects/${projectId}/flows/${t.id}`}
-                                        className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                                      >
-                                        {t.name}
-                                      </Link>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
+                              </span>
+                              <ul className="space-y-0.5">
+                                {r.tobes.map((t) => (
+                                  <li key={t.id}>
+                                    <Link
+                                      href={`/dashboard/projects/${projectId}/flows/${t.id}`}
+                                      className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                                    >
+                                      {t.name}
+                                    </Link>
+                                  </li>
+                                ))}
+                              </ul>
                             </div>
                           )}
                         </td>
 
-                        {/* GAP（件数バッジ → 行内展開） */}
+                        {/* GAP（常に具体内容を表示） */}
                         <td className="px-3 py-2 align-top">
                           {r.gaps.length === 0 ? (
                             <span className="text-gray-400">—</span>
                           ) : (
                             <div className="space-y-1">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setOpenGap((prev) => ({
-                                    ...prev,
-                                    [r.asis.id]: !prev[r.asis.id],
-                                  }))
-                                }
-                                className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700 hover:bg-rose-200"
-                              >
+                              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700">
                                 <GitCompare className="h-3 w-3" />
                                 {r.gaps.length} 件
-                              </button>
-                              {gapExpanded && (
-                                <div className="space-y-1">
-                                  <ul className="space-y-1">
-                                    {r.gaps.map((g) => (
-                                      <li
-                                        key={g.id}
-                                        className="flex items-start gap-1.5 text-xs text-gray-700"
-                                      >
-                                        <span
-                                          className={`mt-0.5 shrink-0 rounded px-1 text-[10px] font-medium ${priorityBadgeClasses(
-                                            g.priority,
-                                          )}`}
-                                        >
-                                          {(g.priority ?? '—').toUpperCase()}
-                                        </span>
-                                        <span className="flex-1">
-                                          {g.gapDescription || '（内容未記入）'}
-                                        </span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                  <Link
-                                    href={`/dashboard/projects/${projectId}/gap-items`}
-                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                              </span>
+                              <ul className="space-y-1">
+                                {r.gaps.map((g) => (
+                                  <li
+                                    key={g.id}
+                                    className="flex items-start gap-1.5 text-xs text-gray-700"
                                   >
-                                    GAP一覧へ
-                                  </Link>
-                                </div>
-                              )}
+                                    <span
+                                      className={`mt-0.5 shrink-0 rounded px-1 text-[10px] font-medium ${priorityBadgeClasses(
+                                        g.priority,
+                                      )}`}
+                                    >
+                                      {(g.priority ?? '—').toUpperCase()}
+                                    </span>
+                                    <span className="flex-1">
+                                      {g.gapDescription || '（内容未記入）'}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                              <Link
+                                href={`/dashboard/projects/${projectId}/gap-items`}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                              >
+                                GAP一覧へ
+                              </Link>
                             </div>
                           )}
                         </td>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -79,6 +80,8 @@ import mermaid from 'mermaid';
 import { useReadOnly } from '@/components/read-only-context';
 import { ExportImportButton } from '@/components/io/ExportImportButton';
 import { entityJsonIo, type EntityBundle } from '@/lib/io';
+import { setFlowStakeholders } from '@/lib/business-list';
+import { listStakeholders, type Stakeholder } from '@/lib/stakeholders';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -844,6 +847,13 @@ export default function ProjectFlowDetailPage() {
   const [annotations, setAnnotations] = useState<FlowAnnotation[]>([]);
   // プロジェクトの API エンドポイント一覧（矢印×API 紐づけの選択肢。コードカタログで抽出済み）。
   const [apiEndpoints, setApiEndpoints] = useState<ApiEndpointItem[]>([]);
+  // フロー単位の担当者（FlowStakeholder の多対多）用のステークホルダー一覧。
+  const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
+  // 担当者ピッカー（ポップオーバ）の開閉と表示座標（portal + fixed でヘッダーのクリップ回避）。
+  const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
+  const [assigneePickerPos, setAssigneePickerPos] = useState<{ top: number; left: number } | null>(null);
+  // 担当者保存中フラグ（連打レース防止＝replace-all の取りこぼし防止）。
+  const [assigneeSaving, setAssigneeSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flowHistory, setFlowHistory] = useState<string[]>([]);
@@ -930,6 +940,58 @@ export default function ProjectFlowDetailPage() {
     }
   }, [getHeaders, fetchRoles, fetchAnnotations]);
 
+  // 担当者ピッカー用のステークホルダー一覧取得（プロジェクト全体）。
+  const fetchStakeholders = useCallback(async () => {
+    try {
+      setStakeholders(await listStakeholders(projectId));
+    } catch {
+      /* 担当者一覧の取得失敗は致命ではない（ピッカーが空になるだけ） */
+    }
+  }, [projectId]);
+
+  // stakeholderId → ステークホルダー（チップ／ピッカーの名前解決）。
+  const stakeholderById = useMemo(
+    () => new Map(stakeholders.map((s) => [s.id, s])),
+    [stakeholders],
+  );
+
+  // フロー担当者トグル（楽観更新 → setFlowStakeholders で保存、失敗時はフロー再取得で巻き戻す）。
+  const toggleAssignee = useCallback(
+    async (stakeholderId: string) => {
+      if (!flowData) return;
+      // 保存中の連打は無視（replace-all の取りこぼし防止）。
+      if (assigneeSaving) return;
+      setAssigneeSaving(true);
+      const cur = (flowData.assignees ?? []).map((a) => a.stakeholderId);
+      const nextIds = cur.includes(stakeholderId)
+        ? cur.filter((x) => x !== stakeholderId)
+        : [...cur, stakeholderId];
+      // 楽観更新。
+      setFlowData((prev) =>
+        prev
+          ? {
+              ...prev,
+              assignees: nextIds.map((id, i) => ({
+                stakeholderId: id,
+                name: stakeholderById.get(id)?.name ?? '',
+                order: i,
+              })),
+            }
+          : prev,
+      );
+      try {
+        const { assignees } = await setFlowStakeholders(flowData.id, nextIds);
+        setFlowData((prev) => (prev ? { ...prev, assignees } : prev));
+      } catch {
+        setError('担当者の保存に失敗しました');
+        await fetchFlowData(flowData.id, true);
+      } finally {
+        setAssigneeSaving(false);
+      }
+    },
+    [flowData, assigneeSaving, stakeholderById, fetchFlowData],
+  );
+
   // Mermaid出力取得
   const fetchMermaid = useCallback(async () => {
     if (!flowData) return;
@@ -1010,6 +1072,10 @@ export default function ProjectFlowDetailPage() {
   useEffect(() => {
     if (projectId) fetchApiEndpoints();
   }, [projectId, fetchApiEndpoints]);
+
+  useEffect(() => {
+    if (projectId) fetchStakeholders();
+  }, [projectId, fetchStakeholders]);
 
   // 子フローへナビゲート
   const handleNodeDoubleClick = useCallback(
@@ -2431,6 +2497,105 @@ export default function ProjectFlowDetailPage() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* このフローの担当者（FlowStakeholder の多対多）。チップ＋複数選択ポップオーバ。
+              ポップオーバは portal + fixed でヘッダーの overflow クリップを回避。 */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="hidden items-center gap-1 text-xs font-medium text-gray-500 sm:inline-flex">
+              <Users className="h-3.5 w-3.5" />
+              担当者
+            </span>
+            {(flowData.assignees ?? []).length === 0 && (
+              <span className="text-xs text-gray-400">未割当</span>
+            )}
+            {(flowData.assignees ?? []).map((a) => (
+              <span
+                key={a.stakeholderId}
+                className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] text-blue-800"
+              >
+                {a.name || stakeholderById.get(a.stakeholderId)?.name || '（不明）'}
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => toggleAssignee(a.stakeholderId)}
+                    disabled={assigneeSaving}
+                    className="text-blue-500 hover:text-blue-800 disabled:opacity-50"
+                    aria-label="外す"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  if (assigneePickerOpen) {
+                    setAssigneePickerOpen(false);
+                    return;
+                  }
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setAssigneePickerPos({ top: rect.bottom + 4, left: rect.left });
+                  setAssigneePickerOpen(true);
+                }}
+                disabled={stakeholders.length === 0 || assigneeSaving}
+                className="flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Users className="h-3 w-3" />
+                担当者
+              </button>
+            )}
+            {/* ポップオーバは portal + fixed でヘッダーの overflow クリップを回避 */}
+            {canEdit &&
+              assigneePickerOpen &&
+              stakeholders.length > 0 &&
+              assigneePickerPos &&
+              createPortal(
+                <>
+                  <button
+                    type="button"
+                    aria-label="閉じる"
+                    onClick={() => setAssigneePickerOpen(false)}
+                    className="fixed inset-0 z-40 cursor-default"
+                  />
+                  <div
+                    style={{
+                      position: 'fixed',
+                      top: assigneePickerPos.top,
+                      left: assigneePickerPos.left,
+                    }}
+                    className="z-50 max-h-56 w-60 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg"
+                  >
+                    {stakeholders.map((s) => {
+                      const checked = (flowData.assignees ?? []).some(
+                        (a) => a.stakeholderId === s.id,
+                      );
+                      return (
+                        <label
+                          key={s.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={assigneeSaving}
+                            onChange={() => toggleAssignee(s.id)}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="flex-1 text-gray-800">{s.name}</span>
+                          {s.role && (
+                            <span className="rounded bg-gray-100 px-1 text-[10px] text-gray-500">
+                              {s.role}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>,
+                document.body,
+              )}
+          </div>
           {/* 操作ガイド */}
           <div ref={howToRef}>
             <HowToPanel

@@ -36,10 +36,15 @@ type BoardKind = (typeof BOARD_KINDS)[number];
 // ========== DTOs ==========
 
 class CreateBoardDto {
-  @ApiPropertyOptional({ description: 'ASIS | TOBE' })
+  @ApiPropertyOptional({ description: 'ASIS | TOBE（後方互換・UI未使用）' })
   @IsOptional()
   @IsIn(BOARD_KINDS)
   kind?: BoardKind;
+
+  @ApiPropertyOptional({ nullable: true, description: '領域（SubProject）ID。null=未分類' })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -58,10 +63,15 @@ class PatchBoardDto {
   @IsString()
   title?: string;
 
-  @ApiPropertyOptional({ description: 'ASIS | TOBE' })
+  @ApiPropertyOptional({ description: 'ASIS | TOBE（後方互換・UI未使用）' })
   @IsOptional()
   @IsIn(BOARD_KINDS)
   kind?: BoardKind;
+
+  @ApiPropertyOptional({ nullable: true, description: '領域（SubProject）ID。null=未分類へ移動' })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -78,6 +88,7 @@ type BoardRow = {
   id: string;
   projectId: string;
   kind: string;
+  subProjectId: string | null;
   title: string;
   order: number;
   scene: Prisma.JsonValue;
@@ -90,6 +101,7 @@ function boardToResponse(b: BoardRow) {
     id: b.id,
     projectId: b.projectId,
     kind: b.kind,
+    subProjectId: b.subProjectId,
     title: b.title,
     order: b.order,
     scene: b.scene,
@@ -112,23 +124,19 @@ export class ImageBoardController {
 
   @Get()
   @ApiOperation({
-    summary: 'プロジェクトの業務イメージボード一覧（kindフィルタ可・scene除く軽量）',
+    summary: 'プロジェクトの業務イメージボード一覧（全件・領域別・scene除く軽量）',
   })
   @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
-  async list(
-    @Param('projectId') projectId: string,
-    @Query('kind') kind?: string,
-  ) {
-    const where: Prisma.ImageBoardWhereInput = { projectId };
-    if (kind === 'ASIS' || kind === 'TOBE') where.kind = kind;
+  async list(@Param('projectId') projectId: string) {
     const boards = await this.prisma.imageBoard.findMany({
-      where,
+      where: { projectId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
       // 一覧は scene を返さない（重いため）。
       select: {
         id: true,
         projectId: true,
         kind: true,
+        subProjectId: true,
         title: true,
         order: true,
         updatedAt: true,
@@ -138,6 +146,7 @@ export class ImageBoardController {
       id: b.id,
       projectId: b.projectId,
       kind: b.kind,
+      subProjectId: b.subProjectId,
       title: b.title,
       order: b.order,
       updatedAt: b.updatedAt.toISOString(),
@@ -155,6 +164,7 @@ export class ImageBoardController {
       data: {
         projectId,
         kind: dto.kind ?? 'ASIS',
+        subProjectId: dto.subProjectId ?? null,
         title: dto.title ?? '',
         order: dto.order ?? 0,
       },
@@ -204,6 +214,12 @@ export class ImageBoardByIdController {
     const data: Prisma.ImageBoardUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.kind !== undefined) data.kind = dto.kind;
+    if (dto.subProjectId !== undefined) {
+      // null=未分類へ移動。relation 経由で接続/切断する。
+      data.subProject = dto.subProjectId
+        ? { connect: { id: dto.subProjectId } }
+        : { disconnect: true };
+    }
     if (dto.order !== undefined) data.order = dto.order;
     if (dto.scene !== undefined) {
       data.scene =

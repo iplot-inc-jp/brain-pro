@@ -173,6 +173,11 @@ export type FlowData = {
   confidence?: 'HYPOTHESIS' | 'CONFIRMED';
   /** ロール別スイムレーン高さの手動オーバーライド（{ [roleId]: height }）。 */
   laneHeights?: Record<string, number>;
+  /**
+   * このフローに紐づくステークホルダー担当者（FlowStakeholder の多対多）。
+   * GET business-flows/:id のレスポンスに含まれる（order 昇順）。
+   */
+  assignees?: { stakeholderId: string; name: string; order: number }[];
   nodes: FlowDataNode[];
   edges: FlowDataEdge[];
   breadcrumbs: Array<{ id: string; name: string }>;
