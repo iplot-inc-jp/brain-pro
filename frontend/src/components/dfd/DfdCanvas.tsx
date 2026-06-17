@@ -97,6 +97,12 @@ import {
   type InformationType,
   type InformationTypeAttachment,
 } from '@/lib/dfd';
+import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
+import { nodeAttachmentApi } from '@/lib/node-attachments';
+import { uploadProjectFile } from '@/lib/upload';
+import { ImageElementNode } from '@/components/diagram/ImageElementNode';
+import { NodeInspectorPanel } from '@/components/diagram/NodeInspectorPanel';
+import { firstImageFile } from '@/components/diagram/diagram-drop';
 
 // 色（navy / blue / emerald / slate）
 const NAVY = '#050f3e';
@@ -505,6 +511,7 @@ const nodeTypes = {
   datastore: DataStoreNode,
   boundary: BoundaryNode,
   annotation: AnnotationNode,
+  imageElement: ImageElementNode,
 };
 
 // ===========================================
@@ -901,6 +908,50 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     setInformationTypes(props.informationTypes ?? []);
   }, [props.informationTypes]);
 
+  // 画像要素（DiagramElement.type=IMAGE）— DFD ノード/フローとは別系統で管理する。
+  const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
+  const diagramId = diagram.id;
+  useEffect(() => {
+    if (!projectId || !diagramId) return;
+    let cancelled = false;
+    void diagramElementApi.list(projectId, 'DFD', diagramId).then((list) => {
+      if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
+    }).catch(() => { /* 取得失敗は致命ではない */ });
+    return () => { cancelled = true; };
+  }, [projectId, diagramId]);
+
+  // ノード訪問パネル（function/external/datastore クリック時）。
+  const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
+
+  // ドラッグ＆ドロップ: 画像ファイルをキャンバスに貼り付ける。
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }, []);
+
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = firstImageFile(Array.from(e.dataTransfer.files));
+    if (!file) return;
+    const pos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    try {
+      const att = await uploadProjectFile(projectId, file);
+      const created = await diagramElementApi.create(projectId, {
+        diagramKind: 'DFD',
+        diagramId,
+        type: 'IMAGE',
+        attachmentId: att.id,
+        positionX: pos.x,
+        positionY: pos.y,
+        width: 200,
+        height: 150,
+      });
+      setImageElements((prev) => [...prev, created]);
+    } catch {
+      /* 作成失敗は致命ではない */
+    }
+  }, [projectId, diagramId, screenToFlowPosition]);
+
   // FUNCTION の採番を反映（既存 number は保持）
   const numberedNodes = useMemo(() => assignFunctionNumbers(diagram.nodes, 1), [diagram.nodes]);
 
@@ -1009,9 +1060,36 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     [props.annotations, props.onUpdateAnnotation, props.onDeleteAnnotation],
   );
 
+  // 画像要素ノード（type:'imageElement'）— DFD ノード/注釈とは別系統。connectable:false。
+  const imageElementRfNodes: Node[] = useMemo(
+    () =>
+      imageElements.map((e) => ({
+        id: e.id,
+        type: 'imageElement',
+        position: { x: e.positionX, y: e.positionY },
+        width: e.width ?? 200,
+        height: e.height ?? 150,
+        style: { width: e.width ?? 200, height: e.height ?? 150 },
+        draggable: true,
+        selectable: true,
+        connectable: false,
+        zIndex: 4,
+        data: {
+          url: nodeAttachmentApi.fileUrl(e.attachmentId!),
+          onResizeEnd: (id: string, size: { width: number; height: number }) => {
+            void diagramElementApi.patch(id, { width: size.width, height: size.height });
+            setImageElements((prev) =>
+              prev.map((x) => (x.id === id ? { ...x, width: size.width, height: size.height } : x)),
+            );
+          },
+        },
+      } as Node)),
+    [imageElements],
+  );
+
   const allRfNodes = useMemo(
-    () => [...rfNodes, ...annotationRfNodes],
-    [rfNodes, annotationRfNodes],
+    () => [...rfNodes, ...annotationRfNodes, ...imageElementRfNodes],
+    [rfNodes, annotationRfNodes, imageElementRfNodes],
   );
 
   const [dragNodes, setDragNodes, onNodesChange] = useNodesState(allRfNodes);
@@ -1155,6 +1233,11 @@ function DfdCanvasInner(props: DfdCanvasProps) {
   const handleNodeDragStop = useCallback(
     (_evt: unknown, node: Node) => {
       if (node.type === 'boundary') return;
+      // 画像要素ノードは DiagramElement API へ位置を保存する（DFD ノード系とは独立）。
+      if (node.type === 'imageElement') {
+        void diagramElementApi.patch(node.id, { positionX: node.position.x, positionY: node.position.y });
+        return;
+      }
       // 注釈ノード（付箋・メモ）は別系統。位置だけ DfdAnnotation API へ保存する。
       if (node.type === 'annotation') {
         void props.onUpdateAnnotation?.(node.id, {
@@ -1315,7 +1398,8 @@ function DfdCanvasInner(props: DfdCanvasProps) {
       </div>
 
       {/* キャンバス */}
-      <div className="relative w-full" style={{ height: 'calc(100% - 76px)' }}>
+      {/* eslint-disable-next-line @typescript-eslint/no-misused-promises */}
+      <div className="relative w-full" style={{ height: 'calc(100% - 76px)' }} onDragOver={onDragOver} onDrop={onDrop}>
         <ReactFlow
           nodes={dragNodes}
           edges={rfEdges}
@@ -1353,6 +1437,11 @@ function DfdCanvasInner(props: DfdCanvasProps) {
             if (node.type === 'boundary') return;
             // 注釈（付箋・メモ）は専用UI（インライン編集/✕/リサイズ）で完結。編集パネルは出さない。
             if (node.type === 'annotation') { setSelectedNodeId(null); setSelectedEdgeId(null); return; }
+            // 画像要素はドラッグ/リサイズのみ。インスペクタパネルは出さない。
+            if (node.type === 'imageElement') { setSelectedNodeId(null); setSelectedEdgeId(null); return; }
+            // DFD ノード（function/external/datastore）はインスペクタパネルを開く。
+            const label = (node.data as DfdNodeData)?.label ?? '';
+            setPanel({ nodeId: node.id, nodeLabel: label });
             setSelectedNodeId(node.id); setSelectedEdgeId(null);
           }}
           onNodeDoubleClick={(_, node) => {
@@ -1603,6 +1692,17 @@ function DfdCanvasInner(props: DfdCanvasProps) {
               </button>
             )}
           </div>
+        )}
+
+        {/* ノードインスペクタパネル（function/external/datastore クリック時） */}
+        {panel && (
+          <NodeInspectorPanel
+            projectId={projectId}
+            nodeKind="DFD_NODE"
+            nodeId={panel.nodeId}
+            nodeLabel={panel.nodeLabel}
+            onClose={() => setPanel(null)}
+          />
         )}
 
         {/* 選択エッジの編集（情報種別の参照 + 削除） */}
