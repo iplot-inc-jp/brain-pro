@@ -75,6 +75,11 @@ import {
   OBJECT_COLORS,
   objectColor,
 } from './object-map-shared';
+import type { DiagramElementDto } from '@/lib/diagram-elements';
+import { diagramElementApi } from '@/lib/diagram-elements';
+import { nodeAttachmentApi } from '@/lib/node-attachments';
+import { uploadProjectFile } from '@/lib/upload';
+import { firstImageFile } from '@/components/diagram/diagram-drop';
 
 interface ViewTransform {
   x: number;
@@ -271,6 +276,18 @@ export interface ObjectMapCanvasProps {
   onImportMermaid: (mermaid: string) => Promise<void>;
   /** 閲覧専用。true のとき編集ツールバーを隠し、ドラッグ・接続・編集系操作を無効化する。 */
   readOnly?: boolean;
+  // ===== 画像要素（ImageElement） =====
+  /** このキャンバスに配置された画像要素一覧 */
+  imageElements?: DiagramElementDto[];
+  /** 画像要素ドロップ時の projectId（uploadProjectFile / diagramElementApi.create に使用） */
+  projectId?: string;
+  /** 画像要素が新規作成されたとき（親が楽観更新） */
+  onImageCreated?: (el: DiagramElementDto) => void;
+  /** 画像要素の移動/リサイズ確定時（親が楽観更新＋デバウンス保存） */
+  onImageGeometryChanged?: (
+    id: string,
+    patch: { positionX?: number; positionY?: number; width?: number; height?: number },
+  ) => void;
 }
 
 export function ObjectMapCanvas({
@@ -300,6 +317,10 @@ export function ObjectMapCanvas({
   onDeleteScope: onDeleteScopeRaw,
   onImportMermaid,
   readOnly = false,
+  imageElements: imageElementsProp = [],
+  projectId,
+  onImageCreated,
+  onImageGeometryChanged,
 }: ObjectMapCanvasProps) {
   // 閲覧専用時は編集系コールバックを no-op に差し替える（ドラッグ確定・接続・編集・削除を無効化）。
   const noop = useCallback(() => {}, []);
@@ -384,6 +405,39 @@ export function ObjectMapCanvas({
   >(null);
   // 囲い move 時に一緒に動かす内包オブジェクト（pointerdown 時にスナップショット）
   const scopeMembersRef = useRef<Array<{ id: string; baseX: number; baseY: number }>>([]);
+
+  // ===== 画像要素（ImageElement） =====
+  // ドロップで追加した画像要素の楽観的ローカル管理（親から受け取った配列にマージして使う）
+  const [localImageElements, setLocalImageElements] = useState<DiagramElementDto[]>([]);
+  // ドラッグ/リサイズ中の画像要素の一時ジオメトリ
+  const [imageDraft, setImageDraft] = useState<
+    Record<string, { x: number; y: number; w: number; h: number }>
+  >({});
+  const imageDragRef = useRef<{
+    id: string;
+    mode: 'move' | 'resize';
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    baseW: number;
+    baseH: number;
+    moved: boolean;
+    last: { x: number; y: number; w: number; h: number };
+  } | null>(null);
+  // 選択中の画像要素ID（DataObject選択とは独立して管理）
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  // ドラッグドロップ中のオーバーレイ表示
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // 親から受け取った + ローカル楽観追加をマージした画像要素リスト
+  const imageElements = useMemo(() => {
+    const localIds = new Set(localImageElements.map((el) => el.id));
+    return [
+      ...imageElementsProp.filter((el) => !localIds.has(el.id)),
+      ...localImageElements,
+    ];
+  }, [imageElementsProp, localImageElements]);
 
   // ===== Mermaidから生成ダイアログ =====
   const [showMermaidImport, setShowMermaidImport] = useState(false);
@@ -929,6 +983,81 @@ export function ObjectMapCanvas({
     [screenToWorld, scopeRect, onScopeGeometryChanged, objects, posOf, onObjectMovedSilent],
   );
 
+  // ===== 画像要素ドラッグ移動・右下ハンドルリサイズ（scope-box パターンをミラー） =====
+  // 最小サイズ制約
+  const IMG_MIN_W = 40;
+  const IMG_MIN_H = 30;
+
+  const handleImagePointerDown = useCallback(
+    (
+      e: ReactPointerEvent<SVGGElement | SVGRectElement>,
+      el: DiagramElementDto,
+      mode: 'move' | 'resize',
+    ) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      if (readOnly) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      const baseX = imageDraft[el.id]?.x ?? el.positionX;
+      const baseY = imageDraft[el.id]?.y ?? el.positionY;
+      const baseW = imageDraft[el.id]?.w ?? (el.width ?? 200);
+      const baseH = imageDraft[el.id]?.h ?? (el.height ?? 150);
+      imageDragRef.current = {
+        id: el.id,
+        mode,
+        startX: world.x,
+        startY: world.y,
+        baseX,
+        baseY,
+        baseW,
+        baseH,
+        moved: false,
+        last: { x: baseX, y: baseY, w: baseW, h: baseH },
+      };
+      setSelectedImageId(el.id);
+
+      const onMove = (ev: PointerEvent) => {
+        const d = imageDragRef.current;
+        if (!d) return;
+        const w = screenToWorld(ev.clientX, ev.clientY);
+        const dx = w.x - d.startX;
+        const dy = w.y - d.startY;
+        if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
+        const next =
+          d.mode === 'move'
+            ? { x: Math.round(d.baseX + dx), y: Math.round(d.baseY + dy), w: d.baseW, h: d.baseH }
+            : {
+                x: d.baseX,
+                y: d.baseY,
+                w: Math.max(IMG_MIN_W, Math.round(d.baseW + dx)),
+                h: Math.max(IMG_MIN_H, Math.round(d.baseH + dy)),
+              };
+        d.last = next;
+        setImageDraft({ [d.id]: next });
+      };
+
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        const d = imageDragRef.current;
+        imageDragRef.current = null;
+        if (!d) return;
+        if (d.moved) {
+          const patch =
+            d.mode === 'move'
+              ? { positionX: d.last.x, positionY: d.last.y }
+              : { width: d.last.w, height: d.last.h };
+          onImageGeometryChanged?.(d.id, patch);
+        }
+        setImageDraft({});
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    },
+    [readOnly, screenToWorld, imageDraft, onImageGeometryChanged],
+  );
+
   // ===== Mermaidから生成 =====
   const handleMermaidImport = useCallback(async () => {
     if (!mermaidImportText.trim()) return;
@@ -944,6 +1073,54 @@ export function ObjectMapCanvas({
       setMermaidImporting(false);
     }
   }, [mermaidImportText, onImportMermaid]);
+
+  // ===== 画像ドロップ =====
+  const handleSvgDragOver = useCallback((e: React.DragEvent<SVGSVGElement>) => {
+    const files = Array.from(e.dataTransfer.files);
+    // ドラッグ中は files が空のことが多い（type で代替判定）
+    const types = Array.from(e.dataTransfer.types);
+    if (readOnly) return;
+    if (types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setIsDragOver(true);
+    }
+  }, [readOnly]);
+
+  const handleSvgDragLeave = useCallback(() => {
+    setIsDragOver(false);
+  }, []);
+
+  const handleSvgDrop = useCallback(
+    async (e: React.DragEvent<SVGSVGElement>) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      if (readOnly || !projectId) return;
+      const file = firstImageFile(Array.from(e.dataTransfer.files));
+      if (!file) return;
+      const world = screenToWorld(e.clientX, e.clientY);
+      try {
+        const att = await uploadProjectFile(projectId, file);
+        const created = await diagramElementApi.create(projectId, {
+          diagramKind: 'OBJECT_MAP',
+          diagramId: projectId,
+          type: 'IMAGE',
+          attachmentId: att.id,
+          positionX: Math.round(world.x - 100),
+          positionY: Math.round(world.y - 75),
+          width: 200,
+          height: 150,
+        });
+        setLocalImageElements((prev) => [...prev, created]);
+        onImageCreated?.(created);
+        setSelectedImageId(created.id);
+      } catch {
+        // ドロップ失敗は静かに無視（ユーザーが気付かないのでコンソールは残す）
+        console.error('Image drop failed');
+      }
+    },
+    [readOnly, projectId, screenToWorld, onImageCreated],
+  );
 
   // ===== 背景パン / 背景クリックで選択解除 =====
   const handleBackgroundPointerDown = useCallback(
@@ -966,13 +1143,14 @@ export function ObjectMapCanvas({
         const p = panRef.current;
         panRef.current = null;
         if (p && !p.moved) {
-          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップ/注釈編集・スコープ選択を閉じる
+          // クリック（パンなし）→ 選択解除・接続元解除・編集ポップ/注釈編集・スコープ選択・画像選択を閉じる
           onSelectObject(null);
           setConnectSourceId(null);
           setConnectSourceHandle(null);
           setEdgeEdit(null);
           setEditingAnnotationId(null);
           setSelectedScopeId(null);
+          setSelectedImageId(null);
         }
       };
       window.addEventListener('pointermove', onMove);
@@ -1153,6 +1331,14 @@ export function ObjectMapCanvas({
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-slate-50">
+      {/* ドラッグオーバー時のインジケータ */}
+      {isDragOver && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-blue-400 bg-blue-50/40">
+          <p className="rounded-md bg-white/90 px-4 py-2 text-sm font-medium text-blue-600 shadow">
+            ここに画像をドロップ
+          </p>
+        </div>
+      )}
       {/* ===== SVG キャンバス ===== */}
       <svg
         ref={svgRef}
@@ -1160,6 +1346,9 @@ export function ObjectMapCanvas({
         style={{ cursor: connectMode ? 'crosshair' : panRef.current ? 'grabbing' : 'default' }}
         onPointerDown={handleBackgroundPointerDown}
         onPointerMove={handleSvgPointerMove}
+        onDragOver={handleSvgDragOver}
+        onDragLeave={handleSvgDragLeave}
+        onDrop={(e) => { void handleSvgDrop(e); }}
       >
         {/* ドット方眼（ビュー変換に追随） */}
         <defs>
@@ -1358,6 +1547,73 @@ export function ObjectMapCanvas({
               pointerEvents="none"
             />
           )}
+
+          {/* ===== 画像要素（付箋/メモの下・スコープ囲みの上。DataObject操作とは独立したレイヤ） ===== */}
+          {imageElements.map((el) => {
+            const draft = imageDraft[el.id];
+            const x = draft?.x ?? el.positionX;
+            const y = draft?.y ?? el.positionY;
+            const w = draft?.w ?? (el.width ?? 200);
+            const h = draft?.h ?? (el.height ?? 150);
+            const isSelected = selectedImageId === el.id;
+            return (
+              <g
+                key={el.id}
+                transform={`translate(${x},${y})`}
+                style={{ cursor: readOnly ? 'default' : 'grab' }}
+                onPointerDown={(e) => handleImagePointerDown(e, el, 'move')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedImageId(el.id);
+                  // DataObject の選択は解除しない（画像クリックは独立）
+                }}
+              >
+                {el.attachmentId && (
+                  <image
+                    href={nodeAttachmentApi.fileUrl(el.attachmentId)}
+                    width={w}
+                    height={h}
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+                {/* 透明ヒット領域（<image> のポインタイベントを確実に捕捉） */}
+                <rect width={w} height={h} fill="transparent" />
+                {/* 選択リング */}
+                {isSelected && (
+                  <>
+                    <rect
+                      x={-4}
+                      y={-4}
+                      width={w + 8}
+                      height={h + 8}
+                      rx={6}
+                      fill="none"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      pointerEvents="none"
+                    />
+                    {/* 右下リサイズハンドル（scope-box 同様） */}
+                    {!readOnly && (
+                      <rect
+                        x={w - 9}
+                        y={h - 9}
+                        width={14}
+                        height={14}
+                        rx={3}
+                        fill="#ffffff"
+                        stroke="#3b82f6"
+                        strokeWidth={1.5}
+                        style={{ cursor: 'nwse-resize' }}
+                        onPointerDown={(e) => handleImagePointerDown(e, el, 'resize')}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                  </>
+                )}
+              </g>
+            );
+          })}
 
           {/* ===== 付箋/メモ（接続モード・オブジェクト選択の対象外。カードの下層に描画） ===== */}
           {noteAnnotations.map((a) => {

@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { Loader2, Boxes, Import, Plus, Spline, Database } from 'lucide-react';
+import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
@@ -66,6 +67,8 @@ export default function ObjectMapPage() {
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  // ===== 画像要素（ImageElement） =====
+  const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
   // 領域一覧パネルからのフォーカス要求トリガ（インクリメントでキャンバスが中央寄せ）
   const [focusNonce, setFocusNonce] = useState(0);
   // 領域紐付けパネルで保存中のオブジェクトID（ピッカーを一時無効化）
@@ -98,16 +101,18 @@ export default function ObjectMapPage() {
       if (withSpinner) setLoading(true);
       setError(null);
       try {
-        const [g, t, a, sp] = await Promise.all([
+        const [g, t, a, sp, imgs] = await Promise.all([
           dataObjectApi.getGraph(projectId),
           tablesApi.list(projectId).catch(() => [] as Table[]),
           dataObjectAnnotationApi.list(projectId).catch(() => [] as DataObjectAnnotationDto[]),
           subProjectApi.list(projectId).catch(() => [] as SubProjectMaster[]),
+          diagramElementApi.list(projectId, 'OBJECT_MAP', projectId).catch(() => [] as DiagramElementDto[]),
         ]);
         setGraph(g);
         setTables(t);
         setAnnotations(a);
         setSubProjects(sp);
+        setImageElements(imgs.filter((el) => el.type === 'IMAGE'));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -616,6 +621,39 @@ export default function ObjectMapPage() {
     void refresh().finally(() => settlers?.resolve()); // 再取得後にダイアログを閉じる
   }, [mermaidJob, refresh]);
 
+  // ===== 画像要素（ImageElement）の作成・ジオメトリ変更（デバウンス保存） =====
+  const pendingImgGeom = useRef(new Map<string, Partial<DiagramElementDto>>());
+  const imgGeomTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (imgGeomTimer.current) clearTimeout(imgGeomTimer.current);
+    };
+  }, []);
+
+  const handleImageCreated = useCallback((el: DiagramElementDto) => {
+    setImageElements((prev) => [...prev, el]);
+  }, []);
+
+  const handleImageGeometryChanged = useCallback(
+    (id: string, patch: { positionX?: number; positionY?: number; width?: number; height?: number }) => {
+      // 楽観更新
+      setImageElements((prev) =>
+        prev.map((el) => (el.id === id ? { ...el, ...patch } : el)),
+      );
+      pendingImgGeom.current.set(id, { ...(pendingImgGeom.current.get(id) ?? {}), ...patch });
+      if (imgGeomTimer.current) clearTimeout(imgGeomTimer.current);
+      imgGeomTimer.current = setTimeout(() => {
+        const entries = Array.from(pendingImgGeom.current.entries());
+        pendingImgGeom.current.clear();
+        for (const [eid, p] of entries) {
+          void diagramElementApi.patch(eid, p).catch((err) => showError(err, '画像要素の保存に失敗しました'));
+        }
+      }, 600);
+    },
+    [showError],
+  );
+
   // ===== オブジェクトの領域紐付け（領域紐付けパネル） =====
   const handleLinkObjectToSubProject = useCallback(
     async (objectId: string, subProjectId: string | null) => {
@@ -854,6 +892,10 @@ export default function ObjectMapPage() {
                 onDeleteScope={handleDeleteScope}
                 onImportMermaid={handleImportMermaid}
                 readOnly={!canEdit}
+                imageElements={imageElements}
+                projectId={projectId}
+                onImageCreated={handleImageCreated}
+                onImageGeometryChanged={handleImageGeometryChanged}
               />
             </div>
             {selectedObject && (

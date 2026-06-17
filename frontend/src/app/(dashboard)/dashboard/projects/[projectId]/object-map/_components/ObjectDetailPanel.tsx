@@ -13,13 +13,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { X, Table2, Trash2, Database, Share2, ExternalLink } from 'lucide-react';
+import { X, Table2, Trash2, Database, Share2, ExternalLink, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import type { Table } from '@/lib/api';
 import type { DataObjectDto } from '@/lib/data-objects';
 import { OBJECT_COLORS, objectColor } from './object-map-shared';
+import { NodeInspectorPanel } from '@/components/diagram/NodeInspectorPanel';
 
 export interface ObjectDetailPanelProps {
   object: DataObjectDto;
@@ -47,11 +48,13 @@ export function ObjectDetailPanel({
 }: ObjectDetailPanelProps) {
   const [name, setName] = useState(object.name);
   const [description, setDescription] = useState(object.description ?? '');
+  const [showInspector, setShowInspector] = useState(false);
 
-  // 別オブジェクトに切り替わったらフォームを引き直す
+  // 別オブジェクトに切り替わったらフォームを引き直し、インスペクタを閉じる
   useEffect(() => {
     setName(object.name);
     setDescription(object.description ?? '');
+    setShowInspector(false);
   }, [object.id, object.name, object.description]);
 
   const commitName = () => {
@@ -73,6 +76,21 @@ export function ObjectDetailPanel({
   const candidates = allTables.filter((t) => !linkedIds.has(t.id));
   const color = objectColor(object.color);
 
+  // NodeInspectorPanel を表示中はそちらを優先表示（同一エリアで衝突しないようにトグル）
+  if (showInspector) {
+    return (
+      <div className="flex h-full w-80 shrink-0 flex-col rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <NodeInspectorPanel
+          projectId={projectId}
+          nodeKind="DATA_OBJECT"
+          nodeId={object.id}
+          nodeLabel={object.name}
+          onClose={() => setShowInspector(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full w-80 shrink-0 flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white">
       {/* ヘッダー */}
@@ -81,9 +99,19 @@ export function ObjectDetailPanel({
           <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: color }} />
           <h3 className="truncate text-sm font-semibold text-gray-800">{object.name}</h3>
         </div>
-        <button type="button" className="text-gray-400 hover:text-gray-600" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            title="添付・ナレッジグラフを開く"
+            onClick={() => setShowInspector(true)}
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+          <button type="button" className="text-gray-400 hover:text-gray-600" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-4 px-4 py-4">
