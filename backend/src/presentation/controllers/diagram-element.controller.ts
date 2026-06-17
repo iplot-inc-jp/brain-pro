@@ -66,6 +66,7 @@ export class DiagramElementController {
     @Query('diagramKind') diagramKind: (typeof DIAGRAM_KINDS)[number],
     @Query('diagramId') diagramId: string,
   ) {
+    if (!diagramKind || !diagramId) return [];
     const rows = await this.prisma.diagramElement.findMany({
       where: { projectId, diagramKind, diagramId },
       orderBy: [{ z: 'asc' }, { createdAt: 'asc' }],

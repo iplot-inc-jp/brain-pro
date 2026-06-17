@@ -50,4 +50,13 @@ describe('DiagramElementByIdController', () => {
     const data = prisma.diagramElement.update.mock.calls[0][0].data;
     expect(data).toEqual({ positionX: 10, positionY: 20 });
   });
+
+  it('remove asserts edit access then deletes by id', async () => {
+    const prisma = makePrisma();
+    const acc = access();
+    const c = new DiagramElementByIdController(prisma, acc);
+    await c.remove(user, 'de1');
+    expect(acc.assertProjectAccess).toHaveBeenCalledWith('p1', 'u1', 'edit');
+    expect(prisma.diagramElement.delete).toHaveBeenCalledWith({ where: { id: 'de1' } });
+  });
 });
