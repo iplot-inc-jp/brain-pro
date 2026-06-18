@@ -2396,24 +2396,30 @@ export default function ProjectFlowDetailPage() {
     setImagesReported(false);
     setFlowImages([]);
   }, [undoFlowId]);
+  // 画像要素の Undo/Redo は再設計まで一時無効。デプロイ前アドバーサリアル・レビューで、非同期
+  // 再同期・jsonbキー順・画像ロード失敗パスに起因する data-loss / redo 破壊が繰り返し検出された
+  // ため。レーン幅 Undo・スナップバック修正・アイコン拡大は本フラグと無関係に有効。画像自体の
+  // 作成/移動/リサイズ/削除も通常どおり動く（Cmd+Z で戻せないだけ）。再有効化は true に。
+  const IMAGE_UNDO_ENABLED = false;
   const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
     flowId: undoFlowId,
     flowData,
     getHeaders,
     refetch: refetchSilent,
-    // 画像要素も履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。正規化済み射影を渡す。
-    extraState: flowImagesSnapshot,
-    extraReady: imagesReported,
-    restoreExtra: async (extra) => {
-      if (!undoFlowId) return undefined;
-      const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
-      const restored = await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
-      // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
-      setImagesReloadKey((k) => k + 1);
-      // サーバ正規化後の結果（例: 削除済み添付→null）を返す。フックがこれで現在の
-      // snapshot.extra を上書きし、再同期後の capture が等価判定で一致 → redo が消えないようにする。
-      return restored.map(toRestoreInput);
-    },
+    // 画像要素を履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。無効時は undefined。
+    extraState: IMAGE_UNDO_ENABLED ? flowImagesSnapshot : undefined,
+    extraReady: IMAGE_UNDO_ENABLED ? imagesReported : undefined,
+    restoreExtra: IMAGE_UNDO_ENABLED
+      ? async (extra) => {
+          if (!undoFlowId) return undefined;
+          const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
+          const restored = await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
+          // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
+          setImagesReloadKey((k) => k + 1);
+          // サーバ正規化後の結果（例: 削除済み添付→null）を返し、フックが snapshot.extra を上書き。
+          return restored.map(toRestoreInput);
+        }
+      : undefined,
   });
 
   // ⌘Z=Undo / ⌘⇧Z（＋⌘Y）=Redo の専用キーバインド。
