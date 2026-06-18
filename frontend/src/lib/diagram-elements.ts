@@ -26,6 +26,13 @@ export interface DiagramElementDto {
   color: string | null;
 }
 
+/** restore / Undo スナップショット用の安定射影（createdAt 等の揮発フィールドを持たない）。 */
+export type DiagramElementRestoreInput = Pick<
+  DiagramElementDto,
+  | 'id' | 'type' | 'positionX' | 'positionY' | 'width' | 'height'
+  | 'rotation' | 'z' | 'attachmentId' | 'text' | 'color'
+>;
+
 export const diagramElementApi = {
   async list(projectId: string, diagramKind: DiagramKind, diagramId: string): Promise<DiagramElementDto[]> {
     const q = new URLSearchParams({ diagramKind, diagramId });
@@ -62,12 +69,13 @@ export const diagramElementApi = {
     if (!res.ok && res.status !== 204) throw new Error('図要素の削除に失敗しました');
   },
 
-  /** Undo/Redo: スナップショットに一致するよう id 保持で一括復元（差分置換）。 */
+  /** Undo/Redo: スナップショットに一致するよう id 保持で一括復元（差分置換）。
+   *  elements は安定射影（createdAt など揮発フィールドを含まない）でよい。 */
   async restore(
     projectId: string,
     diagramKind: DiagramKind,
     diagramId: string,
-    elements: DiagramElementDto[],
+    elements: DiagramElementRestoreInput[],
   ): Promise<DiagramElementDto[]> {
     const res = await fetch(`${API_URL}/api/projects/${projectId}/diagram-elements/restore`, {
       method: 'PUT',

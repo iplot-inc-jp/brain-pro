@@ -167,6 +167,15 @@ export class DiagramElementController {
     }
     const keepIds = dto.elements.map((e) => e.id);
     await this.prisma.$transaction(async (tx) => {
+      // この (projectId, diagramKind, diagramId) スコープの現存 id 集合。
+      // update は「このスコープに実在する id」だけに限定し、他テナントの要素 id を
+      // body に紛れ込ませても upsert の update 分岐で書き換えられないようにする
+      // （スコープ外 id は create に回り、グローバル衝突時は PK エラーでロールバック）。
+      const existing = await tx.diagramElement.findMany({
+        where: { projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId },
+        select: { id: true },
+      });
+      const existingIds = new Set(existing.map((e) => e.id));
       await tx.diagramElement.deleteMany({
         where: {
           projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId,
@@ -182,11 +191,13 @@ export class DiagramElementController {
           z: el.z ?? 0, rotation: el.rotation ?? 0,
           attachmentId, text: el.text ?? '', color: el.color ?? null,
         };
-        await tx.diagramElement.upsert({
-          where: { id: el.id },
-          create: { id: el.id, projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, ...fields },
-          update: fields,
-        });
+        if (existingIds.has(el.id)) {
+          await tx.diagramElement.update({ where: { id: el.id }, data: fields });
+        } else {
+          await tx.diagramElement.create({
+            data: { id: el.id, projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, ...fields },
+          });
+        }
       }
     });
     const out = await this.prisma.diagramElement.findMany({

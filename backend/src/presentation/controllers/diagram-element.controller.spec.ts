@@ -81,13 +81,15 @@ describe('DiagramElementController', () => {
     expect(prisma.diagramElement.create).not.toHaveBeenCalled();
   });
 
-  it('restore upserts elements by id, deletes ones not in the snapshot, and nulls unknown attachments', async () => {
+  it('restore: scope内既存idはupdate・未存在idはcreate(id保持)、不在の要素は削除、未知添付はnull', async () => {
     const prisma = makePrisma({
       attachment: {
         findFirst: jest.fn(async () => ({ id: 'a1' })),
         findMany: jest.fn(async () => [{ id: 'a1' }]), // a1 のみ実在、a-deleted は無い
       },
     });
+    // このスコープの現存要素は de1 のみ（de2 は削除済み＝undo で復活させる）。
+    prisma.diagramElement.findMany = jest.fn(async () => [{ id: 'de1' }]);
     const c = new DiagramElementController(prisma);
     await c.restore('p1', {
       diagramKind: 'FLOW',
@@ -101,13 +103,17 @@ describe('DiagramElementController', () => {
     expect(prisma.diagramElement.deleteMany).toHaveBeenCalledWith({
       where: { projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1', id: { notIn: ['de1', 'de2'] } },
     });
-    const upserts = prisma.diagramElement.upsert.mock.calls.map((x: any) => x[0]);
-    // id 指定で upsert（= 削除の undo で同一 id 復活）。
-    expect(upserts[0].where).toEqual({ id: 'de1' });
-    expect(upserts[0].create.id).toBe('de1');
-    expect(upserts[0].create.attachmentId).toBe('a1'); // 実在する添付は維持
-    // 実在しない添付(a-deleted)は null に落として FK エラーを避ける。
-    expect(upserts[1].create.attachmentId).toBeNull();
+    // 既存 de1 は update（クロステナント書込防止＝スコープ内 id のみ update）。
+    const upd = prisma.diagramElement.update.mock.calls.map((x: any) => x[0]);
+    expect(upd.some((u: any) => u.where.id === 'de1')).toBe(true);
+    const de1Upd = upd.find((u: any) => u.where.id === 'de1');
+    expect(de1Upd.data.attachmentId).toBe('a1'); // 実在する添付は維持
+    // 未存在 de2 は id 指定で create（= 削除の undo で同一 id 復活）。未知添付は null。
+    const cre = prisma.diagramElement.create.mock.calls.map((x: any) => x[0].data);
+    const de2 = cre.find((d: any) => d.id === 'de2');
+    expect(de2).toBeTruthy();
+    expect(de2.projectId).toBe('p1');
+    expect(de2.attachmentId).toBeNull();
   });
 });
 

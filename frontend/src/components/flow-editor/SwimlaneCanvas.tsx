@@ -2272,9 +2272,17 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // --- 画像要素（DiagramElement.type=IMAGE）— flow ノード/注釈とは別系統 ---
   const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
   const flowId = flowData.id;
+  const prevImageFlowIdRef = useRef<string | null>(null);
   useEffect(() => {
     const pid = props.projectId;
     if (!pid || !flowId) return;
+    // フロー切替時は前フローの画像を即クリア（古い画像を新フローへ報告して親の
+    // baseline ガードを誤作動させないため）。imagesReloadKey だけの変化ではクリアしない
+    // （Undo 復元後の再同期では空フラッシュを挟まず復元結果へ差し替えたい）。
+    if (prevImageFlowIdRef.current !== flowId) {
+      prevImageFlowIdRef.current = flowId;
+      setImageElements([]);
+    }
     let cancelled = false;
     void diagramElementApi.list(pid, 'FLOW', flowId).then((list) => {
       if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));

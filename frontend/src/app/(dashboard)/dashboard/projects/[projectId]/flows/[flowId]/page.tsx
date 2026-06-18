@@ -71,7 +71,7 @@ import {
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
-import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
+import { diagramElementApi, type DiagramElementDto, type DiagramElementRestoreInput } from '@/lib/diagram-elements';
 import {
   flowDefinitionApi,
   EMPTY_DEFINITION,
@@ -2374,17 +2374,35 @@ export default function ProjectFlowDetailPage() {
     setImagesReported(true);
   }, []);
   const undoFlowId = flowData?.id ?? flowId;
+  // 履歴に入れる画像は安定射影に正規化する（createdAt 等の揮発フィールドを落とす）。
+  // これをしないと undo 復元後にサーバ再取得した形と snapshot がズレ、JSON 等価判定が
+  // 誤って「変化あり」になり、復元直後に余計な capture が走って redo が消える。
+  const flowImagesSnapshot = useMemo<DiagramElementRestoreInput[]>(
+    () =>
+      flowImages.map((e) => ({
+        id: e.id, type: e.type,
+        positionX: e.positionX, positionY: e.positionY,
+        width: e.width, height: e.height, rotation: e.rotation, z: e.z,
+        attachmentId: e.attachmentId, text: e.text, color: e.color,
+      })),
+    [flowImages],
+  );
+  // フロー切替で undo 基準をリセット（前フローの画像で baseline ガードが誤作動しないように）。
+  useEffect(() => {
+    setImagesReported(false);
+    setFlowImages([]);
+  }, [undoFlowId]);
   const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
     flowId: undoFlowId,
     flowData,
     getHeaders,
     refetch: refetchSilent,
-    // 画像要素も履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。
-    extraState: flowImages,
+    // 画像要素も履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。正規化済み射影を渡す。
+    extraState: flowImagesSnapshot,
     extraReady: imagesReported,
     restoreExtra: async (extra) => {
       if (!undoFlowId) return;
-      const images = Array.isArray(extra) ? (extra as DiagramElementDto[]) : [];
+      const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
       await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
       // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
       setImagesReloadKey((k) => k + 1);
