@@ -115,10 +115,21 @@ export function serializeSnapshot(flowData: FlowData): FlowSnapshotData {
   return { nodes, edges, laneHeights: flowData.laneHeights ?? {} };
 }
 
-// 2 スナップショットが等価か（捕捉ループ・無変化 push の抑止用）。
-// 安定したキー順で文字列化して比較する（serializeSnapshot がキー順を固定するので JSON で十分）。
-function snapshotsEqual(a: FlowSnapshotData, b: FlowSnapshotData): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+// オブジェクトキーを再帰的にソートして文字列化する（キー順非依存の安定比較）。
+// laneHeights / node.metadata は Postgres jsonb 由来でキー順が保存時に正規化され、
+// 楽観値（挿入順）と再取得値（jsonb順）で JSON.stringify がズレる。素の stringify 比較だと
+// 同値なのに「変化あり」と誤判定し、復元直後に余計な capture が走って redo が消える。
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  const obj = v as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+}
+
+// 2 スナップショットが等価か（捕捉ループ・無変化 push の抑止用）。キー順非依存で比較する。
+export function snapshotsEqual(a: FlowSnapshotData, b: FlowSnapshotData): boolean {
+  return stableStringify(a) === stableStringify(b);
 }
 
 export interface UseFlowUndoRedoOptions {

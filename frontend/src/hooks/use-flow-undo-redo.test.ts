@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { serializeSnapshot } from './use-flow-undo-redo';
+import { serializeSnapshot, snapshotsEqual } from './use-flow-undo-redo';
 import type { FlowData } from '@/components/flow-editor/flow-types';
 
 const baseFlow: FlowData = {
@@ -142,6 +142,24 @@ describe('serializeSnapshot', () => {
     expect(serializeSnapshot(withLanes).laneHeights).toEqual({ r1: 120, r2: 200 });
     // 未設定なら {}（undo 時に誤ってレーン幅をクリアしないよう、新スナップは必ず値を持つ）。
     expect(serializeSnapshot(baseFlow).laneHeights).toEqual({});
+  });
+
+  it('snapshotsEqual: jsonb 由来のキー順違い(laneHeights/metadata)を等価とみなす', () => {
+    const a = {
+      nodes: [{ id: 'n1', label: 'A', metadata: { x: 1, y: 2 } }],
+      edges: [],
+      laneHeights: { r1: 120, r2: 200 },
+    } as any;
+    // 同じ内容・キー順だけ違う（jsonb 再取得を模擬）。
+    const b = {
+      nodes: [{ id: 'n1', label: 'A', metadata: { y: 2, x: 1 } }],
+      edges: [],
+      laneHeights: { r2: 200, r1: 120 },
+    } as any;
+    expect(snapshotsEqual(a, b)).toBe(true);
+    // 値が違えば不等価。
+    const c = { ...a, laneHeights: { r1: 120, r2: 999 } } as any;
+    expect(snapshotsEqual(a, c)).toBe(false);
   });
 
   it('同一 flowData からは安定した（等価な）スナップショットを返す', () => {

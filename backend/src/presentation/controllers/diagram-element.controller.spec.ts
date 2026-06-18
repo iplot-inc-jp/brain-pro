@@ -101,7 +101,7 @@ describe('DiagramElementController', () => {
     } as any);
     // スナップショットに無い要素を削除（id 保持の差分置換）。
     expect(prisma.diagramElement.deleteMany).toHaveBeenCalledWith({
-      where: { projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1', id: { notIn: ['de1', 'de2'] } },
+      where: { projectId: 'p1', diagramKind: 'FLOW', diagramId: 'f1', type: 'IMAGE', id: { notIn: ['de1', 'de2'] } },
     });
     // 既存 de1 は update（クロステナント書込防止＝スコープ内 id のみ update）。
     const upd = prisma.diagramElement.update.mock.calls.map((x: any) => x[0]);

@@ -2291,7 +2291,14 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       if (cancelled) return;
       imagesLoadedRef.current = true; // 実ロード完了。これ以降の変化のみ親へ通知する。
       setImageElements(list.filter((e) => e.type === 'IMAGE'));
-    }).catch(() => { /* 取得失敗は致命ではない */ });
+    }).catch(() => {
+      // 取得失敗時も「ロード完了（画像0件）」として親へ通知する。さもないと
+      // imagesLoadedRef が false のまま → 親の extraReady が立たず、ノード/エッジ/レーン幅を
+      // 含む Undo 全体が baseline を作れず永久に無効化されてしまう。
+      if (cancelled) return;
+      imagesLoadedRef.current = true;
+      props.onImageElementsChange?.([]);
+    });
     return () => { cancelled = true; };
     // imagesReloadKey が変わると再取得（Undo/Redo 復元後にサーバの復元結果へ再同期）。
   }, [props.projectId, flowId, props.imagesReloadKey]);

@@ -176,9 +176,12 @@ export class DiagramElementController {
         select: { id: true },
       });
       const existingIds = new Set(existing.map((e) => e.id));
+      // 削除は IMAGE 要素のみに限定する。restore のスナップショット(extra)はキャンバスが
+      // ミラーする IMAGE 要素だけを含むため、type を絞らないと将来 IMAGE 以外の要素を
+      // 追加したとき undo がそれらを巻き添えで全削除してしまう（潜在的データ損失）。
       await tx.diagramElement.deleteMany({
         where: {
-          projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId,
+          projectId, diagramKind: dto.diagramKind, diagramId: dto.diagramId, type: 'IMAGE',
           ...(keepIds.length > 0 ? { id: { notIn: keepIds } } : {}),
         },
       });
