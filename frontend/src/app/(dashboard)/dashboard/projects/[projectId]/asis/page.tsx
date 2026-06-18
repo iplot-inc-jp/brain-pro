@@ -134,10 +134,16 @@ function FlowCard({
   onChangeTobe: (tobeFlowId: string | null) => void;
 }) {
   return (
-    <div className="group flex w-full flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-amber-400 hover:bg-amber-50/40">
+    <div
+      className="group flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-amber-400 hover:bg-amber-50/40"
+      onClick={onOpen}
+    >
       <button
         type="button"
-        onClick={onOpen}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen();
+        }}
         className="flex w-full items-start justify-between gap-2 text-left"
       >
         <span className="flex items-center gap-2 font-medium text-foreground">

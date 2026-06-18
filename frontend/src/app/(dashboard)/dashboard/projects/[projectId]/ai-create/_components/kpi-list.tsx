@@ -70,8 +70,8 @@ export function KpiList({
   kpis: KpiDto[];
   loading: boolean;
   error: string | null;
-  /** 直前にAI生成/プリセット追加されたKPI（ハイライト表示） */
-  highlightIds: Set<string>;
+  /** 直前にAI生成/プリセット追加されたKPI（ハイライト表示）。未指定時はハイライトなし。 */
+  highlightIds?: Set<string>;
   flows: BusinessFlowItem[];
   systems: SystemMaster[];
   roles: RoleItem[];
@@ -202,7 +202,7 @@ export function KpiList({
               <KpiCard
                 key={kpi.id}
                 kpi={kpi}
-                highlighted={highlightIds.has(kpi.id)}
+                highlighted={highlightIds?.has(kpi.id) ?? false}
                 busy={busyId === kpi.id}
                 onClick={() => setEditing(kpi)}
                 onAdopt={() => void handleAdopt(kpi)}

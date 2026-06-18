@@ -335,24 +335,28 @@ const SECTIONS: GuideSection[] = [
     ],
   },
   {
-    badge: 'AI作成',
-    title: 'AI作成（業務KPI・AI精度KPI）',
+    badge: 'KPI',
+    title: 'KPI（業務KPI・AI精度KPI）',
     accent: '#db2777',
     summary:
-      '業務フローを起点に、AI が業務KPI を生成します。各KPIには SMART の5軸採点が付き、AI精度KPI（認識精度・自動化率など）は対象システムに紐づけて、baseline / target / current と達成率で継続的に管理します。',
+      '業務KPIは業務フローのゴール指標として自分たちで決めて登録します（SMARTの5軸で質を確認）。一方 AI精度KPI（認識精度・自動化率など）はAIシステムの性能指標で、対象システムに紐づけて baseline / target / current と達成率で継続管理します。',
     features: [
       {
-        name: 'AI作成',
-        description: '業務フローからAIが業務KPI・AI精度KPIを生成します',
+        name: '業務KPI',
+        description: '業務フローのゴール指標を手動で作成・採用します（チームで決定）',
+        icon: Target,
+      },
+      {
+        name: 'AI精度KPI',
+        description: '認識精度・自動化率などAIシステムの精度指標を対象システムに紐づけて管理します',
         icon: Sparkles,
       },
     ],
     manualKeys: [],
     steps: [
-      '対象の業務フローを選びます。',
-      'フロー上の INPUT/OUTPUT・帳票を複数選択します。種別（帳票/データ/物体）の紐づけはその場で変更できます。',
-      'AI が業務KPI を生成します。各KPIには SMART（Specific / Measurable / Achievable / Relevant / Time-bound）の5軸採点とコメントが付くので、KPIの質をその場で確認できます。',
-      'AI精度KPI（認識精度・自動化率などのプリセット、またはAI生成）は対象システムに紐づけて登録します。',
+      '業務KPIは「＋手動で追加」で作成します。業務フローのゴール指標として、チームで議論して決めて登録します（区分は業務KPIに固定）。',
+      '各業務KPIには SMART（Specific / Measurable / Achievable / Relevant / Time-bound）の5軸採点とコメントが付くので、KPIの質をその場で確認できます。',
+      'AI精度KPI（認識精度・自動化率などのプリセット、またはAI生成）はAIシステムの性能指標として対象システムに紐づけて登録します。',
       '各KPIは baseline（現状値）・target（目標値）・current（最新値）と達成率で管理し、測定頻度（日次/週次/月次/四半期）と測定方法・オーナー（ロール）を設定して運用します。',
     ],
   },

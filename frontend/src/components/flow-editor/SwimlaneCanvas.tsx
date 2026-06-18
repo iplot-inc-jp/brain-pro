@@ -136,6 +136,7 @@ import {
 } from '@/lib/dfd';
 import type { SystemMaster } from '@/lib/masters';
 import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
+import { transposeFreeElement } from './flow-lane-transpose';
 import { nodeAttachmentApi } from '@/lib/node-attachments';
 import { uploadProjectFile } from '@/lib/upload';
 import { ImageElementNode } from '@/components/diagram/ImageElementNode';
@@ -2790,6 +2791,32 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedEdgeId, onDeleteEdge]);
 
+  // 選択中の自由配置要素（画像 / 注釈=DB/人/アイコン・付箋・コメント・スコープ）を
+  // Delete / Backspace で削除する。コンテンツノード（業務ブロック）は誤削除防止のため
+  // 対象外（従来どおりパネル/右クリックから削除）。React Flow の選択(node.selected)を見る。
+  const dragNodesRef = useRef(dragNodes);
+  dragNodesRef.current = dragNodes;
+  const onDeleteAnnotationKb = props.onDeleteAnnotation;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const selected = dragNodesRef.current.filter((n) => n.selected);
+      const imgIds = selected.filter((n) => n.type === 'imageElement').map((n) => n.id);
+      const annoIds = selected.filter((n) => n.type === 'annotation').map((n) => n.id);
+      if (imgIds.length === 0 && annoIds.length === 0) return;
+      e.preventDefault();
+      if (imgIds.length > 0) {
+        for (const id of imgIds) void diagramElementApi.remove(id);
+        setImageElements((prev) => prev.filter((x) => !imgIds.includes(x.id)));
+      }
+      for (const id of annoIds) onDeleteAnnotationKb?.(id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onDeleteAnnotationKb]);
+
   // 接続ドラッグを開始したノード/ハンドルを覚えておく。
   // - 向きの正規化（開始ノード → ドロップ先）に使う。
   // - 空き場所にドロップした時の「ノード自動生成＋接続」（②）で開始ハンドルを使う。
@@ -3190,6 +3217,61 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       laneHeightOverrides,
     } as Parameters<typeof computeFlowLayout>[3]) as unknown as FlowLayoutView;
 
+    // --- 自由配置要素（画像 / ICON注釈）をレーン相対で新しい向きへ移し替える ---
+    // 旧/新のレーン帯（横断方向）＋ time軸コンテンツ範囲（ノード中心の最小〜最大）を用意し、
+    // 「どのロールのどこにいたか」の相対位置を新しい向きのレーン幾何へ写像する。
+    const oldLaneBands = bands.lanes.map((l) => ({
+      roleId: l.roleId,
+      crossStart: (orientation === 'horizontal' ? l.top : l.left) ?? 0,
+      crossThickness: (orientation === 'horizontal' ? l.height : l.width) ?? 0,
+    }));
+    const newLaneBands = relaid.lanes.map((l) => ({
+      roleId: l.roleId,
+      crossStart: (next === 'horizontal' ? l.top : l.left) ?? 0,
+      crossThickness: (next === 'horizontal' ? l.height : l.width) ?? 0,
+    }));
+    let oldMainMin = Infinity;
+    let oldMainMax = -Infinity;
+    for (const n of flowData.nodes) {
+      const pos = effectivePositions.get(n.id) ?? { x: 0, y: 0 };
+      const w = typeof n.width === 'number' && n.width > 0 ? n.width : NODE_W;
+      const h = typeof n.height === 'number' && n.height > 0 ? n.height : NODE_H;
+      const c = orientation === 'horizontal' ? pos.x + w / 2 : pos.y + h / 2;
+      oldMainMin = Math.min(oldMainMin, c);
+      oldMainMax = Math.max(oldMainMax, c);
+    }
+    let newMainMin = Infinity;
+    let newMainMax = -Infinity;
+    for (const pn of relaid.nodes) {
+      const c = next === 'horizontal' ? pn.x : pn.y;
+      newMainMin = Math.min(newMainMin, c);
+      newMainMax = Math.max(newMainMax, c);
+    }
+    const transposeFree = (center: { x: number; y: number }, w: number, h: number) =>
+      transposeFreeElement({
+        center,
+        size: { w, h },
+        fromOrientation: orientation,
+        toOrientation: next,
+        oldLanes: oldLaneBands,
+        newLanes: newLaneBands,
+        oldMain: { min: oldMainMin, max: oldMainMax },
+        newMain: { min: newMainMin, max: newMainMax },
+      });
+
+    // 画像要素: レーン相対で移し替えて patch（レーンが取れなければ据え置き）。
+    if (imageElements.length > 0) {
+      const movedImages = imageElements.map((el) => {
+        const w = el.width ?? 200;
+        const h = el.height ?? 150;
+        const np = transposeFree({ x: el.positionX + w / 2, y: el.positionY + h / 2 }, w, h);
+        if (!np) return el;
+        void diagramElementApi.patch(el.id, np);
+        return { ...el, ...np };
+      });
+      setImageElements(movedImages);
+    }
+
     // --- 注釈（付箋/コメント/アイコン/スコープ）のアンカー相対追従 ---
     // flowData.nodes は再整形で動くが annotations は絶対座標のため置き去りになる。
     // 切替の直前に各注釈の「アンカー」＝最寄りのノード（矩形中心）またはエッジ（両端
@@ -3246,6 +3328,15 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         const SCOPE_MIN_PAD = 12;
         for (const a of annos) {
           const { w, h } = annotationSizeOf(a);
+          if (a.kind === 'ICON') {
+            // ICON（DB/人/アイコン）はレーン相対で移し替える。レーンが取れない場合のみ
+            // 下の最寄りアンカー追従へフォールバックする。
+            const np = transposeFree({ x: a.positionX + w / 2, y: a.positionY + h / 2 }, w, h);
+            if (np) {
+              props.onUpdateAnnotation(a.id, np);
+              continue;
+            }
+          }
           if (a.kind === 'SCOPE') {
             // 囲みノード集合 = 切替前に SCOPE 矩形へ中心が入っていたノード
             const memberIds: string[] = [];
@@ -3349,6 +3440,8 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     flowData.nodes,
     flowData.edges,
     effectivePositions,
+    bands,
+    imageElements,
     props,
     layoutSaving,
   ]);
