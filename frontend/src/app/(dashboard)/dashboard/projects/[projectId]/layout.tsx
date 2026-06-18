@@ -8,6 +8,7 @@ import { RoomProvider, roomIdForProject } from '@/lib/liveblocks.config'
 import { WhoIsOnline } from '@/components/presence/WhoIsOnline'
 import { LiveCursors } from '@/components/presence/LiveCursors'
 import { PresencePageSync } from '@/components/presence/PresencePageSync'
+import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard'
 
 /**
  * プロジェクト配下（/dashboard/projects/[projectId]/...）共通レイアウト。
@@ -44,6 +45,8 @@ export default function ProjectScopedLayout({
         id={roomIdForProject(projectId)}
         initialPresence={{ page: pathname, cursor: null, space: 'screen' }}
       >
+        {/* タブ非表示/アイドル時に切断して Liveblocks の「毎分課金」を抑える。 */}
+        <RoomConnectionGuard />
         <ClientSideSuspense fallback={null}>
           {() => (
             <>

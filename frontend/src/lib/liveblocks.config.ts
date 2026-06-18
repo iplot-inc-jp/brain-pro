@@ -34,6 +34,7 @@ export const liveblocksClient = createClient({
 
 export const {
   RoomProvider,
+  useRoom,
   useOthers,
   useSelf,
   useUpdateMyPresence,

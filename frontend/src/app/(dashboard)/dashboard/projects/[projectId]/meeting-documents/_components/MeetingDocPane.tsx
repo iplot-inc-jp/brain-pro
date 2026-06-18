@@ -15,6 +15,7 @@ import '@liveblocks/react-tiptap/styles.css';
 import { Loader2, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard';
 import type { MeetingDocument } from '@/lib/meeting-documents';
 
 interface Props {
@@ -34,6 +35,8 @@ export default function MeetingDocPane({ doc, canEdit, onSaveGoogleUrl }: Props)
       id={doc.roomId}
       initialPresence={{ page: `meetingdoc:${doc.id}`, cursor: null, space: 'screen' }}
     >
+      {/* タブ非表示/アイドル時は切断（Yjs は再接続時に再同期）。編集中は短めのアイドルにする。 */}
+      <RoomConnectionGuard idleMs={10 * 60 * 1000} />
       <ClientSideSuspense
         fallback={
           <div className="flex h-full items-center justify-center bg-white">
