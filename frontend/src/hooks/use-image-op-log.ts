@@ -6,7 +6,7 @@
 // 冪等な applyOps でサーバへ反映する。スナップショット比較・全件再取得・isRestoring 窓・jsonb
 // キー順といった脆い機構を一切持たないため、設計上 race を生まない（applyDelta は純粋関数で
 // ユニットテスト可能）。
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import {
   diagramElementApi,
@@ -27,17 +27,21 @@ interface OpEntry {
   seq: number;
 }
 
-export interface UseImageOpLogResult {
-  /** ジェスチャ確定時に順操作と逆操作を記録する（操作自体は呼び出し側が既に適用済み）。 */
-  recordImageOp: (doOp: DiagramElementOp, undoOp: DiagramElementOp) => void;
+/** 親（page）が ⌘Z ルーターから画像Undoを駆動するための命令的ハンドル。 */
+export interface ImageUndoApi {
   undo: () => void;
   redo: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
-  /** undo で取り消される操作の seq（無ければ null）。ルーターがチャンネル選択に使う。 */
+  /** undo で取り消される操作の seq（無ければ null）。 */
   peekUndoSeq: () => number | null;
   /** redo で再適用される操作の seq（無ければ null）。 */
   peekRedoSeq: () => number | null;
+}
+
+export interface UseImageOpLogResult extends ImageUndoApi {
+  /** ジェスチャ確定時に順操作と逆操作を記録する（操作自体は呼び出し側が既に適用済み）。 */
+  recordImageOp: (doOp: DiagramElementOp, undoOp: DiagramElementOp) => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export function useImageOpLog(params: {
@@ -51,6 +55,14 @@ export function useImageOpLog(params: {
   const futureRef = useRef<OpEntry[]>([]);
   const [, force] = useState(0);
   const rerender = useCallback(() => force((n) => n + 1), []);
+
+  // フロー切替（diagramId 変更）で op-log を破棄する。SwimlaneCanvasInner はドリルダウンで
+  // 再マウントされず diagramId だけが変わるため、これをしないと別フローの操作を取り消してしまう。
+  useEffect(() => {
+    pastRef.current = [];
+    futureRef.current = [];
+    rerender();
+  }, [diagramId, rerender]);
 
   // 1 op をローカル(applyDelta)＋サーバ(applyOps 冪等)へ反映。サーバ失敗はログのみ（ローカルは反映済み）。
   const apply = useCallback(

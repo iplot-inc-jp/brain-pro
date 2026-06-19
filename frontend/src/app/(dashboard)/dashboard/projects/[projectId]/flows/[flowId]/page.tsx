@@ -71,7 +71,7 @@ import {
 import { InformationTypePicker } from '@/components/masters/InformationTypePicker';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
 import { useFlowUndoRedo } from '@/hooks/use-flow-undo-redo';
-import { diagramElementApi, type DiagramElementDto, type DiagramElementRestoreInput } from '@/lib/diagram-elements';
+import { type ImageUndoApi } from '@/hooks/use-image-op-log';
 import {
   flowDefinitionApi,
   EMPTY_DEFINITION,
@@ -2363,64 +2363,56 @@ export default function ProjectFlowDetailPage() {
   // Undo/Redo は「今表示しているフロー」を対象にする。子フローへドリルダウン中は
   // flowData.id がルートの params.flowId と異なる（router は変えず flowData だけ差し替える）ため、
   // ルート固定だと ⌘Z で親フローに飛んでしまう。表示中フロー id を渡してフローごとに履歴を持つ。
-  // 画像要素(DiagramElement)を Undo 履歴へ含めるためのミラー state（SwimlaneCanvas が通知する）。
-  const [flowImages, setFlowImages] = useState<DiagramElementDto[]>([]);
-  // 画像の初回ロード完了フラグ（baseline を画像込みで確立させ、初回ロードを履歴に乗せない）。
-  const [imagesReported, setImagesReported] = useState(false);
-  // Undo/Redo の画像復元後、SwimlaneCanvas にサーバ再取得させるためのキー。
-  const [imagesReloadKey, setImagesReloadKey] = useState(0);
-  const handleImageElementsChange = useCallback((els: DiagramElementDto[]) => {
-    setFlowImages(els);
-    setImagesReported(true);
-  }, []);
   const undoFlowId = flowData?.id ?? flowId;
-  // 履歴に入れる画像は安定射影に正規化する（createdAt 等の揮発フィールドを落とす）。
-  // これをしないと undo 復元後にサーバ再取得した形と snapshot がズレ、JSON 等価判定が
-  // 誤って「変化あり」になり、復元直後に余計な capture が走って redo が消える。
-  // 画像 DTO → 安定射影（createdAt 等の揮発フィールドを落とす）。capture/restore で共通利用。
-  const toRestoreInput = useCallback(
-    (e: DiagramElementDto): DiagramElementRestoreInput => ({
-      id: e.id, type: e.type,
-      positionX: e.positionX, positionY: e.positionY,
-      width: e.width, height: e.height, rotation: e.rotation, z: e.z,
-      attachmentId: e.attachmentId, text: e.text, color: e.color,
-    }),
-    [],
-  );
-  const flowImagesSnapshot = useMemo<DiagramElementRestoreInput[]>(
-    () => flowImages.map(toRestoreInput),
-    [flowImages, toRestoreInput],
-  );
-  // フロー切替で undo 基準をリセット（前フローの画像で baseline ガードが誤作動しないように）。
-  useEffect(() => {
-    setImagesReported(false);
-    setFlowImages([]);
-  }, [undoFlowId]);
-  // 画像要素の Undo/Redo は再設計まで一時無効。デプロイ前アドバーサリアル・レビューで、非同期
-  // 再同期・jsonbキー順・画像ロード失敗パスに起因する data-loss / redo 破壊が繰り返し検出された
-  // ため。レーン幅 Undo・スナップバック修正・アイコン拡大は本フラグと無関係に有効。画像自体の
-  // 作成/移動/リサイズ/削除も通常どおり動く（Cmd+Z で戻せないだけ）。再有効化は true に。
-  const IMAGE_UNDO_ENABLED = false;
-  const { canUndo, canRedo, undo, redo } = useFlowUndoRedo({
+
+  // 画像Undo（op-log）は SwimlaneCanvas 内の useImageOpLog が保持する。ここでは命令的ハンドルと
+  // 操作可否だけを受け取り、フローのスナップショット Undo と ⌘Z を seq で統合する。
+  const imageUndoApiRef = useRef<ImageUndoApi | null>(null);
+  const [imgCanUndo, setImgCanUndo] = useState(false);
+  const [imgCanRedo, setImgCanRedo] = useState(false);
+  const handleImageUndoState = useCallback((s: { canUndo: boolean; canRedo: boolean }) => {
+    setImgCanUndo(s.canUndo);
+    setImgCanRedo(s.canRedo);
+  }, []);
+
+  const {
+    canUndo: flowCanUndo,
+    canRedo: flowCanRedo,
+    undo: flowUndo,
+    redo: flowRedo,
+    peekUndoSeq: flowPeekUndo,
+    peekRedoSeq: flowPeekRedo,
+  } = useFlowUndoRedo({
     flowId: undoFlowId,
     flowData,
     getHeaders,
     refetch: refetchSilent,
-    // 画像要素を履歴対象に含める（移動/リサイズ/追加/削除を Cmd+Z で戻せる）。無効時は undefined。
-    extraState: IMAGE_UNDO_ENABLED ? flowImagesSnapshot : undefined,
-    extraReady: IMAGE_UNDO_ENABLED ? imagesReported : undefined,
-    restoreExtra: IMAGE_UNDO_ENABLED
-      ? async (extra) => {
-          if (!undoFlowId) return undefined;
-          const images = Array.isArray(extra) ? (extra as DiagramElementRestoreInput[]) : [];
-          const restored = await diagramElementApi.restore(projectId, 'FLOW', undoFlowId, images);
-          // SwimlaneCanvas にサーバの復元結果を再読込させる（楽観 state と DB を再同期）。
-          setImagesReloadKey((k) => k + 1);
-          // サーバ正規化後の結果（例: 削除済み添付→null）を返し、フックが snapshot.extra を上書き。
-          return restored.map(toRestoreInput);
-        }
-      : undefined,
   });
+
+  // ⌘Z ルーター: フロー履歴と画像 op-log のうち「直近の操作」を seq で選んで取り消す/やり直す。
+  // seq が大きいほど新しい。undo は大きい seq から、redo は（mirror として）小さい seq から戻す。
+  // 一方が端（null）なら他方へ振る。両方端なら no-op。
+  const combinedUndo = useCallback(() => {
+    const img = imageUndoApiRef.current;
+    const imgSeq = img ? img.peekUndoSeq() : null;
+    const flowSeq = flowPeekUndo();
+    if (imgSeq === null && flowSeq === null) return;
+    if (flowSeq === null || (imgSeq !== null && imgSeq > flowSeq)) img?.undo();
+    else flowUndo();
+  }, [flowUndo, flowPeekUndo]);
+  const combinedRedo = useCallback(() => {
+    const img = imageUndoApiRef.current;
+    const imgSeq = img ? img.peekRedoSeq() : null;
+    const flowSeq = flowPeekRedo();
+    if (imgSeq === null && flowSeq === null) return;
+    if (flowSeq === null || (imgSeq !== null && imgSeq < flowSeq)) img?.redo();
+    else flowRedo();
+  }, [flowRedo, flowPeekRedo]);
+
+  const canUndo = flowCanUndo || imgCanUndo;
+  const canRedo = flowCanRedo || imgCanRedo;
+  const undo = combinedUndo;
+  const redo = combinedRedo;
 
   // ⌘Z=Undo / ⌘⇧Z（＋⌘Y）=Redo の専用キーバインド。
   // 共有の useKeyboardShortcuts は mod 系を「入力中でも常に発火」させる仕様（mod+s/i 用）のため、
@@ -2844,8 +2836,8 @@ export default function ProjectFlowDetailPage() {
           flowData={flowData}
           roles={visibleRoles}
           projectId={projectId}
-          onImageElementsChange={handleImageElementsChange}
-          imagesReloadKey={imagesReloadKey}
+          onImageUndoStateChange={handleImageUndoState}
+          imageUndoApiRef={imageUndoApiRef}
           otherFlows={otherFlows}
           informationTypes={informationTypes}
           onSaveNodeInformationLinks={ro(handleSaveNodeInformationLinks)}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlowData } from '@/components/flow-editor/flow-types';
+import { nextUndoSeq } from './undo-seq';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -172,6 +173,10 @@ export interface UseFlowUndoRedoResult {
   redo: () => void;
   /** restore 由来の再取得中フラグ（capture を抑止する間 true）。 */
   isRestoring: boolean;
+  /** 次の undo が取り消す捕捉の seq（端＝null）。画像 op-log と比較して ⌘Z の振り先を決める。 */
+  peekUndoSeq: () => number | null;
+  /** 次の redo が再適用する捕捉の seq（端＝null）。 */
+  peekRedoSeq: () => number | null;
 }
 
 // ===========================================
@@ -214,6 +219,11 @@ export function useFlowUndoRedo(
   const indexRef = useRef(index);
   stackRef.current = stack;
   indexRef.current = index;
+  // stack と同順・同長で各エントリを「いつ捕捉したか」の単調 seq を保持する（画像 op-log と
+  // 横断比較して ⌘Z の振り先を決める）。hydrate 由来（前セッションの履歴）は 0＝最古とし、
+  // 今セッションの新規操作（seq≥1）が必ず上回るようにする。undo/redo は index だけ動かすので
+  // この配列は不変。capture/baseline/reset/hydrate で stack と同じ加工を施し整合を保つ。
+  const seqStackRef = useRef<number[]>([]);
 
   const storageKey = useMemo(
     () => (flowId ? `flow-undo-${flowId}` : null),
@@ -333,6 +343,7 @@ export function useFlowUndoRedo(
     setIndex(0);
     stackRef.current = [];
     indexRef.current = 0;
+    seqStackRef.current = [];
   }, [flowId]);
 
   // ===========================================
@@ -367,6 +378,7 @@ export function useFlowUndoRedo(
             if (!cancelled) {
               setStack(s);
               setIndex(i);
+              seqStackRef.current = s.map(() => 0); // 復元分は最古扱い
               restored = true;
             }
           }
@@ -393,6 +405,7 @@ export function useFlowUndoRedo(
             if (dbStack.length > 0) {
               setStack(dbStack);
               setIndex(dbStack.length - 1);
+              seqStackRef.current = dbStack.map(() => 0); // 復元分は最古扱い
               persist(dbStack, dbStack.length - 1);
               restored = true;
             }
@@ -441,6 +454,7 @@ export function useFlowUndoRedo(
       if (extraReadyRef.current === false) return;
       setStack([snap]);
       setIndex(0);
+      seqStackRef.current = [0]; // baseline は操作ではない＝最古
       persist([snap], 0);
       hydratedFlowIdRef.current = flowId;
       return;
@@ -460,6 +474,9 @@ export function useFlowUndoRedo(
 
       const next = [...base, snap].slice(-MAX_STACK);
       const nextIndex = next.length - 1;
+      // seqStack も stack と同じ加工（index+1 で truncate → 新 seq 追記 → 同じ -MAX_STACK）。
+      const seqBase = seqStackRef.current.slice(0, indexRef.current + 1);
+      seqStackRef.current = [...seqBase, nextUndoSeq()].slice(-MAX_STACK);
       setStack(next);
       setIndex(nextIndex);
       persist(next, nextIndex);
@@ -498,5 +515,19 @@ export function useFlowUndoRedo(
   const canUndo = index > 0;
   const canRedo = index < stack.length - 1;
 
-  return { canUndo, canRedo, undo, redo, isRestoring };
+  // ルーター用 peek（呼び出し時に最新 ref を読む）。undo は stack[index] を生んだ捕捉を、
+  // redo は stack[index+1] を生んだ捕捉を取り消す/再適用するので、その seq を返す。
+  const peekUndoSeq = useCallback(
+    () => (indexRef.current > 0 ? seqStackRef.current[indexRef.current] ?? null : null),
+    [],
+  );
+  const peekRedoSeq = useCallback(
+    () =>
+      indexRef.current < stackRef.current.length - 1
+        ? seqStackRef.current[indexRef.current + 1] ?? null
+        : null,
+    [],
+  );
+
+  return { canUndo, canRedo, undo, redo, isRestoring, peekUndoSeq, peekRedoSeq };
 }

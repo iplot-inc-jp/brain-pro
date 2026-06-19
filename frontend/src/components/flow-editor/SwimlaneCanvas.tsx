@@ -25,6 +25,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type MouseEvent as ReactMouseEvent,
   type DragEvent as ReactDragEvent,
+  type MutableRefObject,
 } from 'react';
 import {
   ReactFlow,
@@ -135,7 +136,13 @@ import {
   type InformationType,
 } from '@/lib/dfd';
 import type { SystemMaster } from '@/lib/masters';
-import { diagramElementApi, type DiagramElementDto } from '@/lib/diagram-elements';
+import {
+  diagramElementApi,
+  type DiagramElementDto,
+  type DiagramElementRestoreInput,
+  type DiagramElementOp,
+} from '@/lib/diagram-elements';
+import { useImageOpLog, type ImageUndoApi } from '@/hooks/use-image-op-log';
 import { transposeFreeElement } from './flow-lane-transpose';
 import { nodeAttachmentApi } from '@/lib/node-attachments';
 import { uploadProjectFile } from '@/lib/upload';
@@ -222,10 +229,10 @@ export interface SwimlaneCanvasProps {
   roles: Role[];
   /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
   projectId?: string;
-  /** 画像要素(DiagramElement)が変わるたびに親へ通知する（Undo 用にスナップショットへ含める）。 */
-  onImageElementsChange?: (elements: DiagramElementDto[]) => void;
-  /** インクリメントすると画像要素をサーバから再取得する（Undo 復元後の再同期）。 */
-  imagesReloadKey?: number;
+  /** 画像Undo(op-log)の操作可否が変わるたびに親へ通知（ツールバー活性/⌘Z のチャンネル統合用）。 */
+  onImageUndoStateChange?: (s: { canUndo: boolean; canRedo: boolean }) => void;
+  /** 親が ⌘Z ルーターから画像Undoの undo/redo/peek を呼ぶための命令的ハンドル。 */
+  imageUndoApiRef?: MutableRefObject<ImageUndoApi | null>;
   /** 連携先フロー選択用の、同プロジェクトの他フロー一覧。 */
   otherFlows?: FlowSummary[];
   onBack?: () => void;
@@ -2272,46 +2279,70 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // --- 画像要素（DiagramElement.type=IMAGE）— flow ノード/注釈とは別系統 ---
   const [imageElements, setImageElements] = useState<DiagramElementDto[]>([]);
   const flowId = flowData.id;
-  const prevImageFlowIdRef = useRef<string | null>(null);
-  // 実ロード完了フラグ。マウント/フロー切替の空配列は「未ロード」として親へ通知しない。
-  const imagesLoadedRef = useRef(false);
+  // 現在の画像配列の最新参照。イベントハンドラ/効果から pre-mutation 値を同期的に読み、
+  // op の逆操作（移動前座標・削除前 DTO 等）を取りこぼさず記録するために使う。
+  const imageElementsRef = useRef<DiagramElementDto[]>(imageElements);
+  imageElementsRef.current = imageElements;
+
+  // 画像 op-log（スナップショット比較ではなく操作ログで Undo/Redo）。各 mutation site が
+  // do/undo ペアを記録し、undo/redo は applyDelta（純粋）＋ applyOps（冪等）で反映する。
+  // フロー切替（diagramId 変化）時の履歴破棄はフック内部で行う。
+  const imageOps = useImageOpLog({
+    projectId: props.projectId,
+    diagramId: flowId,
+    setImageElements,
+  });
+  const recordImageOpRef = useRef(imageOps.recordImageOp);
+  recordImageOpRef.current = imageOps.recordImageOp;
+
+  // 画像 DTO → 安定射影（op 要素ペイロード用。createdAt 等の揮発フィールドを落とす）。
+  const toRestoreInput = useCallback(
+    (e: DiagramElementDto): DiagramElementRestoreInput => ({
+      id: e.id, type: e.type,
+      positionX: e.positionX, positionY: e.positionY,
+      width: e.width, height: e.height, rotation: e.rotation, z: e.z,
+      attachmentId: e.attachmentId, text: e.text, color: e.color,
+    }),
+    [],
+  );
+
+  // フロー切替で画像をサーバから読み直す（op-log 履歴の破棄はフック側が diagramId で行う）。
+  // 取得失敗時は空のまま（旧実装の「親 baseline を巻き込む空通知」は廃止）。
   useEffect(() => {
     const pid = props.projectId;
+    setImageElements([]);
     if (!pid || !flowId) return;
-    // フロー切替時は前フローの画像を即クリアし未ロード扱いに戻す（古い画像を新フローへ
-    // 報告して親の baseline ガードを誤作動させないため）。imagesReloadKey だけの変化では
-    // クリアしない（Undo 復元後の再同期は空フラッシュを挟まず復元結果へ差し替えたい）。
-    if (prevImageFlowIdRef.current !== flowId) {
-      prevImageFlowIdRef.current = flowId;
-      imagesLoadedRef.current = false;
-      setImageElements([]);
-    }
     let cancelled = false;
-    void diagramElementApi.list(pid, 'FLOW', flowId).then((list) => {
-      if (cancelled) return;
-      imagesLoadedRef.current = true; // 実ロード完了。これ以降の変化のみ親へ通知する。
-      setImageElements(list.filter((e) => e.type === 'IMAGE'));
-    }).catch(() => {
-      // 取得失敗時も「ロード完了（画像0件）」として親へ通知する。さもないと
-      // imagesLoadedRef が false のまま → 親の extraReady が立たず、ノード/エッジ/レーン幅を
-      // 含む Undo 全体が baseline を作れず永久に無効化されてしまう。
-      if (cancelled) return;
-      imagesLoadedRef.current = true;
-      props.onImageElementsChange?.([]);
-    });
+    void diagramElementApi
+      .list(pid, 'FLOW', flowId)
+      .then((list) => {
+        if (!cancelled) setImageElements(list.filter((e) => e.type === 'IMAGE'));
+      })
+      .catch(() => {
+        /* 取得失敗は致命ではない（空のまま表示） */
+      });
     return () => { cancelled = true; };
-    // imagesReloadKey が変わると再取得（Undo/Redo 復元後にサーバの復元結果へ再同期）。
-  }, [props.projectId, flowId, props.imagesReloadKey]);
+  }, [props.projectId, flowId]);
 
-  // 画像要素の変化を親へ通知（親が Undo 用ミラー state を保持しスナップショットへ含める）。
-  const onImageElementsChange = props.onImageElementsChange;
+  // 画像Undoの操作可否＋命令的ハンドルを親へ公開（⌘Z ルーター/ツールバー活性の統合用）。
+  const onImageUndoStateChange = props.onImageUndoStateChange;
+  const imageUndoApiRef = props.imageUndoApiRef;
+  const {
+    undo: imageUndo, redo: imageRedo,
+    peekUndoSeq: imagePeekUndo, peekRedoSeq: imagePeekRedo,
+    canUndo: imageCanUndo, canRedo: imageCanRedo,
+  } = imageOps;
   useEffect(() => {
-    // 実ロード完了前の空配列（マウント/フロー切替クリア）は通知しない。通知すると親の
-    // extraReady が画像ロード前に true になり、初回ロード自体が履歴の1ステップに乗り
-    // 初回 Cmd+Z で全画像が消える。ロード後・編集後の変化だけを通知する。
-    if (!imagesLoadedRef.current) return;
-    onImageElementsChange?.(imageElements);
-  }, [imageElements, onImageElementsChange]);
+    onImageUndoStateChange?.({ canUndo: imageCanUndo, canRedo: imageCanRedo });
+  }, [onImageUndoStateChange, imageCanUndo, imageCanRedo]);
+  useEffect(() => {
+    if (!imageUndoApiRef) return;
+    imageUndoApiRef.current = {
+      undo: imageUndo, redo: imageRedo,
+      peekUndoSeq: imagePeekUndo, peekRedoSeq: imagePeekRedo,
+    };
+    return () => { imageUndoApiRef.current = null; };
+  }, [imageUndoApiRef, imageUndo, imageRedo, imagePeekUndo, imagePeekRedo]);
 
   // --- ノードインスペクタパネル（content ノード単一クリック時） ---
   const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
@@ -2689,6 +2720,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           url: nodeAttachmentApi.fileUrl(e.attachmentId!),
           onResizeEnd: (id: string, size: { width: number; height: number }) => {
             void diagramElementApi.patch(id, { width: size.width, height: size.height });
+            // 逆操作＝リサイズ前のサイズへ。e は useMemo[imageElements] 時点（リサイズ前）の値。
+            const before = toRestoreInput(e);
+            recordImageOpRef.current(
+              { type: 'upsert', elements: [{ ...before, width: size.width, height: size.height }] },
+              { type: 'upsert', elements: [before] },
+            );
             setImageElements((prev) =>
               prev.map((x) => (x.id === id ? { ...x, width: size.width, height: size.height } : x)),
             );
@@ -2844,8 +2881,16 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       if (imgIds.length === 0 && annoIds.length === 0) return;
       e.preventDefault();
       if (imgIds.length > 0) {
+        // 逆操作（id 保持で復活）のため削除前 DTO を ref から同期取得してから消す。
+        const removed = imageElementsRef.current.filter((x) => imgIds.includes(x.id));
         for (const id of imgIds) void diagramElementApi.remove(id);
         setImageElements((prev) => prev.filter((x) => !imgIds.includes(x.id)));
+        if (removed.length > 0) {
+          recordImageOpRef.current(
+            { type: 'delete', ids: removed.map((x) => x.id) },
+            { type: 'upsert', elements: removed.map(toRestoreInput) },
+          );
+        }
       }
       for (const id of annoIds) onDeleteAnnotationKb?.(id);
     };
@@ -3062,6 +3107,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         height: 150,
       });
       setImageElements((prev) => [...prev, created]);
+      // 逆操作＝この id を削除。redo は同 id で upsert（id 保持で復活）。
+      recordImageOpRef.current(
+        { type: 'upsert', elements: [toRestoreInput(created)] },
+        { type: 'delete', ids: [created.id] },
+      );
     } catch {
       /* 作成失敗は致命ではない */
     }
@@ -3129,9 +3179,18 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       if (node.type === 'imageElement') {
         const np = { positionX: node.position.x, positionY: node.position.y };
         void diagramElementApi.patch(node.id, np);
+        // 逆操作のため移動前座標を ref から同期取得。
+        const before = imageElementsRef.current.find((el) => el.id === node.id);
         // ローカル state も更新する。さもないと imageElementRfNodes が旧座標のままになり、
         // 次の allRfNodes 再同期(setDragNodes)でドラッグ位置が巻き戻る（スナップバック）。
         setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
+        if (before) {
+          const beforeInput = toRestoreInput(before);
+          recordImageOpRef.current(
+            { type: 'upsert', elements: [{ ...beforeInput, ...np }] },
+            { type: 'upsert', elements: [beforeInput] },
+          );
+        }
         return;
       }
       if (node.type !== 'content') return;
@@ -3168,6 +3227,9 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   // 再取得・整形・縦横転置で元レーンへ戻る）を防ぐ。
   const handleSelectionDragStop = useCallback(
     (_evt: unknown, nodes: Node[]) => {
+      // 複数選択ドラッグ内の画像移動は 1 つの op にまとめる（1 回の ⌘Z でまとめて戻す）。
+      const imgDoEls: DiagramElementRestoreInput[] = [];
+      const imgUndoEls: DiagramElementRestoreInput[] = [];
       for (const node of nodes) {
         if (node.type === 'content') {
           const w = node.width ?? NODE_W;
@@ -3194,8 +3256,20 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           // 画像要素は DiagramElement API へ位置を保存する（flow バッチとは独立）。
           const np = { positionX: node.position.x, positionY: node.position.y };
           void diagramElementApi.patch(node.id, np);
+          const before = imageElementsRef.current.find((el) => el.id === node.id);
           setImageElements((prev) => prev.map((el) => (el.id === node.id ? { ...el, ...np } : el)));
+          if (before) {
+            const beforeInput = toRestoreInput(before);
+            imgDoEls.push({ ...beforeInput, ...np });
+            imgUndoEls.push(beforeInput);
+          }
         }
+      }
+      if (imgDoEls.length > 0) {
+        recordImageOpRef.current(
+          { type: 'upsert', elements: imgDoEls },
+          { type: 'upsert', elements: imgUndoEls },
+        );
       }
     },
     [resolveDroppedRoleId, flowData.nodes, props],
@@ -3303,15 +3377,27 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
     // 画像要素: レーン相対で移し替えて patch（レーンが取れなければ据え置き）。
     if (imageElements.length > 0) {
+      const tDoEls: DiagramElementRestoreInput[] = [];
+      const tUndoEls: DiagramElementRestoreInput[] = [];
       const movedImages = imageElements.map((el) => {
         const w = el.width ?? 200;
         const h = el.height ?? 150;
         const np = transposeFree({ x: el.positionX + w / 2, y: el.positionY + h / 2 }, w, h);
         if (!np) return el;
         void diagramElementApi.patch(el.id, np);
+        const beforeInput = toRestoreInput(el);
+        tDoEls.push({ ...beforeInput, ...np });
+        tUndoEls.push(beforeInput);
         return { ...el, ...np };
       });
       setImageElements(movedImages);
+      // 転置で実際に動いた画像だけを 1 op に束ねる（1 回の ⌘Z でまとめて戻す）。
+      if (tDoEls.length > 0) {
+        recordImageOpRef.current(
+          { type: 'upsert', elements: tDoEls },
+          { type: 'upsert', elements: tUndoEls },
+        );
+      }
     }
 
     // --- 注釈（付箋/コメント/アイコン/スコープ）のアンカー相対追従 ---
