@@ -967,7 +967,17 @@ export default function DashboardLayout({
       {
         label: '推進',
         items: [
-          { name: 'ステークホルダーマネジメント', href: `${base}/stakeholder-management`, icon: Users },
+          {
+            name: 'ステークホルダーマネジメント',
+            href: `${base}/stakeholder-management`,
+            icon: Users,
+            children: [
+              { name: 'ステークホルダー', tab: 'stakeholders' },
+              { name: '関心ごと', tab: 'interests' },
+              { name: '会議・報告', tab: 'meetings' },
+              { name: '導入状況', tab: 'adoption' },
+            ],
+          },
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'アジャイル', href: `${base}/tasks/agile`, icon: Layers },
@@ -1045,18 +1055,24 @@ export default function DashboardLayout({
       >
         {/* ===== 展開表示（モバイルは常にこちら。lg は非縮小時のみ） ===== */}
         <div className={cn('flex flex-col h-full', sidebarCollapsed && 'lg:hidden')}>
-          {/* Logo */}
+          {/* Logo（プロジェクトを開いている間は左上をプロジェクト名にする） */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-            <Link href="/dashboard" className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
+            <Link
+              href={projectId ? `/dashboard/projects/${projectId}` : '/dashboard'}
+              title={projectId ? projectName || 'プロジェクト' : 'Brain Pro'}
+              className="flex min-w-0 flex-1 items-center gap-3"
+            >
+              <div className="w-9 h-9 flex-shrink-0 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
                 <Database className="h-5 w-5 text-primary" />
               </div>
-              <span className="font-mono text-lg font-semibold text-foreground">Brain Pro</span>
+              <span className="truncate font-mono text-lg font-semibold text-foreground">
+                {projectId ? projectName || 'プロジェクト' : 'Brain Pro'}
+              </span>
             </Link>
             <button
               onClick={() => setSidebarCollapsed(true)}
               title="メニューを縮小"
-              className="hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              className="ml-1 hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0"
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
@@ -1081,15 +1097,9 @@ export default function DashboardLayout({
               )
             })}
 
-            {/* プロジェクト名ヘッダー */}
-            {projectId && (
-              <div className="pt-4 pb-2 px-1">
-                <div className="section-title text-xs">
-                  <FolderOpen className="h-3.5 w-3.5 text-primary" />
-                  <span className="truncate">{projectName || 'プロジェクト'}</span>
-                </div>
-              </div>
-            )}
+            {/* プロジェクト名は左上ロゴ位置に表示するため、ここでの重複ヘッダーは廃止。
+                プロジェクトを開いている間の区切りとして薄い境界線だけ残す。 */}
+            {projectId && <div className="pt-2 mb-1 border-t border-border/60" />}
 
             {/* ステージごとにグループ化したプロジェクトナビ
                 （業務フローブラウザは「現状把握」グループ配下に階層表示する。下記参照） */}

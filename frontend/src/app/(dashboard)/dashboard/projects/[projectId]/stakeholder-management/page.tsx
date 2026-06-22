@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
+import { useTabParam } from '@/hooks/use-tab-param';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
@@ -52,7 +53,9 @@ export default function StakeholderManagementPage() {
   const params = useParams();
   const projectId = params.projectId as string;
   const { canEdit } = useReadOnly();
-  const [active, setActive] = useState<TabKey>('stakeholders');
+  // タブを URL ?tab= で駆動し、左サイドメニューのアコーディオン子項目と双方向同期。
+  const [activeTab, setActive] = useTabParam('stakeholders');
+  const active = activeTab as TabKey;
   const [refreshKey, setRefreshKey] = useState(0);
 
   return (
