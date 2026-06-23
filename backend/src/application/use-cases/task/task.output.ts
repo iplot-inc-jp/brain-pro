@@ -41,6 +41,10 @@ export interface TaskOutput {
   milestone: string | null;
   category: string | null;
   order: number;
+  /** 達成条件（自由記述）。未設定は null。 */
+  acceptanceCriteria: string | null;
+  /** 領域（SubProject）ID。未設定は null。 */
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,6 +102,8 @@ export function toTaskOutput(task: Task): TaskOutput {
     milestone: task.milestone,
     category: task.category,
     order: task.order,
+    acceptanceCriteria: task.acceptanceCriteria,
+    subProjectId: task.subProjectId,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   };

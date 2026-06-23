@@ -119,6 +119,7 @@ import {
   RemoveTaskDependencyUseCase,
   ImportBacklogTasksUseCase,
   ImportJiraTasksUseCase,
+  GenerateTasksFromIssueTreeUseCase,
   // 外部トラッカー Webhook（秘密の生成/再生成/無効化/URL取得）
   ManageTrackerWebhookUseCase,
   // 外部トラッカー Webhook 受信（token検証→単一import / 削除=クローズ）
@@ -444,6 +445,7 @@ import {
   NodeAttachmentByIdController,
 } from './presentation/controllers/node-attachment.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
+import { ExcelTaskImportService } from './infrastructure/services/excel-task-import.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
@@ -890,6 +892,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     DeleteTaskUseCase,
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
+    GenerateTasksFromIssueTreeUseCase,
     ImportBacklogTasksUseCase,
     ImportJiraTasksUseCase,
     // 外部トラッカー Webhook 秘密の管理
@@ -1070,6 +1073,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // ナレッジグラフ バッチ取り込み（Blob 保管 / 型別抽出 / 1ファイルパイプライン）
     BlobStorageService,
     FileExtractionService,
+    ExcelTaskImportService,
     KnowledgeIngestionService,
     KnowledgeDocumentExtractService,
     // Google Drive ソースアダプタ（Phase 3）

@@ -140,6 +140,32 @@ export function JiraImportDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* 対応フォーマット（CSVの列）の案内 */}
+        <details className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 text-sm text-gray-600">
+          <summary className="cursor-pointer font-medium text-gray-700">
+            対応フォーマット（CSVの列）
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <p>
+              Jira の Issue 一覧 → Export → CSV（推奨: CSV(all fields)）の出力を使えます。
+              ヘッダ行を見て次の列を自動対応します（日本語/英語の別名可）:
+            </p>
+            <ul className="ml-4 list-disc space-y-0.5 text-xs">
+              <li><b>Summary</b>（件名 / タイトル）… <b>必須</b></li>
+              <li>Description（詳細 / 説明）</li>
+              <li>Status（状態 / ステータス）／ Priority（優先度）</li>
+              <li>Issue Type（種別 / 課題種別）</li>
+              <li>Assignee（担当者）</li>
+              <li>Start date（開始日）／ Due date（期限 / 締切）… 日付列</li>
+              <li>Issue key（キー）… 例 ABC-34 ／ <b>Parent</b>（親）… 親子関係(parentId)に解決</li>
+              <li>Epic Link（Epic）… epic への紐付けに解決</li>
+            </ul>
+            <p className="text-xs text-gray-400">
+              ※ Issue key は <code>JIRA:&lt;key&gt;</code> として保持し、再取込で冪等に更新します。未知の状態/優先度は既定値になります。
+            </p>
+          </div>
+        </details>
+
         <div className="space-y-4 py-2">
           {/* 文字コード選択 */}
           <div className="space-y-1.5">

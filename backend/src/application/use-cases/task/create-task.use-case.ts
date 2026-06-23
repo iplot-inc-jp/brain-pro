@@ -41,6 +41,10 @@ export interface CreateTaskInput {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** 達成条件（自由記述）。 */
+  acceptanceCriteria?: string | null;
+  /** 領域（SubProject）への紐付け。 */
+  subProjectId?: string | null;
   /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
   riskId?: string | null;
   startDate?: Date | null;
@@ -123,6 +127,8 @@ export class CreateTaskUseCase {
         assigneeName: input.assigneeName,
         assigneeRoleId: input.assigneeRoleId,
         issueNodeId: input.issueNodeId,
+        acceptanceCriteria: input.acceptanceCriteria,
+        subProjectId: input.subProjectId,
         riskId: input.riskId,
         startDate: input.startDate,
         dueDate: input.dueDate,

@@ -10,7 +10,13 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
+import { ExcelTaskImportService } from '../../infrastructure/services/excel-task-import.service';
 import {
   ApiTags,
   ApiOperation,
@@ -19,6 +25,7 @@ import {
   ApiParam,
   ApiProperty,
   ApiQuery,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import {
   IsString,
@@ -38,6 +45,7 @@ import {
   DeleteTaskUseCase,
   AddTaskDependencyUseCase,
   RemoveTaskDependencyUseCase,
+  GenerateTasksFromIssueTreeUseCase,
   ImportBacklogTasksUseCase,
   ImportBacklogTasksOutput,
   ImportJiraTasksUseCase,
@@ -172,6 +180,24 @@ class CreateTaskDto {
   @IsOptional()
   @IsString()
   issueNodeId?: string | null;
+
+  @ApiProperty({
+    description: '達成条件（自由記述）。null で未設定',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  acceptanceCriteria?: string | null;
+
+  @ApiProperty({
+    description: '領域（SubProject）ID。null で未設定',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
 
   @ApiProperty({
     description: '紐付けるリスクID（リスク対応タスク）。null で未紐付け',
@@ -342,6 +368,24 @@ class UpdateTaskDto {
   issueNodeId?: string | null;
 
   @ApiProperty({
+    description: '達成条件（自由記述）。指定で更新 / null で解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  acceptanceCriteria?: string | null;
+
+  @ApiProperty({
+    description: '領域（SubProject）ID。null で未設定',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  subProjectId?: string | null;
+
+  @ApiProperty({
     description:
       '紐付けるリスクID。指定で紐付け差し替え / null で紐付け解除 / 省略で変更なし',
     required: false,
@@ -435,6 +479,15 @@ class ImportJiraDto {
   csv: string;
 }
 
+class GenerateFromIssueTreeDto {
+  @ApiProperty({
+    description:
+      '生成元のイシューツリーID。配下の打ち手・行動ノード（ACTION/COUNTERMEASURE/OPTION）をタスク化する。',
+  })
+  @IsString()
+  issueTreeId: string;
+}
+
 @ApiTags('タスク')
 @ApiBearerAuth()
 @ProjectScopedAccess()
@@ -444,8 +497,11 @@ export class TaskController {
   constructor(
     private readonly getTasksUseCase: GetTasksUseCase,
     private readonly createTaskUseCase: CreateTaskUseCase,
+    private readonly generateTasksFromIssueTreeUseCase: GenerateTasksFromIssueTreeUseCase,
     private readonly importBacklogTasksUseCase: ImportBacklogTasksUseCase,
     private readonly importJiraTasksUseCase: ImportJiraTasksUseCase,
+    private readonly companyKeyService: CompanyKeyService,
+    private readonly excelTaskImportService: ExcelTaskImportService,
   ) {}
 
   @Get()
@@ -500,6 +556,8 @@ export class TaskController {
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,
+      acceptanceCriteria: dto.acceptanceCriteria,
+      subProjectId: dto.subProjectId,
       riskId: dto.riskId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
@@ -509,6 +567,34 @@ export class TaskController {
       milestone: dto.milestone,
       category: dto.category,
       order: dto.order,
+    });
+  }
+
+  @Post('generate-from-issue-tree')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'イシューツリーから一旦のガントを自動生成（打ち手・行動ノードをタスク化／親子を引き継ぎ／論点を自動紐付け）',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiResponse({
+    status: 201,
+    description: '生成完了（created / skipped を返す）',
+  })
+  @ApiResponse({ status: 403, description: '権限がありません' })
+  @ApiResponse({
+    status: 404,
+    description: 'プロジェクト / イシューツリーが見つかりません',
+  })
+  async generateFromIssueTree(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: GenerateFromIssueTreeDto,
+  ): Promise<{ created: number; skipped: number }> {
+    return this.generateTasksFromIssueTreeUseCase.execute({
+      userId: user.id,
+      projectId,
+      issueTreeId: dto.issueTreeId,
     });
   }
 
@@ -560,6 +646,49 @@ export class TaskController {
       projectId,
       csv: dto.csv,
     });
+  }
+
+  @Post('import-excel-ai')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Excel(.xlsx)を生成AIで読み取り、大項目/中項目などの階層を推測してタスクを自動生成',
+  })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: '生成完了（created / rootCount / preview を返す）' })
+  @ApiResponse({ status: 400, description: 'AI鍵未設定 / ファイル不正' })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 4 * 1024 * 1024 } }))
+  async importExcelAi(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { instructions?: string },
+  ) {
+    if (!file) throw new BadRequestException('Excelファイルがありません');
+    const name = (file.originalname || '').toLowerCase();
+    if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !file.mimetype.includes('sheet')) {
+      throw new BadRequestException('Excel（.xlsx）ファイルをアップロードしてください');
+    }
+    const apiKey = await this.companyKeyService.resolveForProject(projectId, user.id);
+    if (!apiKey) {
+      throw new BadRequestException(
+        'AI鍵が未設定です。会社管理またはユーザー設定で Anthropic APIキーを設定してください。',
+      );
+    }
+    try {
+      return await this.excelTaskImportService.importFromXlsx({
+        projectId,
+        bytes: file.buffer,
+        instructions: body?.instructions,
+        apiKey,
+        userId: user.id,
+      });
+    } catch (e) {
+      throw new BadRequestException(
+        (e as Error)?.message ?? 'Excelの取り込みに失敗しました',
+      );
+    }
   }
 }
 
@@ -617,6 +746,8 @@ export class TaskByIdController {
       assigneeName: dto.assigneeName,
       assigneeRoleId: dto.assigneeRoleId,
       issueNodeId: dto.issueNodeId,
+      acceptanceCriteria: dto.acceptanceCriteria,
+      subProjectId: dto.subProjectId,
       riskId: dto.riskId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),

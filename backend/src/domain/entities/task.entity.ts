@@ -64,6 +64,10 @@ export interface CreateTaskProps {
   milestone?: string | null;
   category?: string | null;
   order?: number;
+  /** 達成条件（自由記述）。null は未設定。 */
+  acceptanceCriteria?: string | null;
+  /** 領域（SubProject）への紐付け。null は未設定。 */
+  subProjectId?: string | null;
 }
 
 export interface ReconstructTaskProps {
@@ -99,6 +103,10 @@ export interface ReconstructTaskProps {
   milestone: string | null;
   category: string | null;
   order: number;
+  /** 達成条件（自由記述）。null は未設定。 */
+  acceptanceCriteria: string | null;
+  /** 領域（SubProject）への紐付け。null は未設定。 */
+  subProjectId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -133,6 +141,10 @@ export interface UpdateTaskProps {
   milestone?: string | null;
   category?: string | null;
   order?: number;
+  /** 達成条件（自由記述）。指定で更新 / null で解除 / 省略で変更なし。 */
+  acceptanceCriteria?: string | null;
+  /** 領域（SubProject）。指定で更新 / null で解除 / 省略で変更なし。 */
+  subProjectId?: string | null;
 }
 
 const VALID_STATUSES: TaskStatus[] = [
@@ -179,6 +191,8 @@ export class Task extends BaseEntity {
   private _milestone: string | null;
   private _category: string | null;
   private _order: number;
+  private _acceptanceCriteria: string | null;
+  private _subProjectId: string | null;
   // read 時に join された紐付けノードの最小情報（書き込みには使わない）
   private _linkedIssueNode: LinkedIssueNode | null;
 
@@ -210,6 +224,8 @@ export class Task extends BaseEntity {
     createdAt: Date,
     updatedAt: Date,
     linkedIssueNode: LinkedIssueNode | null = null,
+    acceptanceCriteria: string | null = null,
+    subProjectId: string | null = null,
   ) {
     super(id, createdAt, updatedAt);
     this._projectId = projectId;
@@ -235,6 +251,8 @@ export class Task extends BaseEntity {
     this._milestone = milestone;
     this._category = category;
     this._order = order;
+    this._acceptanceCriteria = acceptanceCriteria;
+    this._subProjectId = subProjectId;
     this._linkedIssueNode = linkedIssueNode;
   }
 
@@ -356,6 +374,9 @@ export class Task extends BaseEntity {
       props.order ?? 0,
       now,
       now,
+      null, // linkedIssueNode（作成時は join 情報なし）
+      props.acceptanceCriteria?.trim() || null,
+      props.subProjectId ?? null,
     );
   }
 
@@ -391,6 +412,8 @@ export class Task extends BaseEntity {
       props.createdAt,
       props.updatedAt,
       props.linkedIssueNode ?? null,
+      props.acceptanceCriteria ?? null,
+      props.subProjectId ?? null,
     );
   }
 
@@ -433,6 +456,12 @@ export class Task extends BaseEntity {
     }
     if (props.issueNodeId !== undefined) {
       this.linkIssueNode(props.issueNodeId ?? null);
+    }
+    if (props.acceptanceCriteria !== undefined) {
+      this._acceptanceCriteria = props.acceptanceCriteria?.trim() || null;
+    }
+    if (props.subProjectId !== undefined) {
+      this._subProjectId = props.subProjectId ?? null;
     }
     if (props.riskId !== undefined) {
       this._riskId = props.riskId ?? null;
@@ -613,5 +642,13 @@ export class Task extends BaseEntity {
 
   get order(): number {
     return this._order;
+  }
+
+  get acceptanceCriteria(): string | null {
+    return this._acceptanceCriteria;
+  }
+
+  get subProjectId(): string | null {
+    return this._subProjectId;
   }
 }

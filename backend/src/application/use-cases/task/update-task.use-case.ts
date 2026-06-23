@@ -41,6 +41,10 @@ export interface UpdateTaskInput {
   assigneeName?: string | null;
   assigneeRoleId?: string | null;
   issueNodeId?: string | null;
+  /** 達成条件（自由記述）。指定で更新 / null で解除 / 省略で変更なし。 */
+  acceptanceCriteria?: string | null;
+  /** 領域（SubProject）。指定で更新 / null で解除 / 省略で変更なし。 */
+  subProjectId?: string | null;
   /** リスク対応タスクの紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
   riskId?: string | null;
   startDate?: Date | null;
@@ -139,6 +143,8 @@ export class UpdateTaskUseCase {
       assigneeName: input.assigneeName,
       assigneeRoleId: input.assigneeRoleId,
       issueNodeId: input.issueNodeId,
+      acceptanceCriteria: input.acceptanceCriteria,
+      subProjectId: input.subProjectId,
       riskId: input.riskId,
       startDate: input.startDate,
       dueDate: input.dueDate,

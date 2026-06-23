@@ -29,6 +29,7 @@ import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { BacklogImportDialog } from '@/components/backlog-import-dialog';
 import { JiraImportDialog } from '@/components/jira-import-dialog';
+import { ExcelAiImportDialog } from '@/components/excel-ai-import-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
 import {
@@ -56,6 +57,7 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Sparkles,
 } from 'lucide-react';
 import {
   tasksApi,
@@ -167,6 +169,7 @@ export default function TasksPage() {
   // Backlog CSV 取込ダイアログ
   const [importOpen, setImportOpen] = useState(false);
   const [jiraImportOpen, setJiraImportOpen] = useState(false);
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -714,6 +717,17 @@ export default function TasksPage() {
               >
                 <FileSpreadsheet className="h-4 w-4" />
                 Jiraから取込
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                variant="outline"
+                onClick={() => setExcelImportOpen(true)}
+                className="gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
+                title="Excel(.xlsx)を生成AIで読み取り、大項目/中項目などの階層を推測してタスクを自動生成します"
+              >
+                <Sparkles className="h-4 w-4" />
+                Excelから取込（AI）
               </Button>
             )}
             {canEdit && (
@@ -1576,6 +1590,14 @@ export default function TasksPage() {
       <JiraImportDialog
         open={jiraImportOpen}
         onOpenChange={setJiraImportOpen}
+        projectId={projectId}
+        onImported={fetchAll}
+      />
+
+      {/* Excel(.xlsx) を生成AIで読み取り、階層付きタスクを自動生成 */}
+      <ExcelAiImportDialog
+        open={excelImportOpen}
+        onOpenChange={setExcelImportOpen}
         projectId={projectId}
         onImported={fetchAll}
       />
