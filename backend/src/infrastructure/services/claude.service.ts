@@ -105,6 +105,18 @@ export interface GenerateKpisContext {
 /**
  * 生成AIが返すKPI候補（1件分。値の妥当化は呼び出し側で行う）
  */
+/** Excel→タスク抽出の入れ子ノード（大項目/中項目を children で表現）。 */
+export interface ExtractedTaskNode {
+  title: string;
+  description?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  assigneeName?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  children?: ExtractedTaskNode[] | null;
+}
+
 export interface GeneratedKpiItem {
   name: string;
   description?: string | null;
@@ -870,6 +882,95 @@ ${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
       throw new Error('KPI候補の解析に失敗しました（候補配列が空または形式不正です）');
     }
     return raw as GeneratedKpiItem[];
+  }
+
+  /**
+   * Excel（Markdown化済みの表）を読み取り、大項目/中項目などの階層・日付・担当などを推測して
+   * 入れ子のタスク木に変換する。列名は固定せず、内容から意味を推測する。
+   *
+   * @param markdown  xlsx をMarkdownテーブル化したテキスト（全シート連結）。
+   * @param instructions 任意の追加指示（読み取りのヒント）。
+   * @param apiKey    解決済み Anthropic APIキー。
+   */
+  async extractTasksFromSpreadsheet(
+    markdown: string,
+    instructions: string | undefined,
+    apiKey: string,
+    usage?: LlmUsageContext,
+  ): Promise<ExtractedTaskNode[]> {
+    const client = this.getClient(apiKey);
+    const model = this.defaultModel();
+
+    const systemPrompt = `あなたはプロジェクト管理のエキスパートです。Excelから抽出した表データ（Markdown）を読み取り、タスク一覧に構造化してください。
+
+読み取りルール：
+1. 列の意味を内容から推測する（列名は固定でない）。例: 「大項目」「中項目」「カテゴリ」→ 階層、「タスク」「作業」「件名」→ タイトル、「担当」「担当者」→ 担当、「開始」→ 開始日、「期限」「締切」「納期」→ 期限、「状態」「ステータス」→ 状態、「優先度」→ 優先度。
+2. 階層化する：大項目・中項目のようなグルーピング列があれば、それを親タスクにし、実作業を子タスク(children)として入れ子にする。グルーピングが無ければフラットでよい。
+3. 同じ大項目/中項目が複数行で繰り返される場合、親はまとめて1つにする（重複生成しない）。
+4. 日付は YYYY-MM-DD に正規化する（年が不明な場合は省略）。判別不能な値は省略する。
+5. 見出し行・空行・合計行・凡例などタスクでないものは除外する。
+6. status は OPEN / IN_PROGRESS / RESOLVED / CLOSED のいずれか（判別できなければ省略）。priority は HIGH / MEDIUM / LOW（判別できなければ省略）。
+
+出力は必ず次のJSONのみ（コードフェンスや説明文は不要）：
+{
+  "tasks": [
+    {
+      "title": "タスク名（必須）",
+      "description": "補足（任意）",
+      "status": "OPEN | IN_PROGRESS | RESOLVED | CLOSED（任意）",
+      "priority": "HIGH | MEDIUM | LOW（任意）",
+      "assigneeName": "担当者名（任意）",
+      "startDate": "YYYY-MM-DD（任意）",
+      "dueDate": "YYYY-MM-DD（任意）",
+      "children": [ { 同じ構造 } ]
+    }
+  ]
+}`;
+
+    const userText = [
+      instructions && instructions.trim() ? `追加指示: ${instructions.trim()}\n` : '',
+      '次のExcelデータを読み取り、上記JSON構造のタスク木に変換してください。\n',
+      '--- Excel（Markdown） ---',
+      markdown.slice(0, 60000), // 過大入力をガード（約60k文字）
+    ].join('\n');
+
+    const response = await client.messages.create({
+      model,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userText }],
+    });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
+
+    const textContent = response.content.find((c) => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+    let jsonText = textContent.text;
+    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) jsonText = fence[1];
+    jsonText = jsonText.trim();
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      const start = jsonText.indexOf('{');
+      const end = jsonText.lastIndexOf('}');
+      if (start < 0 || end <= start) {
+        throw new Error('タスクの解析に失敗しました（JSONが見つかりません）');
+      }
+      parsed = JSON.parse(jsonText.slice(start, end + 1));
+    }
+    const tasks = Array.isArray(parsed?.tasks)
+      ? parsed.tasks
+      : Array.isArray(parsed)
+        ? parsed
+        : null;
+    if (!Array.isArray(tasks)) {
+      throw new Error('タスクの解析に失敗しました（tasks配列が見つかりません）');
+    }
+    return tasks as ExtractedTaskNode[];
   }
 }
 

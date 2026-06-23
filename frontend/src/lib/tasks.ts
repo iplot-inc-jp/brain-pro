@@ -54,6 +54,10 @@ export interface Task {
   issueNodeLabel?: string | null;
   /** 紐付いた課題ノードの種別（CAUSE=調査 / COUNTERMEASURE=打ち手） */
   issueNodeKind?: IssueNodeKind | null;
+  /** 達成条件（自由記述）。未設定なら null。バックエンド対応前は undefined のことがある。 */
+  acceptanceCriteria?: string | null;
+  /** 領域（SubProject）への紐付け。未設定なら null。バックエンド対応前は undefined のことがある。 */
+  subProjectId?: string | null;
   // ---- アジャイル拡張（バックエンドが順次返すフィールド。未対応 API でも壊れないよう任意） ----
   /** イシュー種別（EPIC/STORY/TASK/SUBTASK/BUG/OTHER）。未指定なら TASK 相当。 */
   issueType?: TaskIssueType | null;
@@ -111,6 +115,13 @@ export interface ImportJiraResult {
   updated: number;
   skipped: number;
   errors: ImportBacklogRowError[];
+}
+
+/** POST /projects/:id/tasks/import-excel-ai の結果（AIによるExcel→タスク自動生成）。 */
+export interface ImportExcelAiResult {
+  created: number; // 作成タスク総数（子含む）
+  rootCount: number; // ルート（大項目相当）件数
+  preview: { title: string; childCount: number }[];
 }
 
 /** 作成/更新時に送る入力（id・projectId はパス側で扱うため除外可能） */
@@ -378,6 +389,21 @@ export const tasksApi = {
       body: JSON.stringify({ csv }),
     }).then((r) => handle<ImportJiraResult>(r)),
 
+  /**
+   * POST /api/projects/:projectId/tasks/import-excel-ai （multipart: file, instructions?）
+   * Excel(.xlsx)を生成AIで読み取り、大項目/中項目などの階層を推測してタスクを自動生成する。
+   */
+  importExcelAi: (projectId: string, file: File, instructions?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (instructions && instructions.trim()) fd.append('instructions', instructions.trim());
+    return fetch(`${API_URL}/api/projects/${projectId}/tasks/import-excel-ai`, {
+      method: 'POST',
+      headers: authOnlyHeaders(),
+      body: fd,
+    }).then((r) => handle<ImportExcelAiResult>(r));
+  },
+
   /** GET /api/tasks/:id */
   get: (id: string) =>
     fetch(`${API_URL}/api/tasks/${id}`, { headers: authHeaders() }).then((r) =>
@@ -431,6 +457,17 @@ export const tasksApi = {
       headers: authHeaders(),
     }).then((r) => handle<IssueNodeRef[]>(r));
   },
+
+  /**
+   * POST /api/projects/:projectId/tasks/generate-from-issue-tree
+   * イシューツリー1本から打ち手・行動ノードをタスク化し、一旦のガントを生成する。
+   */
+  generateFromIssueTree: (projectId: string, issueTreeId: string) =>
+    fetch(`${API_URL}/api/projects/${projectId}/tasks/generate-from-issue-tree`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ issueTreeId }),
+    }).then((r) => handle<{ created: number; skipped: number }>(r)),
 };
 
 /** Authorization のみ（multipart は Content-Type をブラウザに任せる） */

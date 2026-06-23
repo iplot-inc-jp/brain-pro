@@ -7,7 +7,7 @@ function headers(): Record<string, string> {
   return h;
 }
 
-export type DiagramNodeKind = 'FLOW_NODE' | 'DFD_NODE' | 'DATA_OBJECT';
+export type DiagramNodeKind = 'FLOW_NODE' | 'DFD_NODE' | 'DATA_OBJECT' | 'FLOW_EDGE';
 
 export interface AttachmentMeta {
   id: string;

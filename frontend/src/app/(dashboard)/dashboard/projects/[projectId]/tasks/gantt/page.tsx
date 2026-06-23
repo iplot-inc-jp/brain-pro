@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { useReadOnly } from '@/components/read-only-context';
 import {
   Select,
@@ -22,6 +23,7 @@ import {
 import {
   Loader2,
   GanttChartSquare,
+  Network,
   ListTodo,
   Link2,
   X,
@@ -49,7 +51,9 @@ import {
   type TaskStatus,
   type TaskPriority,
   type TaskTreeNode,
+  type IssueNodeRef,
 } from '@/lib/tasks';
+import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import {
   mapTasksToFrappe,
   dateToYmd,
@@ -97,6 +101,12 @@ type SidebarForm = {
   dueDate: string;
   progress: number;
   estimatedHours: string;
+  /** 論点（課題/調査ツリーのノードへの紐付け）。'' は未設定。 */
+  issueNodeId: string;
+  /** 達成条件（自由記述）。 */
+  acceptanceCriteria: string;
+  /** 領域（SubProject）。'' は未設定。 */
+  subProjectId: string;
 };
 
 const emptySidebarForm: SidebarForm = {
@@ -109,6 +119,9 @@ const emptySidebarForm: SidebarForm = {
   dueDate: '',
   progress: 0,
   estimatedHours: '',
+  issueNodeId: '',
+  acceptanceCriteria: '',
+  subProjectId: '',
 };
 
 export default function GanttPage() {
@@ -118,6 +131,14 @@ export default function GanttPage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
+  // 論点ピッカー用: プロジェクト配下の課題/調査ツリーの全ノード（ツリー横断・フラット）。
+  const [issueNodes, setIssueNodes] = useState<IssueNodeRef[]>([]);
+  // イシューツリーから自動生成: ドロップダウン開閉・生成中フラグ。
+  const [genTreeOpen, setGenTreeOpen] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  // 領域（SubProject）一覧と、ガントを領域で絞り込むフィルタ（'' = すべて）。
+  const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
+  const [areaFilter, setAreaFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState<ZoomMode>('day');
 
@@ -205,16 +226,99 @@ export default function GanttPage() {
     fetchAll();
   }, [fetchAll]);
 
+  // 論点ピッカー用に、課題/調査ツリーの全ノードをツリー横断で取得（kind 指定なし＝全件）。
+  useEffect(() => {
+    tasksApi
+      .listIssueNodes(projectId)
+      .then(setIssueNodes)
+      .catch(() => setIssueNodes([]));
+  }, [projectId]);
+
+  // 領域（SubProject）一覧を取得（領域ピッカー・領域フィルタの選択肢）。
+  useEffect(() => {
+    subProjectApi
+      .list(projectId)
+      .then(setSubProjects)
+      .catch(() => setSubProjects([]));
+  }, [projectId]);
+
+  // 領域ID → 名前。タスク行の領域表示やフィルタラベルに使う。
+  const subProjectName = useCallback(
+    (id: string | null | undefined) =>
+      id ? subProjects.find((s) => s.id === id)?.name ?? null : null,
+    [subProjects],
+  );
+
+  // 領域フィルタ適用後のタスク（'' のときは全件）。ガントのバー・ツリー両方の元データ。
+  const filteredTasks = useMemo(
+    () =>
+      areaFilter
+        ? tasks.filter((t) => (t.subProjectId ?? '') === areaFilter)
+        : tasks,
+    [tasks, areaFilter],
+  );
+
+  // 論点セレクトの optgroup 用に、ツリー名でグルーピング。
+  const issueNodesByTree = useMemo(() => {
+    const m = new Map<string, IssueNodeRef[]>();
+    for (const n of issueNodes) {
+      const list = m.get(n.treeTitle) ?? [];
+      list.push(n);
+      m.set(n.treeTitle, list);
+    }
+    return Array.from(m.entries());
+  }, [issueNodes]);
+
+  // 自動生成のツリー選択肢（issueNodes から treeId で一意化）。
+  const issueTrees = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const n of issueNodes) if (!m.has(n.treeId)) m.set(n.treeId, n.treeTitle);
+    return Array.from(m.entries()).map(([treeId, treeTitle]) => ({
+      treeId,
+      treeTitle,
+    }));
+  }, [issueNodes]);
+
+  // イシューツリー1本から打ち手・行動ノードをタスク化（一旦のガント生成）。
+  const handleGenerateFromTree = useCallback(
+    async (treeId: string, treeTitle: string) => {
+      if (!canEdit) return;
+      setGenTreeOpen(false);
+      if (
+        !window.confirm(
+          `「${treeTitle}」の打ち手・行動ノードからタスクを生成します。よろしいですか？`,
+        )
+      ) {
+        return;
+      }
+      setGenBusy(true);
+      try {
+        const res = await tasksApi.generateFromIssueTree(projectId, treeId);
+        await fetchAll();
+        window.alert(
+          `タスクを ${res.created} 件生成しました${
+            res.skipped ? `（既にタスク化済み ${res.skipped} 件はスキップ）` : ''
+          }。`,
+        );
+      } catch {
+        window.alert('生成に失敗しました');
+      } finally {
+        setGenBusy(false);
+      }
+    },
+    [canEdit, projectId, fetchAll],
+  );
+
   // ---------------------------------------------------------------------
   // ドメイン -> frappe-gantt データ（WBS 表示順）
   // ---------------------------------------------------------------------
   const frappeTasks = useMemo(
-    () => mapTasksToFrappe(tasks, dependencies),
-    [tasks, dependencies]
+    () => mapTasksToFrappe(filteredTasks, dependencies),
+    [filteredTasks, dependencies]
   );
 
   // WBS 番号・表示順（依存関係パネルのラベル・並び用）。
-  const tree = useMemo(() => buildTaskTree(tasks), [tasks]);
+  const tree = useMemo(() => buildTaskTree(filteredTasks), [filteredTasks]);
   const wbs = useMemo(() => computeWbsNumbers(tree), [tree]);
 
   // ---------------------------------------------------------------------
@@ -397,6 +501,9 @@ export default function GanttPage() {
         progress: t.progress ?? 0,
         estimatedHours:
           t.estimatedHours != null ? String(t.estimatedHours) : '',
+        issueNodeId: t.issueNodeId ?? '',
+        acceptanceCriteria: t.acceptanceCriteria ?? '',
+        subProjectId: t.subProjectId ?? '',
       });
       setSidebarError(null);
       sidebarOpenedAtRef.current = Date.now();
@@ -434,6 +541,9 @@ export default function GanttPage() {
           sidebarForm.estimatedHours === ''
             ? null
             : Number(sidebarForm.estimatedHours),
+        issueNodeId: sidebarForm.issueNodeId || null,
+        acceptanceCriteria: sidebarForm.acceptanceCriteria.trim() || null,
+        subProjectId: sidebarForm.subProjectId || null,
       });
       await fetchAll();
     } catch (err) {
@@ -671,12 +781,73 @@ export default function GanttPage() {
               ]}
             />
             <ManualButton feature="tasks-gantt" />
+            {canEdit && issueTrees.length > 0 && (
+              <div className="relative flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={genBusy}
+                  onClick={() => setGenTreeOpen((v) => !v)}
+                >
+                  {genBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Network className="h-4 w-4" />
+                  )}
+                  イシューツリーから生成
+                </Button>
+                <HelpTooltip text="課題 / 調査 / 打ち手ツリーの「打ち手・行動ノード（打ち手・解決候補・アクション）」を、このガントのタスクとして一括生成します。ノード名がタスク名になり、そのノードが各タスクの『論点』に自動で紐づきます。ツリーの親子関係はタスクの親子に引き継がれ、開始日・期限は空のまま（あとから調整してください）。すでにタスク化済みのノードはスキップするので、何度押しても重複しません。" />
+                {genTreeOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setGenTreeOpen(false)}
+                    />
+                    <div className="absolute right-0 z-50 mt-1 max-h-72 w-64 overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg">
+                      <p className="px-3 py-1 text-[11px] text-gray-400">
+                        ツリーを選んで打ち手をタスク化
+                      </p>
+                      {issueTrees.map((t) => (
+                        <button
+                          key={t.treeId}
+                          type="button"
+                          onClick={() =>
+                            handleGenerateFromTree(t.treeId, t.treeTitle)
+                          }
+                          className="block w-full truncate px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-blue-50"
+                        >
+                          {t.treeTitle}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             <Link href={`/dashboard/projects/${projectId}/tasks`}>
               <Button variant="outline" className="gap-1.5">
                 <ListTodo className="h-4 w-4" />
                 タスク一覧
               </Button>
             </Link>
+            {subProjects.length > 0 && (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-gray-500">領域</span>
+                <select
+                  value={areaFilter}
+                  onChange={(e) => setAreaFilter(e.target.value)}
+                  className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  title="領域でタスクを絞り込む"
+                >
+                  <option value="">すべての領域</option>
+                  {subProjects.map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center rounded-md border border-gray-300 bg-white p-0.5">
               {ZOOM_OPTIONS.map((opt) => (
                 <button
@@ -853,6 +1024,14 @@ export default function GanttPage() {
                             {num ? `${num} ` : ''}
                             {node.title}
                           </span>
+                          {!areaFilter && subProjectName(node.subProjectId) && (
+                            <span
+                              className="ml-1 shrink-0 rounded bg-indigo-50 px-1 text-[9px] leading-4 text-indigo-600"
+                              title={`領域: ${subProjectName(node.subProjectId)}`}
+                            >
+                              {subProjectName(node.subProjectId)}
+                            </span>
+                          )}
                           {hasChildren && (
                             <span
                               className="ml-auto shrink-0 rounded-full bg-gray-200 px-1.5 text-[10px] leading-4 text-gray-600"
@@ -1276,6 +1455,80 @@ export default function GanttPage() {
                     }
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  領域
+                </label>
+                <select
+                  value={sidebarForm.subProjectId}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({
+                      ...f,
+                      subProjectId: e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value="">未設定</option>
+                  {subProjects.map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name}
+                    </option>
+                  ))}
+                </select>
+                {subProjects.length === 0 && (
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    領域（共通マスタ）が登録されていません
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  論点（課題・調査ツリーから選択）
+                </label>
+                <select
+                  value={sidebarForm.issueNodeId}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({ ...f, issueNodeId: e.target.value }))
+                  }
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value="">未設定</option>
+                  {issueNodesByTree.map(([treeTitle, nodes]) => (
+                    <optgroup key={treeTitle} label={treeTitle}>
+                      {nodes.map((n) => (
+                        <option key={n.id} value={n.id}>
+                          {n.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                {issueNodes.length === 0 && (
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    課題ツリー / 調査ツリーのノードがありません
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500">
+                  達成条件
+                </label>
+                <Textarea
+                  rows={3}
+                  placeholder="このタスクが完了したと言える条件（例: 発注書をFAX送信し台帳へ記入済み）"
+                  value={sidebarForm.acceptanceCriteria}
+                  onChange={(e) =>
+                    setSidebarForm((f) => ({
+                      ...f,
+                      acceptanceCriteria: e.target.value,
+                    }))
+                  }
+                />
               </div>
             </div>
 

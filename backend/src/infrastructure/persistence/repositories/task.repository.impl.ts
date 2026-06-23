@@ -47,6 +47,8 @@ export class TaskRepositoryImpl implements ITaskRepository {
     milestone: string | null;
     category: string | null;
     order: number;
+    acceptanceCriteria: string | null;
+    subProjectId: string | null;
     createdAt: Date;
     updatedAt: Date;
     issueNode?: { id: string; label: string; kind: string } | null;
@@ -83,6 +85,8 @@ export class TaskRepositoryImpl implements ITaskRepository {
       milestone: record.milestone,
       category: record.category,
       order: record.order,
+      acceptanceCriteria: record.acceptanceCriteria,
+      subProjectId: record.subProjectId,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });
@@ -158,6 +162,8 @@ export class TaskRepositoryImpl implements ITaskRepository {
       milestone: task.milestone,
       category: task.category,
       order: task.order,
+      acceptanceCriteria: task.acceptanceCriteria,
+      subProjectId: task.subProjectId,
     };
 
     await this.prisma.task.upsert({

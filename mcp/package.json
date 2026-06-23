@@ -1,11 +1,11 @@
 {
-  "name": "ai-data-flow-mcp",
+  "name": "brain-pro-mcp",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP server exposing the ai-data-flow IPLoT methodology pipeline (projects, phases, ASIS/TOBE flows, issue trees, GAP, CRUD) over the public API",
+  "description": "MCP server exposing the brain-pro IPLoT methodology pipeline (projects, phases, ASIS/TOBE flows, issue trees, GAP, CRUD) over the public API",
   "bin": {
-    "ai-data-flow-mcp": "index.mjs"
+    "brain-pro-mcp": "index.mjs"
   },
   "scripts": {
     "start": "node index.mjs"

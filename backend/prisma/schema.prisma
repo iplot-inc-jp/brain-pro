@@ -236,6 +236,7 @@ model Project {
   gapItems      GapItem[]
   apiKeys       ApiKey[]
   githubConnections GithubConnection[]
+  pageScreenshots   PageScreenshot[]
   apiEndpoints      ApiEndpoint[]
   subProjects       SubProject[]
   systems           System[]
@@ -1229,11 +1230,57 @@ model GithubConnection {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  project Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  runs    SyncRun[]
+  project     Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs        SyncRun[]
+  screenshots PageScreenshot[]
 
   @@unique([projectId, repoFullName])
   @@map("github_connections")
+}
+
+// ページ別スクリーンショット／ビジュアル参照。
+// 1ページ(slug)に対し複数ソースの参照を持てる:
+//   GITHUB    = 連携リポジトリ docs/screenshots/<slug…>/<caption>.png を取り込み（blobUrl）
+//   UPLOAD    = 直接アップロードした画像（blobUrl）
+//   IMAGE_URL = 外部画像URLリンク（linkUrl）
+//   FIGMA     = Figma 共有リンク（linkUrl をライブ埋め込み）
+// ディレクトリ階層を URL slug、ファイル名をキャプションとして扱う。
+enum PageScreenshotSource {
+  GITHUB
+  UPLOAD
+  IMAGE_URL
+  FIGMA
+}
+
+model PageScreenshot {
+  id           String               @id @default(uuid())
+  projectId    String               @map("project_id")
+  source       PageScreenshotSource @default(GITHUB)
+  connectionId String?              @map("connection_id") // GITHUB の取り込み元連携
+  slug         String                                      // ページの URL slug（例: /orders/list）
+  caption      String               @default("")           // キャプション/状態
+  // GITHUB / UPLOAD: Blob 保存物
+  blobUrl  String? @map("blob_url")
+  mimeType String? @map("mime_type")
+  size     Int     @default(0)
+  // GITHUB: リポジトリ内パス / blob sha（変更検知・重複判定キー）
+  filePath String? @map("file_path")
+  fileSha  String? @map("file_sha")
+  // IMAGE_URL / FIGMA: 元リンク
+  linkUrl    String?  @map("link_url")
+  order      Int      @default(0)
+  importedAt DateTime @default(now()) @map("imported_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connection GithubConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  // filePath は GITHUB のみ非NULL。NULL は Postgres で重複可なので手動参照は制約されない。
+  @@unique([projectId, filePath])
+  @@index([projectId])
+  @@index([projectId, slug])
+  @@map("page_screenshots")
 }
 
 model SyncRun {
@@ -1347,6 +1394,7 @@ model SubProject {
   parent        SubProject?  @relation("SubProjectTree", fields: [parentId], references: [id], onDelete: Cascade)
   children      SubProject[] @relation("SubProjectTree")
   businessFlows BusinessFlow[]
+  tasks            Task[]
   roles            Role[]
   systems          System[]
   constraints      Constraint[]
@@ -1544,6 +1592,8 @@ model Task {
   issueNodeId    String?      @map("issue_node_id")
   // リスク対応タスクの紐付け（任意）
   riskId         String?      @map("risk_id")
+  // 領域（SubProject）への紐付け。タスクを領域で分けて管理するため。任意。
+  subProjectId   String?      @map("sub_project_id")
   startDate      DateTime?    @map("start_date")
   dueDate        DateTime?    @map("due_date")
   progress       Int          @default(0)
@@ -1552,6 +1602,8 @@ model Task {
   milestone      String?
   category       String?
   order          Int          @default(0)
+  // 達成条件（自由記述）。タスク完了の判定基準。
+  acceptanceCriteria String?  @map("acceptance_criteria") @db.Text
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
@@ -1564,6 +1616,8 @@ model Task {
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
   issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
   risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
+  // 領域（SubProject）。領域が消えても task は残す（SetNull）。
+  subProject   SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）
   predecessors TaskDependency[] @relation("DepSuccessor")
   // この依存関係でこのタスクが先行側（後続タスクから参照される）
@@ -2854,6 +2908,7 @@ enum DiagramNodeKind {
   FLOW_NODE
   DFD_NODE
   DATA_OBJECT
+  FLOW_EDGE
 }
 
 model ImageBoard {
@@ -2973,6 +3028,11 @@ model MeetingDocument {
   title        String              @default("")
   // GOOGLE_DOC のとき：外部 Google Document の URL。
   googleDocUrl String?             @map("google_doc_url")
+  // GOOGLE_DOC を Drive 連携経由で取得したときの本文スナップショット（検索/AI参照用にこちらにも保存）。
+  fetchedContent String?           @map("fetched_content") @db.Text
+  fetchedTitle   String?           @map("fetched_title")
+  fetchedMime    String?           @map("fetched_mime")
+  fetchedAt      DateTime?         @map("fetched_at")
   order        Int                 @default(0)
   createdAt    DateTime            @default(now()) @map("created_at")
   updatedAt    DateTime            @updatedAt @map("updated_at")

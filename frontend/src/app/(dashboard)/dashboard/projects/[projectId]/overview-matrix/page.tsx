@@ -216,11 +216,17 @@ export default function OverviewMatrixListPage() {
                 {items.map((item) => (
                   <tr
                     key={item.id}
-                    className="border-b border-gray-100 last:border-0 hover:bg-gray-50/60"
+                    onClick={() =>
+                      router.push(
+                        `/dashboard/projects/${projectId}/overview-matrix/${item.id}`,
+                      )
+                    }
+                    className="group cursor-pointer border-b border-gray-100 last:border-0 hover:bg-blue-50/40"
                   >
                     <td className="px-4 py-2.5">
                       <Link
                         href={`/dashboard/projects/${projectId}/overview-matrix/${item.id}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-2 font-medium text-gray-900 hover:text-blue-600 hover:underline"
                       >
                         <TableProperties className="h-4 w-4 shrink-0 text-blue-500" />
@@ -243,19 +249,14 @@ export default function OverviewMatrixListPage() {
                     </td>
                     <td className="px-2 py-2.5">
                       <div className="flex items-center justify-end gap-0.5">
-                        <Link
-                          href={`/dashboard/projects/${projectId}/overview-matrix/${item.id}`}
-                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"
-                          title="開く"
-                        >
-                          開く
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </Link>
                         {canEdit && (
                           <>
                             <button
                               type="button"
-                              onClick={() => handleDuplicate(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDuplicate(item);
+                              }}
                               disabled={busyId === item.id}
                               title="複製"
                               aria-label="複製"
@@ -269,7 +270,10 @@ export default function OverviewMatrixListPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDelete(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(item);
+                              }}
                               disabled={busyId === item.id}
                               title="削除"
                               aria-label="削除"
@@ -279,6 +283,10 @@ export default function OverviewMatrixListPage() {
                             </button>
                           </>
                         )}
+                        <ChevronRight
+                          className="h-4 w-4 text-gray-300 transition-colors group-hover:text-blue-500"
+                          aria-hidden
+                        />
                       </div>
                     </td>
                   </tr>

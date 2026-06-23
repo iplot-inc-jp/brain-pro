@@ -13,6 +13,7 @@ import { ArrowLeft, FolderCog, Users, Loader2, Trash2, AlertTriangle } from 'luc
 import { HelpTooltip } from '@/components/ui/help-tooltip'
 import { HowToPanel } from '@/components/ui/how-to-panel'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
+import { useTabParam } from '@/hooks/use-tab-param'
 import { useReadOnly } from '@/components/read-only-context'
 import { EditGate } from '@/components/edit-gate'
 import { ProjectBundleIo } from '@/components/io/ProjectBundleIo'
@@ -39,6 +40,9 @@ export default function ProjectSettingsPage() {
   const router = useRouter();
   const projectId = params.projectId as string;
   const { canEdit } = useReadOnly();
+
+  // タブ（一般 / ロール）を URL ?tab= で駆動し、左サイドメニューの子項目と同期。
+  const [tab, setTab] = useTabParam('general');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -247,7 +251,7 @@ export default function ProjectSettingsPage() {
         </div>
       )}
 
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList className="bg-gray-100 border border-gray-200">
           <TabsTrigger value="general" className="data-[state=active]:bg-white data-[state=active]:text-gray-900">
             <FolderCog className="h-4 w-4 mr-2" />

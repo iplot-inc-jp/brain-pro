@@ -8,7 +8,7 @@
 
 **Tech Stack:** NestJS, Prisma, node:crypto(HMAC/timingSafeEqual), Next.js。テスト=jest。
 
-**前提:** worktree `/Users/kazuyukijimbo/ai-data-flow-wt-webhooks`、ブランチ `feat/tracker-webhooks`（このブランチ/ディレクトリでのみ作業。main tree は別作業者が編集中）。各タスク後 `pnpm --filter @dataflow/backend build` と関連テストが緑。スキーマ変更後は `pnpm --filter @dataflow/backend exec prisma generate --schema=./prisma/schema.prisma`。
+**前提:** worktree `/Users/kazuyukijimbo/brain-pro-wt-webhooks`、ブランチ `feat/tracker-webhooks`（このブランチ/ディレクトリでのみ作業。main tree は別作業者が編集中）。各タスク後 `pnpm --filter @dataflow/backend build` と関連テストが緑。スキーマ変更後は `pnpm --filter @dataflow/backend exec prisma generate --schema=./prisma/schema.prisma`。
 
 **重要・現行コード確認:** `tracker-import.service.ts` / `jira-api.ts` / `backlog-api.ts` / `task.entity.ts` は直近で大きく変更済み（アジャイル取込）。各タスクは**実ファイルを読んで現行シグネチャに合わせる**こと（本プランのコードは意図を示す骨子）。`jiraListIssues`/`backlogListIssues` の現行引数（options に JQL や projectKey, 単一key フィルタ可否）を確認し、無ければ「単一課題 fetch」関数を最小追加する。`@Public()` は cron.controller と同じ import 元から。`CryptoService` は `backend/src/infrastructure/services/crypto.service.ts`。
 

@@ -16,6 +16,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { useTabParam } from '@/hooks/use-tab-param'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -116,6 +117,9 @@ export default function KnowledgeListPage() {
   const { canEdit } = useReadOnly()
   const { toast } = useToast()
 
+  // タブ（ノード / 文書 / 関係）を URL ?tab= で駆動し、左サイドメニューの子項目と同期。
+  const [tab, setTab] = useTabParam('nodes')
+
   const [nodes, setNodes] = useState<KnowledgeNode[]>([])
   const [edges, setEdges] = useState<KnowledgeEdge[]>([])
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
@@ -191,7 +195,7 @@ export default function KnowledgeListPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs defaultValue="nodes">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="nodes">ノード（{nodes.length}）</TabsTrigger>
             <TabsTrigger value="documents">文書（{documents.length}）</TabsTrigger>

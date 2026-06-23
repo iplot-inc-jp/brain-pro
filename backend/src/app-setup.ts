@@ -67,7 +67,7 @@ export function configureApp(app: INestApplication): void {
 
   // Swagger documentation
   const config = new DocumentBuilder()
-    .setTitle('ai-data-flow API')
+    .setTitle('brain-pro API')
     .setDescription(
       [
         'IPLoT方法論パイプラインAPI: 現状把握/ASIS → 課題(イシューツリー) → TOBE → GAP → 要件/CRUD → 動作確認。',

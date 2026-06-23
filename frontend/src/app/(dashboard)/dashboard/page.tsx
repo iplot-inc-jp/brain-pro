@@ -167,7 +167,7 @@ export default function DashboardPage() {
               <Zap className="h-8 w-8 text-primary" />
             </div>
             <h2 className="text-xl font-bold text-foreground mb-2">
-              ai-data-flow へようこそ
+              brain-pro へようこそ
             </h2>
             <p className="text-muted-foreground mb-6 max-w-md">
               まずはプロジェクトを作成しましょう。プロジェクト内でデータカタログ、業務フロー、ロールを管理できます。

@@ -21,6 +21,13 @@ export interface MeetingDocument {
   order: number;
   /** Liveblocks ルームID（INTERNAL の共同編集本文はこのルームの Yjs が真実源）。 */
   roomId: string;
+  /** GOOGLE_DOC を Drive 連携経由で取り込んだ本文スナップショットのメタ。 */
+  hasFetchedContent?: boolean;
+  fetchedTitle?: string | null;
+  fetchedMime?: string | null;
+  fetchedAt?: string | null;
+  /** 単体取得（get）/取り込み（fetchGoogle）時のみ本文を含む。 */
+  fetchedContent?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,5 +97,24 @@ export const meetingDocumentApi = {
     if (!res.ok && res.status !== 204) {
       throw new Error('ドキュメントの削除に失敗しました');
     }
+  },
+
+  /**
+   * GOOGLE_DOC の本文を Drive 連携経由で取得し DB に保存（fetchedContent）。
+   * 要: プロジェクトの Drive 連携 + 対象ファイルの共有設定。
+   */
+  async fetchGoogle(id: string): Promise<MeetingDocument> {
+    const res = await fetch(`${API_URL}/api/meeting-documents/${id}/fetch`, {
+      method: 'POST',
+      headers: headers(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(
+        (data && (Array.isArray(data.message) ? data.message.join(' / ') : data.message)) ||
+          'Google ドキュメント本文の取り込みに失敗しました',
+      );
+    }
+    return res.json();
   },
 };

@@ -12,7 +12,7 @@ import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorat
 import { CurrentUser } from '../decorators/current-user.decorator';
 import type { CurrentUserPayload } from '../decorators/current-user.decorator';
 
-const NODE_KINDS = ['FLOW_NODE', 'DFD_NODE', 'DATA_OBJECT'] as const;
+const NODE_KINDS = ['FLOW_NODE', 'DFD_NODE', 'DATA_OBJECT', 'FLOW_EDGE'] as const;
 type NodeKind = (typeof NODE_KINDS)[number];
 
 const ATTACHMENT_SELECT = {
@@ -73,6 +73,11 @@ export class NodeAttachmentController {
       if (!n || n.diagram.projectId !== projectId) throw new NotFoundException('ノードが見つかりません');
       return n.label;
     }
+    if (kind === 'FLOW_EDGE') {
+      const e = await this.prisma.flowEdge.findUnique({ where: { id: nodeId }, select: { label: true, flow: { select: { projectId: true } } } });
+      if (!e || e.flow.projectId !== projectId) throw new NotFoundException('矢印が見つかりません');
+      return e.label ?? '矢印';
+    }
     const n = await this.prisma.dataObject.findUnique({ where: { id: nodeId }, select: { name: true, projectId: true } });
     if (!n || n.projectId !== projectId) throw new NotFoundException('オブジェクトが見つかりません');
     return n.name;
@@ -114,16 +119,20 @@ export class NodeAttachmentController {
     });
 
     // KG 常時登録（無課金・決定的）。失敗しても添付自体は成功させる。
-    try {
-      const { knowledgeNodeId } = await this.bridge.ensureEntityForNode(projectId, dto.nodeKind, dto.nodeId, label);
-      await this.bridge.registerAttachmentDocument({
-        projectId, attachmentId: dto.attachmentId,
-        title: att.displayName || att.filename, mimeType: att.mimeType,
-        blobUrl: att.blobUrl ?? null, linkNodeId: knowledgeNodeId,
-      });
-    } catch (e) {
-      // best-effort; ログのみ
-      console.warn('[node-attachment] KG register failed', e);
+    // 矢印（FLOW_EDGE）はラベルが空のことが多くエンティティ化が不適切なため KG 登録はしない
+    // （添付自体は保存・取得できる）。
+    if (dto.nodeKind !== 'FLOW_EDGE') {
+      try {
+        const { knowledgeNodeId } = await this.bridge.ensureEntityForNode(projectId, dto.nodeKind, dto.nodeId, label);
+        await this.bridge.registerAttachmentDocument({
+          projectId, attachmentId: dto.attachmentId,
+          title: att.displayName || att.filename, mimeType: att.mimeType,
+          blobUrl: att.blobUrl ?? null, linkNodeId: knowledgeNodeId,
+        });
+      } catch (e) {
+        // best-effort; ログのみ
+        console.warn('[node-attachment] KG register failed', e);
+      }
     }
     return toDto(created);
   }

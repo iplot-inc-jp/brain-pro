@@ -128,7 +128,7 @@ Expected: valid / Generated / in sync。
 
 - [ ] **Step 3: Commit**
 ```bash
-cd /Users/kazuyukijimbo/ai-data-flow && git add backend/prisma/schema.prisma
+cd /Users/kazuyukijimbo/brain-pro && git add backend/prisma/schema.prisma
 git commit -m "feat(dfd): schema (DfdDiagram/DfdNode/DfdFlow/ReportType + Attachment.reportTypeId)"
 ```
 
@@ -520,8 +520,8 @@ git commit -m "feat(dfd): 帳票種別レジストリUI + データフローか�
 
 Run:
 ```bash
-cd /Users/kazuyukijimbo/ai-data-flow/backend && ../node_modules/.bin/tsc --noEmit -p tsconfig.json
-cd /Users/kazuyukijimbo/ai-data-flow/frontend && rm -rf .next/types && ../node_modules/.bin/tsc --noEmit -p tsconfig.json && ../node_modules/.bin/vitest run
+cd /Users/kazuyukijimbo/brain-pro/backend && ../node_modules/.bin/tsc --noEmit -p tsconfig.json
+cd /Users/kazuyukijimbo/brain-pro/frontend && rm -rf .next/types && ../node_modules/.bin/tsc --noEmit -p tsconfig.json && ../node_modules/.bin/vitest run
 ```
 Expected: backend 0, frontend 0, vitest green（72 + dfd 新規）。
 

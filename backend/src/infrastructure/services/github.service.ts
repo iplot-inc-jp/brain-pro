@@ -31,6 +31,31 @@ const MAX_FILES = 40;
 // 取得する総バイト数の上限（約300KB）。
 const MAX_TOTAL_BYTES = 300 * 1024;
 
+// ページ別スクリーンショット取り込み用：対応画像拡張子 → MIME。
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+// 1枚あたりの最大サイズ（10MB）。
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+function imageExt(path: string): string | null {
+  const lower = path.toLowerCase();
+  const ext = lower.slice(lower.lastIndexOf('.'));
+  return ext in IMAGE_MIME ? ext : null;
+}
+function isImageFile(path: string): boolean {
+  return imageExt(path) !== null;
+}
+/** 画像パスから MIME を返す（未対応なら application/octet-stream）。 */
+export function mimeForImagePath(path: string): string {
+  const ext = imageExt(path);
+  return ext ? IMAGE_MIME[ext] : 'application/octet-stream';
+}
+
 interface GitTreeEntry {
   path?: string;
   type?: string; // 'blob' | 'tree' | 'commit'
@@ -46,7 +71,7 @@ export class GithubService {
     return {
       Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'ai-data-flow',
+      'User-Agent': 'brain-pro',
     };
   }
 
@@ -162,6 +187,58 @@ export class GithubService {
       return Buffer.from(j.content, 'base64').toString('utf8');
     }
     return j.content;
+  }
+
+  /**
+   * rootPath 配下の画像ファイル（png/jpg/jpeg/webp/gif）の一覧を取得する。
+   * 再帰ツリー API でパス・sha・サイズだけを返す（本体は fetchBlobBytes で sha 指定取得）。
+   */
+  async listImageFiles(
+    repoFullName: string,
+    branch: string,
+    token: string,
+    rootPath: string,
+  ): Promise<{ path: string; sha: string; size: number }[]> {
+    const treeRes = await fetch(
+      `${GH_API}/repos/${repoFullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      { headers: this.headers(token) },
+    );
+    if (!treeRes.ok) {
+      const body = await treeRes.text().catch(() => '');
+      throw new Error(
+        `GitHub: failed to get tree for ${repoFullName}@${branch} (${treeRes.status}) ${body.slice(0, 200)}`,
+      );
+    }
+    const tree = (await treeRes.json()) as { tree?: GitTreeEntry[] };
+    const prefix = rootPath.replace(/\/+$/, '') + '/';
+    return (tree.tree ?? [])
+      .filter((e) => e.type === 'blob' && !!e.path && !!e.sha)
+      .filter((e) => (e.path as string).startsWith(prefix))
+      .filter((e) => isImageFile(e.path as string))
+      .filter((e) => (e.size ?? 0) <= MAX_IMAGE_BYTES)
+      .map((e) => ({ path: e.path as string, sha: e.sha as string, size: e.size ?? 0 }));
+  }
+
+  /**
+   * git blobs API で sha 指定のバイナリを取得する（contents API と違いサイズ上限が緩い）。
+   */
+  async fetchBlobBytes(
+    repoFullName: string,
+    sha: string,
+    token: string,
+  ): Promise<Buffer> {
+    const res = await fetch(
+      `${GH_API}/repos/${repoFullName}/git/blobs/${encodeURIComponent(sha)}`,
+      { headers: this.headers(token) },
+    );
+    if (!res.ok) {
+      throw new Error(`GitHub: failed to get blob ${sha} (${res.status})`);
+    }
+    const j = (await res.json()) as { content?: string; encoding?: string };
+    if (j.encoding !== 'base64' || typeof j.content !== 'string') {
+      throw new Error(`GitHub: unexpected blob encoding for ${sha}`);
+    }
+    return Buffer.from(j.content, 'base64');
   }
 
   private isSourceFile(path: string): boolean {

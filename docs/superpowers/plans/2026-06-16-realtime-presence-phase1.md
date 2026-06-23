@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add hosted Liveblocks presence (per-project "who's online" avatar stack + same-page live cursors) to ai-data-flow, with tokens minted by an authenticated NestJS endpoint that reuses the existing JWT auth + project RBAC, and the Liveblocks secret key never reaching the browser.
+**Goal:** Add hosted Liveblocks presence (per-project "who's online" avatar stack + same-page live cursors) to brain-pro, with tokens minted by an authenticated NestJS endpoint that reuses the existing JWT auth + project RBAC, and the Liveblocks secret key never reaching the browser.
 
 **Architecture:** A new `POST /api/liveblocks/token` endpoint (behind the global `JwtAuthGuard`) resolves project access via `ProjectAccessService`, fetches lean identity via `UserRepository`, assigns a deterministic color, and mints a Liveblocks access token via `@liveblocks/node`. The frontend wraps the existing `[projectId]/layout.tsx` in one `RoomProvider` (room id `project:{projectId}`) so all ~35 project pages inherit presence; cursors are viewport-relative (`clientX/clientY`) on a single `fixed inset-0` overlay, filtered to peers on the same sub-page. Pure logic (color, room-id, cursor-filter, dedupe, initials) lives in unit-tested helpers; Liveblocks-hook components stay thin.
 

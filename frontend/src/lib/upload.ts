@@ -37,6 +37,31 @@ function authHeaders(json = true): Record<string, string> {
  *   ここに既存のスコープ付き upload API を渡すこと（フォールバックでもスコープを保つ）。
  *   省略時はプロジェクト直下添付（projectAttachmentApi.upload）。
  */
+/**
+ * 既存の Blob URL（例: スクリーンショットの blobUrl）を Attachment として登録する。
+ * register-blob は blobUrl で冪等なので、同じ画像を複数ノードに付けても Attachment は1つ。
+ */
+export async function registerBlobAttachment(
+  projectId: string,
+  input: { blobUrl: string; filename: string; mimeType?: string; size?: number },
+): Promise<ProjectAttachment> {
+  const res = await fetch(
+    `${API_URL}/api/projects/${projectId}/attachments/register-blob`,
+    {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        blobUrl: input.blobUrl,
+        filename: input.filename,
+        mimeType: input.mimeType || 'image/png',
+        size: input.size ?? 0,
+      }),
+    },
+  );
+  if (!res.ok) throw new Error('スクリーンショットの添付登録に失敗しました');
+  return (await res.json()) as ProjectAttachment;
+}
+
 export async function uploadProjectFile(
   projectId: string,
   file: File,

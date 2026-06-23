@@ -1,10 +1,12 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
-import { X, Trash2, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { X, Trash2, Sparkles, Plus, Maximize2 } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
 import { uploadProjectFile } from '@/lib/upload';
 import { nodeAttachmentApi, type DiagramNodeKind, type NodeAttachmentDto } from '@/lib/node-attachments';
 import { AttachmentViewer } from './AttachmentViewer';
+import { AttachmentPickerDialog } from './AttachmentPickerDialog';
+import { AttachmentLightbox, type LightboxItem } from './AttachmentLightbox';
 
 export interface NodeInspectorPanelProps {
   projectId: string;
@@ -18,6 +20,8 @@ export function NodeInspectorPanel({ projectId, nodeKind, nodeId, nodeLabel, onC
   const [items, setItems] = useState<NodeAttachmentDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'files' | 'kg'>('files');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const reload = useCallback(() => {
     nodeAttachmentApi.list(projectId, nodeKind, nodeId).then(setItems).catch(() => setItems([]));
@@ -35,9 +39,36 @@ export function NodeInspectorPanel({ projectId, nodeKind, nodeId, nodeLabel, onC
     } finally { setBusy(false); }
   }, [projectId, nodeKind, nodeId, reload]);
 
+  // ピッカー（アップロード/既存/スクショ）で選んだ Attachment をこのノードに紐づける。
+  const attachExisting = useCallback(async (attachmentId: string, caption?: string) => {
+    await nodeAttachmentApi.create(projectId, { nodeKind, nodeId, attachmentId, caption });
+    reload();
+  }, [projectId, nodeKind, nodeId, reload]);
+
   const remove = useCallback(async (id: string) => {
     await nodeAttachmentApi.remove(id); reload();
   }, [reload]);
+
+  // ライトボックス用に添付（実体あり）のみを並べる。
+  const gallery = useMemo<LightboxItem[]>(
+    () =>
+      items
+        .filter((it) => it.attachment)
+        .map((it) => ({
+          attachmentId: it.attachment!.id,
+          mimeType: it.attachment!.mimeType,
+          filename: it.attachment!.displayName || it.attachment!.filename,
+          caption: it.caption,
+        })),
+    [items],
+  );
+  const openLightbox = useCallback(
+    (attachmentId: string) => {
+      const i = gallery.findIndex((g) => g.attachmentId === attachmentId);
+      if (i >= 0) setLightboxIndex(i);
+    },
+    [gallery],
+  );
 
   return (
     <div className="absolute right-3 top-3 z-30 w-80 rounded-lg border border-gray-200 bg-white shadow-lg">
@@ -52,10 +83,30 @@ export function NodeInspectorPanel({ projectId, nodeKind, nodeId, nodeLabel, onC
       {tab === 'files' && (
         <div className="space-y-2 p-3">
           <FileDropZone onFiles={onFiles} busy={busy} accept="image/*,video/*,application/pdf" />
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 py-1.5 text-xs text-gray-600 hover:border-blue-400 hover:text-blue-600"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            既存ファイル・スクリーンショットから選択
+          </button>
           <ul className="space-y-3">
             {items.map((it) => (
               <li key={it.id} className="rounded border p-2">
-                {it.attachment && <AttachmentViewer attachment={it.attachment} />}
+                {it.attachment && (
+                  <button
+                    type="button"
+                    onClick={() => openLightbox(it.attachment!.id)}
+                    title="拡大表示"
+                    className="group relative block w-full"
+                  >
+                    <AttachmentViewer attachment={it.attachment} />
+                    <span className="pointer-events-none absolute right-1 top-1 rounded bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      <Maximize2 className="h-3.5 w-3.5" />
+                    </span>
+                  </button>
+                )}
                 <div className="mt-1 flex items-center justify-between">
                   <span className="truncate text-[11px] text-gray-500">{it.attachment?.displayName || it.attachment?.filename}</span>
                   <button type="button" onClick={() => remove(it.id)} className="text-red-500 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -74,6 +125,22 @@ export function NodeInspectorPanel({ projectId, nodeKind, nodeId, nodeLabel, onC
             <Sparkles className="h-3.5 w-3.5" /> AI抽出（ナレッジグラフ画面から実行）
           </button>
         </div>
+      )}
+
+      {pickerOpen && (
+        <AttachmentPickerDialog
+          projectId={projectId}
+          onPick={attachExisting}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+      {lightboxIndex !== null && gallery.length > 0 && (
+        <AttachmentLightbox
+          items={gallery}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
       )}
     </div>
   );

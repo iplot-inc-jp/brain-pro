@@ -139,6 +139,32 @@ export function BacklogImportDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* 対応フォーマット（CSVの列）の案内 */}
+        <details className="rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 text-sm text-gray-600">
+          <summary className="cursor-pointer font-medium text-gray-700">
+            対応フォーマット（CSVの列）
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <p>
+              Backlog の「課題」一覧 → エクスポートで出力される CSV
+              をそのまま使えます。ヘッダ行（1行目）を見て次の列を自動対応します（別名も可）:
+            </p>
+            <ul className="ml-4 list-disc space-y-0.5 text-xs">
+              <li><b>件名</b>（タイトル / Summary）… <b>必須</b></li>
+              <li>詳細（説明 / Description）</li>
+              <li>状態（ステータス / Status）… 未完了→OPEN / 処理中→IN_PROGRESS / 完了→RESOLVED など</li>
+              <li>優先度（Priority）… 高→HIGH / 中→MEDIUM / 低→LOW</li>
+              <li>種別（課題種別 / Issue Type）</li>
+              <li>担当者（Assignee）</li>
+              <li>開始日（Start Date）／ 期限日（期限 / 締切 / Due Date）… 日付列</li>
+              <li>キー（課題キー / Key）… 例 PROJ-12 ／ <b>親課題</b>（キー）… 親子関係(parentId)に解決</li>
+            </ul>
+            <p className="text-xs text-gray-400">
+              ※ 未対応の列は無視されます。未知の状態/優先度は安全な既定値（OPEN / MEDIUM）になります。
+            </p>
+          </div>
+        </details>
+
         <div className="space-y-4 py-2">
           {/* 文字コード選択 */}
           <div className="space-y-1.5">

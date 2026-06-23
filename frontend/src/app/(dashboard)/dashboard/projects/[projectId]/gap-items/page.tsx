@@ -45,6 +45,7 @@ import { useTableSort } from '@/lib/use-table-sort';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { useTabParam } from '@/hooks/use-tab-param';
 import { AnalysisTab } from './_components/analysis-tab';
 import { LedgerTab } from './_components/ledger-tab';
 import { useReadOnly } from '@/components/read-only-context';
@@ -139,6 +140,10 @@ export default function GapItemsPage() {
   const router = useRouter();
   const projectId = params.projectId as string;
   const { canEdit } = useReadOnly();
+
+  // タブ（GAP一覧 / 分析 / 課題一覧・対応表）を URL ?tab= で駆動し、
+  // 左サイドメニューの子項目（メニューダウン）と双方向に同期する。
+  const [tab, setTab] = useTabParam('list');
 
   const [items, setItems] = useState<GapItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -579,8 +584,8 @@ export default function GapItemsPage() {
         </div>
       </div>
 
-      {/* タブ: GAP一覧（既定） / 分析 / 課題一覧・対応表 */}
-      <Tabs defaultValue="list" className="space-y-4">
+      {/* タブ: GAP一覧（既定） / 分析 / 課題一覧・対応表（URL ?tab= で駆動・サイドメニュー連動） */}
+      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList className="bg-gray-100 border border-gray-200">
           <TabsTrigger
             value="list"

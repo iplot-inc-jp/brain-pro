@@ -1,5 +1,5 @@
 /**
- * ai-data-flow API fetch クライアント
+ * brain-pro API fetch クライアント
  *
  * createApiClient({ apiUrl, apiKey }) が返す call(method, path, { body, query }) は
  * `${apiUrl}/api${path}` を x-api-key 付きで叩く。

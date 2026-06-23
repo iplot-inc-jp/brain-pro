@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * ai-data-flow MCP server
+ * brain-pro MCP server
  *
- * ai-data-flow バックエンド（NestJS, /api 全292ルート）を APIキー認証で叩く MCP サーバ。
+ * brain-pro バックエンド（NestJS, /api 全292ルート）を APIキー認証で叩く MCP サーバ。
  * IPLoT 方法論パイプライン（Ph.0〜7 / ASIS・TOBEフロー / イシューツリー / GAP / DFD /
  * データカタログ / タスク / リスク / KPI / 導入状況）を curated ツールとして公開し、
  * curated 外の操作は list_capabilities + api_request でフォールバックできる。
@@ -37,20 +37,21 @@ import * as rbac from './tools/rbac.mjs';
 import * as jobs from './tools/jobs.mjs';
 import * as entityJson from './tools/entity_json.mjs';
 import * as knowledge from './tools/knowledge.mjs';
+import * as meetingDocuments from './tools/meeting_documents.mjs';
 
 const API_URL = (process.env.AIDATAFLOW_API_URL || 'http://localhost:5021').replace(/\/$/, '');
 const API_KEY = process.env.AIDATAFLOW_API_KEY;
 
 if (!API_KEY) {
   console.error(
-    '[ai-data-flow-mcp] AIDATAFLOW_API_KEY is required (issue one via POST /api/api-keys).',
+    '[brain-pro-mcp] AIDATAFLOW_API_KEY is required (issue one via POST /api/api-keys).',
   );
   process.exit(1);
 }
 
 const call = createApiClient({ apiUrl: API_URL, apiKey: API_KEY });
 
-const server = new McpServer({ name: 'ai-data-flow', version: '1.0.0' });
+const server = new McpServer({ name: 'brain-pro', version: '1.0.0' });
 
 const modules = [
   generic,
@@ -70,6 +71,7 @@ const modules = [
   jobs,
   entityJson,
   knowledge,
+  meetingDocuments,
 ];
 
 for (const mod of modules) {
@@ -82,4 +84,4 @@ initOpenApi(API_URL);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error('[ai-data-flow-mcp] connected via stdio. API:', API_URL);
+console.error('[brain-pro-mcp] connected via stdio. API:', API_URL);

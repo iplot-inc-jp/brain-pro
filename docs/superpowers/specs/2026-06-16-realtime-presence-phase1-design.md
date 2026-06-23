@@ -11,7 +11,7 @@
 - **前提（ユーザー手当て）**: `LIVEBLOCKS_SECRET_KEY`（`sk_…`）が必要。コードは**グレースフルデグレード**（キー未設定でも各ページは通常表示、プレゼンスのみ非表示）で先行実装可。
 
 ## 0. 目的とスコープ
-ai-data-flow に Liveblocks の **プレゼンス専用**コラボを追加: プロジェクト単位の **「オンラインの人」アバタースタック** と **ライブカーソル**。Liveblocks の秘密鍵はブラウザに渡さず、既存の `JwtAuthGuard` ＋ `ProjectAccessService` RBAC を再利用する認証付き NestJS エンドポイントでトークンを発行する。
+brain-pro に Liveblocks の **プレゼンス専用**コラボを追加: プロジェクト単位の **「オンラインの人」アバタースタック** と **ライブカーソル**。Liveblocks の秘密鍵はブラウザに渡さず、既存の `JwtAuthGuard` ＋ `ProjectAccessService` RBAC を再利用する認証付き NestJS エンドポイントでトークンを発行する。
 
 **In scope (Phase 1):** プロジェクト単位の room、サーバ刻印のアイデンティティ（name/email/avatar/color）、プレゼンス（現在ページ＋カーソル）、プロジェクトレイアウトに1つのアバタースタック＋1つのカーソルオーバーレイを設置し全サブページを自動カバー。
 

@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTabParam } from '@/hooks/use-tab-param';
+import { FlowAttachmentsGallery } from '@/components/diagram/FlowAttachmentsGallery';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,6 +24,7 @@ import {
   Eye,
   Users,
   Wand2,
+  Image as ImageIcon,
   AlertCircle,
   GitBranch,
   ClipboardList,
@@ -52,11 +55,17 @@ import {
 import type {
   FlowAnnotation,
   FlowData,
+  FlowDataNode,
+  FlowDataEdge,
   FlowLinkDirection,
   FlowSummary,
   Role,
 } from '@/components/flow-editor/flow-types';
 import { applyEdgePatch } from '@/components/flow-editor/flow-types';
+import {
+  deriveDefinitionFromFlow,
+  hasDerivableContent,
+} from '@/lib/derive-flow-definition';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
@@ -96,6 +105,9 @@ if (typeof window !== 'undefined') {
 }
 
 type FlowTab = 'flow' | 'definition' | 'cruoa' | 'dfd';
+
+// タブの正準キー順。?tab= の値検証と、サイドメニューのフロー子タブ生成の両方で参照する。
+const FLOW_TAB_KEYS = ['flow', 'definition', 'cruoa', 'dfd'] as const;
 
 // Mermaidから生成ダイアログの「サンプルを表示」用テンプレート。
 // ロールを subgraph で表現する（parseMermaidToFlow の解析ルール: subgraph タイトル＝レーン）。
@@ -427,6 +439,8 @@ function FlowDefinitionPanel({
   flowId,
   projectId,
   roles,
+  nodes,
+  edges,
   informationTypes,
   onCreatedInformationType,
   onCreateRole,
@@ -435,6 +449,10 @@ function FlowDefinitionPanel({
   projectId: string;
   /** ロール一覧（次工程＝渡し先ロールの選択肢）。取得失敗時は空配列でも動く。 */
   roles: Role[];
+  /** フロー図のノード（手順・トリガー・担当・IO の自動導出元）。 */
+  nodes: FlowDataNode[];
+  /** フロー図のエッジ（将来の経路解析用。現状は導出に未使用）。 */
+  edges: FlowDataEdge[];
   /** 情報種別マスタ（INPUT/OUTPUT の選択肢）。取得失敗時は空配列でも動く。 */
   informationTypes: InformationType[];
   /** その場で情報種別を新規作成したとき、親の一覧へ反映する。 */
@@ -519,6 +537,75 @@ function FlowDefinitionPanel({
     dirtyRef.current = true;
     setSavedAt(null);
   }, []);
+
+  // フロー図（フローズ）から導出した業務記述書フィールド。
+  // ノード/ロール/情報リンクが変わるたび再計算され、「取り込む」で業務定義へ反映できる。
+  const derived = useMemo(
+    () => deriveDefinitionFromFlow(nodes, edges, roles),
+    [nodes, edges, roles],
+  );
+
+  // flowId ごとに「空欄のみ自動補完」を一度だけ行うためのガード。
+  const autoFilledForFlow = useRef<string | null>(null);
+
+  // 初回ロード時、フロー図に手順ノードがあれば空欄を自動補完する（手順は自動生成される）。
+  // 既に値がある項目は壊さない（非破壊）。フロー未ロード時は判定を保留する。
+  useEffect(() => {
+    if (loading || !def) return;
+    if (nodes.length === 0) return;
+    if (autoFilledForFlow.current === flowId) return;
+    autoFilledForFlow.current = flowId;
+
+    let changed = false;
+    if (steps.length === 0 && derived.doSteps.length > 0) {
+      setSteps(derived.doSteps);
+      changed = true;
+    }
+    const fills: Partial<FlowDefinition> = {};
+    if (!(def.trigger ?? '').trim() && derived.trigger) fills.trigger = derived.trigger;
+    if (!(def.owner ?? '').trim() && derived.owner) fills.owner = derived.owner;
+    if (!(def.system ?? '').trim() && derived.system) fills.system = derived.system;
+    if (Object.keys(fills).length > 0) {
+      setDef((prev) => (prev ? { ...prev, ...fills } : prev));
+      changed = true;
+    }
+    if (changed) {
+      dirtyRef.current = true;
+      setSavedAt(null);
+    }
+  }, [loading, def, nodes.length, steps, derived, flowId]);
+
+  // 「フロー図から取り込む」: 手順・トリガー・担当・使用システム・INPUT/OUTPUT をフロー図で上書き。
+  const handleImportFromFlow = useCallback(() => {
+    const hasExisting =
+      steps.length > 0 ||
+      [def?.trigger, def?.owner, def?.system, def?.input, def?.output].some(
+        (v) => (v ?? '').trim(),
+      );
+    if (
+      hasExisting &&
+      !window.confirm(
+        'フロー図の内容で「手順・トリガー・担当・使用システム・INPUT・OUTPUT」を上書きします。よろしいですか？（個別に手入力した内容は失われます）',
+      )
+    ) {
+      return;
+    }
+    setSteps(derived.doSteps);
+    setDef((prev) =>
+      prev
+        ? {
+            ...prev,
+            trigger: derived.trigger ?? prev.trigger,
+            owner: derived.owner ?? prev.owner,
+            system: derived.system ?? prev.system,
+            input: derived.input ?? prev.input,
+            output: derived.output ?? prev.output,
+          }
+        : prev,
+    );
+    dirtyRef.current = true;
+    setSavedAt(null);
+  }, [derived, steps.length, def]);
 
   // 次工程ロールをその場で新規作成 → 作成したロール名を nextProcess に即セット。
   const handleCreateRole = useCallback(async () => {
@@ -609,6 +696,38 @@ function FlowDefinitionPanel({
 
   return (
     <div className="space-y-4">
+      {/* フロー図から自動生成（フローズ ↔ 業務記述書の相互反映） */}
+      {nodes.length > 0 && (
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardContent className="flex flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 text-sm font-medium text-blue-900">
+                <Wand2 className="h-4 w-4 text-blue-600" />
+                フロー図から取り込む
+              </div>
+              <p className="text-xs text-blue-700/80">
+                手順 {derived.doSteps.length} 件
+                {derived.trigger ? `・トリガー「${derived.trigger}」` : ''}
+                {derived.owner ? `・担当「${derived.owner}」` : ''}
+                {derived.system ? `・システム「${derived.system}」` : ''}
+                を検出。フロー図を編集したら再取り込みで業務定義へ同期できます。
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleImportFromFlow}
+              disabled={!hasDerivableContent(derived)}
+              className="shrink-0 border-blue-300 bg-white text-blue-700 hover:bg-blue-100"
+            >
+              <Wand2 className="mr-1.5 h-4 w-4" />
+              フロー図から取り込む
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 単一行テキスト項目（2カラム） */}
       <Card className="bg-white border-gray-200">
         <CardContent className="grid grid-cols-1 gap-4 py-5 md:grid-cols-2">
@@ -867,7 +986,6 @@ function FlowDefinitionPanel({
 export default function ProjectFlowDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
   const flowId = params.flowId as string;
   const { canEdit } = useReadOnly();
@@ -876,9 +994,15 @@ export default function ProjectFlowDetailPage() {
   const ro = <T,>(fn: T): T | undefined => (canEdit ? fn : undefined);
 
   // フロー図 / 業務定義 / 情報の地図(CRUOA) / DFD のタブ。
-  // ?tab=dfd（第1レベルDFDからのドリルダウン）で初期タブをDFDに。
-  const initialTab: FlowTab = searchParams.get('tab') === 'dfd' ? 'dfd' : 'flow';
-  const [activeTab, setActiveTab] = useState<FlowTab>(initialTab);
+  // URL の ?tab= と双方向同期し、左サイドメニューのフロー子タブ（メニューダウン）から
+  // 各タブへ直接 deep-link できるようにする（?tab=definition / cruoa / dfd）。
+  const [tabParam, setActiveTab] = useTabParam('flow');
+  const activeTab: FlowTab = (FLOW_TAB_KEYS as readonly string[]).includes(tabParam)
+    ? (tabParam as FlowTab)
+    : 'flow';
+
+  // このフローに紐づく画像・ファイルのギャラリー（フロー図タブのボタンで開く）。
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -2853,7 +2977,29 @@ export default function ProjectFlowDetailPage() {
             </button>
           );
         })}
+        {activeTab === 'flow' && flowData && (
+          <button
+            type="button"
+            onClick={() => setGalleryOpen(true)}
+            className="ml-auto -mb-px flex items-center gap-1.5 rounded-t-lg border-b-2 border-transparent px-3 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-800"
+            title="このフローのノード・矢印に紐づく画像/ファイルを一覧表示"
+          >
+            <ImageIcon className="h-4 w-4" />
+            紐づけ画像を表示
+          </button>
+        )}
       </div>
+
+      {galleryOpen && flowData && (
+        <FlowAttachmentsGallery
+          projectId={projectId}
+          nodes={flowData.nodes
+            .filter((n) => n.type !== 'lane')
+            .map((n) => ({ id: n.id, label: n.label }))}
+          edges={flowData.edges.map((e) => ({ id: e.id, label: e.label ?? '' }))}
+          onClose={() => setGalleryOpen(false)}
+        />
+      )}
 
       {/* フロービューアー（フロー図タブ） */}
       <div
@@ -2924,6 +3070,8 @@ export default function ProjectFlowDetailPage() {
             flowId={flowId}
             projectId={projectId}
             roles={roles}
+            nodes={flowData?.nodes ?? []}
+            edges={flowData?.edges ?? []}
             informationTypes={informationTypes}
             onCreatedInformationType={(created) =>
               setInformationTypes((prev) =>

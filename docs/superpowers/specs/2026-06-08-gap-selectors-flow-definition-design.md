@@ -1,7 +1,7 @@
 # GAP選択式化 ＋ 業務定義シート①/個別定義シート③ 設計
 
 - 日付: 2026-06-08
-- 対象: ai-data-flow（Next.js フロント + NestJS/Prisma バックエンド）
+- 対象: brain-pro（Next.js フロント + NestJS/Prisma バックエンド）
 - 状態: 設計承認済み（ユーザレビュー前）
 
 ## 目的 / 背景

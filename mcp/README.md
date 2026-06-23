@@ -1,6 +1,6 @@
-# ai-data-flow MCP server
+# brain-pro MCP server
 
-ai-data-flow バックエンド（NestJS, `/api` 全302ルート）を **APIキー認証**で叩く MCP サーバ。
+brain-pro バックエンド（NestJS, `/api` 全302ルート）を **APIキー認証**で叩く MCP サーバ。
 Claude（Code / Desktop）から IPLoT 方法論パイプライン（Ph.0〜7・ASIS/TOBE業務フロー・イシューツリー・GAP・DFD・データカタログ・タスク・リスク・KPI・導入状況）を直接操作できる。
 
 - curated ツール **102個**（モジュール別、下表）
@@ -47,18 +47,18 @@ APIキーは発行ユーザーの権限で動作する（バックエンドが `
 ## Claude Code への登録
 
 ```bash
-claude mcp add ai-data-flow \
+claude mcp add brain-pro \
   -e AIDATAFLOW_API_KEY=sk_... \
-  -- node /Users/kazuyukijimbo/ai-data-flow/mcp/index.mjs
+  -- node /Users/kazuyukijimbo/brain-pro/mcp/index.mjs
 ```
 
 本番（Vercel）に向ける場合:
 
 ```bash
-claude mcp add ai-data-flow \
+claude mcp add brain-pro \
   -e AIDATAFLOW_API_URL=https://brain-pro-api.vercel.app \
   -e AIDATAFLOW_API_KEY=sk_... \
-  -- node /Users/kazuyukijimbo/ai-data-flow/mcp/index.mjs
+  -- node /Users/kazuyukijimbo/brain-pro/mcp/index.mjs
 ```
 
 ## Claude Desktop への登録
@@ -68,9 +68,9 @@ claude mcp add ai-data-flow \
 ```json
 {
   "mcpServers": {
-    "ai-data-flow": {
+    "brain-pro": {
       "command": "node",
-      "args": ["/Users/kazuyukijimbo/ai-data-flow/mcp/index.mjs"],
+      "args": ["/Users/kazuyukijimbo/brain-pro/mcp/index.mjs"],
       "env": {
         "AIDATAFLOW_API_URL": "http://localhost:5021",
         "AIDATAFLOW_API_KEY": "sk_..."

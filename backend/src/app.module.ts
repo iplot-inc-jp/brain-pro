@@ -119,6 +119,7 @@ import {
   RemoveTaskDependencyUseCase,
   ImportBacklogTasksUseCase,
   ImportJiraTasksUseCase,
+  GenerateTasksFromIssueTreeUseCase,
   // 外部トラッカー Webhook（秘密の生成/再生成/無効化/URL取得）
   ManageTrackerWebhookUseCase,
   // 外部トラッカー Webhook 受信（token検証→単一import / 削除=クローズ）
@@ -395,6 +396,10 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
+import {
+  PageScreenshotController,
+  PageScreenshotByIdController,
+} from './presentation/controllers/page-screenshot.controller';
 import { CronController } from './presentation/controllers/cron.controller';
 import { CodeCatalogController } from './presentation/controllers/code-catalog.controller';
 import { DatabaseConnectionController } from './presentation/controllers/database-connection.controller';
@@ -440,6 +445,7 @@ import {
   NodeAttachmentByIdController,
 } from './presentation/controllers/node-attachment.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
+import { ExcelTaskImportService } from './infrastructure/services/excel-task-import.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
@@ -448,6 +454,7 @@ import { CodeExtractionService } from './infrastructure/services/code-extraction
 import { LlmUsageRecorder } from './infrastructure/services/llm-usage-recorder.service';
 import { AttachmentRegisterService } from './infrastructure/services/attachment-register.service';
 import { SyncService } from './infrastructure/services/sync.service';
+import { ScreenshotImportService } from './infrastructure/services/screenshot-import.service';
 import { SyncSchedulerService } from './infrastructure/services/sync-scheduler.service';
 import { QStashService } from './infrastructure/services/qstash.service';
 import { JobService } from './infrastructure/services/job.service';
@@ -540,6 +547,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     UserSettingsController,
     ApiKeyController,
     GithubConnectionController,
+    PageScreenshotController,
+    PageScreenshotByIdController,
     CodeCatalogController,
     DatabaseConnectionController,
     AttachmentController,
@@ -883,6 +892,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     DeleteTaskUseCase,
     AddTaskDependencyUseCase,
     RemoveTaskDependencyUseCase,
+    GenerateTasksFromIssueTreeUseCase,
     ImportBacklogTasksUseCase,
     ImportJiraTasksUseCase,
     // 外部トラッカー Webhook 秘密の管理
@@ -1054,6 +1064,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     LlmUsageRecorder,
     AttachmentRegisterService,
     SyncService,
+    ScreenshotImportService,
     SyncSchedulerService,
     QStashService,
     JobService,
@@ -1062,6 +1073,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // ナレッジグラフ バッチ取り込み（Blob 保管 / 型別抽出 / 1ファイルパイプライン）
     BlobStorageService,
     FileExtractionService,
+    ExcelTaskImportService,
     KnowledgeIngestionService,
     KnowledgeDocumentExtractService,
     // Google Drive ソースアダプタ（Phase 3）

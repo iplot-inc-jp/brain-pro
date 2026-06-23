@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { GithubService } from './github.service';
+import { ScreenshotImportService } from './screenshot-import.service';
 import {
   CodeExtractionService,
   ExtractResult,
@@ -53,6 +54,7 @@ export class SyncService {
     private readonly crypto: CryptoService,
     private readonly github: GithubService,
     private readonly extraction: CodeExtractionService,
+    private readonly screenshots: ScreenshotImportService,
   ) {}
 
   /**
@@ -134,6 +136,18 @@ export class SyncService {
         extracted,
       );
 
+      // ページ別スクリーンショット（docs/screenshots/）も best-effort で取り込む。
+      // 失敗してもコード同期自体は成功扱い（連携の本筋を止めない）。
+      let shots: string = '';
+      try {
+        const s = await this.screenshots.importForConnection(connection);
+        shots = ` Screenshots +${s.imported} ~${s.updated} -${s.removed}.`;
+      } catch (e) {
+        this.logger.warn(
+          `Screenshot import skipped for ${connectionId}: ${(e as Error).message}`,
+        );
+      }
+
       await this.prisma.githubConnection.update({
         where: { id: connectionId },
         data: { lastSyncedSha: latestSha, lastSyncedAt: new Date() },
@@ -145,7 +159,7 @@ export class SyncService {
           status: 'SUCCESS',
           commitSha: latestSha,
           summary: summary as any,
-          log: `Processed ${files.length} files.`,
+          log: `Processed ${files.length} files.${shots}`,
           finishedAt: new Date(),
         },
       });

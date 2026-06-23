@@ -2345,7 +2345,10 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   }, [imageUndoApiRef, imageUndo, imageRedo, imagePeekUndo, imagePeekRedo]);
 
   // --- ノードインスペクタパネル（content ノード単一クリック時） ---
-  const [panel, setPanel] = useState<{ nodeId: string; nodeLabel: string } | null>(null);
+  // 添付/ナレッジグラフ inspector。ノード（FLOW_NODE）と矢印（FLOW_EDGE）で共用する。
+  const [panel, setPanel] = useState<
+    { nodeId: string; nodeLabel: string; nodeKind: 'FLOW_NODE' | 'FLOW_EDGE' } | null
+  >(null);
 
   // --- 向き（縦/横）: flow ごとに localStorage 永続化 ---
   const [orientation, setOrientation] = useState<FlowOrientation>('horizontal');
@@ -4035,7 +4038,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             !props.embedded && props.projectId
               ? (nodeId, nodeLabel) => {
                   setEditingNodeId(null);
-                  setPanel({ nodeId, nodeLabel });
+                  setPanel({ nodeId, nodeLabel, nodeKind: 'FLOW_NODE' });
                 }
               : undefined
           }
@@ -4046,7 +4049,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       {!props.embedded && panel && props.projectId && (
         <NodeInspectorPanel
           projectId={props.projectId}
-          nodeKind="FLOW_NODE"
+          nodeKind={panel.nodeKind}
           nodeId={panel.nodeId}
           nodeLabel={panel.nodeLabel}
           onClose={() => setPanel(null)}
@@ -4108,6 +4111,22 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
             onClose={() => setSelectedEdgeId(null)}
             onUpdateEdge={props.onUpdateEdge}
             onCreateInformationType={props.onCreateInformationType}
+            onOpenAttachments={
+              !props.embedded && props.projectId
+                ? () => {
+                    const sLabel =
+                      flowData.nodes.find((n) => n.id === edge.sourceNodeId)?.label ?? '';
+                    const tLabel =
+                      flowData.nodes.find((n) => n.id === edge.targetNodeId)?.label ?? '';
+                    setPanel({
+                      nodeId: edge.id,
+                      nodeLabel: edge.label || `${sLabel} → ${tLabel}`,
+                      nodeKind: 'FLOW_EDGE',
+                    });
+                    setSelectedEdgeId(null);
+                  }
+                : undefined
+            }
             onDelete={
               props.onDeleteEdge
                 ? () => {
@@ -4863,6 +4882,7 @@ function EdgePropertyPanel({
   onReverse,
   onDelete,
   onCreateInformationType,
+  onOpenAttachments,
 }: {
   edge: FlowDataEdge;
   informationTypes: InformationType[];
@@ -4901,6 +4921,8 @@ function EdgePropertyPanel({
     name: string;
     category: InformationCategory;
   }) => Promise<InformationType | null>;
+  /** この矢印に画像/ファイルを添付する inspector を開く。 */
+  onOpenAttachments?: () => void;
 }) {
   const [informationTypeId, setInformationTypeId] = useState<string>(
     edge.informationTypeId ?? '',
@@ -4959,14 +4981,27 @@ function EdgePropertyPanel({
     <div className="absolute top-0 right-0 h-full w-full sm:w-80 bg-white border-l border-gray-200 shadow-xl z-40 flex flex-col animate-in slide-in-from-right duration-200">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900">矢印のプロパティ</h3>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1 rounded hover:bg-gray-100 text-gray-500"
-          title="閉じる"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onOpenAttachments && (
+            <button
+              type="button"
+              onClick={onOpenAttachments}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-gray-100 text-gray-600"
+              title="添付・画像"
+            >
+              <Paperclip className="w-3.5 h-3.5" />
+              添付
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded hover:bg-gray-100 text-gray-500"
+            title="閉じる"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">

@@ -1,6 +1,6 @@
 # Brain Pro — AI連携ガイド（MCP / REST API）
 
-> このドキュメントは、生成AIエージェント（Claude など）が **Brain Pro**（= ai-data-flow バックエンド）を
+> このドキュメントは、生成AIエージェント（Claude など）が **Brain Pro**（= brain-pro バックエンド）を
 > 自走して操作するための統合ガイドです。AIが仕様を読んで自力で「プロジェクト作成 → 業務フロー → 課題 → GAP → タスク」までを
 > 完遂できることをゴールにしています。
 >
@@ -202,19 +202,19 @@ MCP curated **102ツール**（モジュール別の代表）＋ 脱出ハッチ
 
 ```bash
 # Claude Code（本番に向ける例）
-claude mcp add ai-data-flow \
+claude mcp add brain-pro \
   -e AIDATAFLOW_API_KEY=sk_xxxxxxxx... \
   -e AIDATAFLOW_API_URL=https://brain-pro-api.vercel.app \
-  -- node /Users/kazuyukijimbo/ai-data-flow/mcp/index.mjs
+  -- node /Users/kazuyukijimbo/brain-pro/mcp/index.mjs
 ```
 
 ```jsonc
 // Claude Desktop（claude_desktop_config.json）
 {
   "mcpServers": {
-    "ai-data-flow": {
+    "brain-pro": {
       "command": "node",
-      "args": ["/Users/kazuyukijimbo/ai-data-flow/mcp/index.mjs"],
+      "args": ["/Users/kazuyukijimbo/brain-pro/mcp/index.mjs"],
       "env": {
         "AIDATAFLOW_API_URL": "https://brain-pro-api.vercel.app",
         "AIDATAFLOW_API_KEY": "sk_xxxxxxxx..."

@@ -92,7 +92,7 @@ Expected: 「valid」「Generated Prisma Client」「Your database is now in syn
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/kazuyukijimbo/ai-data-flow
+cd /Users/kazuyukijimbo/brain-pro
 git add backend/prisma/schema.prisma
 git commit -m "feat(schema): add FlowDefinition model (1:1 BusinessFlow)"
 ```
@@ -960,8 +960,8 @@ git commit -m "feat(gap): 対象業務/ASIS/TOBE を業務フロー・ノード�
 
 Run:
 ```bash
-cd /Users/kazuyukijimbo/ai-data-flow/backend && ../node_modules/.bin/tsc --noEmit -p tsconfig.json
-cd /Users/kazuyukijimbo/ai-data-flow/frontend && rm -rf .next/types && ../node_modules/.bin/tsc --noEmit -p tsconfig.json && ../node_modules/.bin/vitest run
+cd /Users/kazuyukijimbo/brain-pro/backend && ../node_modules/.bin/tsc --noEmit -p tsconfig.json
+cd /Users/kazuyukijimbo/brain-pro/frontend && rm -rf .next/types && ../node_modules/.bin/tsc --noEmit -p tsconfig.json && ../node_modules/.bin/vitest run
 ```
 Expected: backend 0 errors、frontend 0 errors、vitest 72 passed。
 

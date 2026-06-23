@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
@@ -116,6 +116,15 @@ export default function MeetingDocumentsPage() {
     void loadList();
   }, [loadList]);
 
+  // 左サイドメニューの「会議別ドキュメント」からの遷移（?doc=<id>）で該当ドキュメントを選択。
+  const searchParams = useSearchParams();
+  const docParam = searchParams.get('doc');
+  useEffect(() => {
+    if (docParam && documents.some((d) => d.id === docParam)) {
+      setSelectedId(docParam);
+    }
+  }, [docParam, documents]);
+
   // 会議を order→name でソート。
   const sortedMeetings = useMemo(
     () =>
@@ -219,18 +228,24 @@ export default function MeetingDocumentsPage() {
     }
   }, [selectedDoc, titleDraft]);
 
-  // GOOGLE_DOC の URL 保存。保存後に再取得して選択を維持。
+  // GOOGLE_DOC の URL 保存（自動保存）。ローカル一覧を即時更新（全件再取得しないので
+  // 入力中に iframe が再読込されてチラつくのを防ぐ）。
   const handleSaveGoogleUrl = useCallback(
     (url: string) => {
       if (!selectedDoc) return;
+      const next = url.trim() === '' ? null : url.trim();
       meetingDocumentApi
-        .update(selectedDoc.id, { googleDocUrl: url })
-        .then(() => loadList(selectedDoc.id))
+        .update(selectedDoc.id, { googleDocUrl: next })
+        .then((updated) => {
+          setDocuments((list) =>
+            list.map((d) => (d.id === selectedDoc.id ? { ...d, googleDocUrl: updated.googleDocUrl } : d)),
+          );
+        })
         .catch(() => {
           /* noop */
         });
     },
-    [selectedDoc, loadList],
+    [selectedDoc],
   );
 
   const hasMeetings = sortedMeetings.length > 0;

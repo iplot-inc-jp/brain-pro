@@ -52,6 +52,7 @@ import {
   Gauge,
   Activity,
   ListChecks,
+  Image as ImageIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
@@ -197,6 +198,93 @@ function useFlowTree(projectId: string | null) {
   return { subProjects, flows }
 }
 
+// フローの子タブ（メニューダウン）。flows/[flowId] の ?tab= と一致させる。
+const FLOW_LEAF_TABS = [
+  { tab: 'flow', name: 'フロー図' },
+  { tab: 'definition', name: '個別定義' },
+  { tab: 'cruoa', name: '情報の地図(CRUOA)' },
+  { tab: 'dfd', name: 'DFD' },
+] as const
+
+// フロー1本のサイドメニュー項目。名前リンク＋右端シェブロンで子タブの開閉。
+// アクティブなフローのみ初期展開し、各子タブは ?tab= へ deep-link する
+// （ページ内タブと双方向同期。useTabParam 参照）。
+function FlowLeaf({
+  flow,
+  projectId,
+  pathname,
+  onNavigate,
+}: {
+  flow: BusinessFlow
+  projectId: string
+  pathname: string
+  onNavigate: () => void
+}) {
+  const href = `/dashboard/projects/${projectId}/flows/${flow.id}`
+  const isActive = pathname === href
+  const searchParams = useSearchParams()
+  const currentTab = isActive ? searchParams.get('tab') ?? 'flow' : null
+  const [open, setOpen] = useState(isActive)
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center gap-1 pr-1 rounded-md transition-colors',
+          'text-muted-foreground hover:text-foreground hover:bg-secondary',
+          isActive && 'text-primary font-medium bg-primary/10'
+        )}
+      >
+        <Link
+          href={href}
+          onClick={onNavigate}
+          title={flow.name}
+          className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 text-xs"
+        >
+          <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+          <span className="truncate">{flow.name}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'タブを閉じる' : 'タブを開く'}
+          aria-expanded={open}
+          className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-secondary/80 flex-shrink-0"
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      {open && (
+        <div className="ml-5 pl-2 mt-0.5 space-y-0.5 border-l border-border/60">
+          {FLOW_LEAF_TABS.map((t) => {
+            const tabHref = t.tab === 'flow' ? href : `${href}?tab=${t.tab}`
+            const tabActive = currentTab === t.tab
+            return (
+              <Link
+                key={t.tab}
+                href={tabHref}
+                onClick={onNavigate}
+                title={t.name}
+                className={cn(
+                  'block px-3 py-1 rounded-md text-[11px] transition-colors',
+                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                  tabActive && 'text-primary font-medium bg-primary/10'
+                )}
+              >
+                {t.name}
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ASIS/TOBE サブグループ
 function FlowKindGroup({
   label,
@@ -237,26 +325,15 @@ function FlowKindGroup({
       </button>
       {open && (
         <div className="space-y-0.5 pl-3">
-          {flows.map((flow) => {
-            const href = `/dashboard/projects/${projectId}/flows/${flow.id}`
-            const isActive = pathname === href
-            return (
-              <Link
-                key={flow.id}
-                href={href}
-                onClick={onNavigate}
-                title={flow.name}
-                className={cn(
-                  'flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors',
-                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
-                  isActive && 'text-primary font-medium bg-primary/10'
-                )}
-              >
-                <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                <span className="truncate">{flow.name}</span>
-              </Link>
-            )
-          })}
+          {flows.map((flow) => (
+            <FlowLeaf
+              key={flow.id}
+              flow={flow}
+              projectId={projectId}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -520,6 +597,8 @@ const COLLAPSED_SHORT_LABELS: Record<string, string> = {
   'リスクマネジメント': 'リスク…',
   '背景・目的': '背景',
   '変更履歴': '履歴',
+  'GAP（課題）': 'GAP',
+  'ページ別スクリーンショット': 'スクショ',
 }
 
 function collapsedLabel(name: string): string {
@@ -579,6 +658,272 @@ function CollapsedGroupDivider({ label }: { label: string }) {
   )
 }
 
+// ====== ナビ項目（ページ内タブを子に持てる）======
+
+// 子（ページ内タブ）。href は親の href + ?tab=<tab>。
+type NavChild = { name: string; tab: string }
+type NavItem = { name: string; href: string; icon: LucideIcon; children?: NavChild[] }
+
+// 展開サイドバーのナビ項目。
+// - children を持たない場合は従来どおり単純な Link。
+// - children（ページ内タブ）を持つ場合は、親行（ページ名リンク＋シェブロン）の下に
+//   子リンク（?tab=<tab> へ遷移）を折りたためる「メニューダウン」として描画する。
+function ProjectNavItem({
+  item,
+  isActive,
+  currentTab,
+  onNavigate,
+}: {
+  item: NavItem
+  isActive: boolean
+  // 現在の ?tab=（未指定なら null）。親ページがアクティブなときの子ハイライト判定に使う。
+  currentTab: string | null
+  onNavigate: () => void
+}) {
+  const hasChildren = !!item.children && item.children.length > 0
+  // 親ページがアクティブなら初期展開。
+  const [open, setOpen] = useState(isActive)
+  // 別ページから遷移してアクティブになったら自動展開（手動で閉じた状態は遷移までは維持）。
+  useEffect(() => {
+    if (isActive) setOpen(true)
+  }, [isActive])
+
+  if (!hasChildren) {
+    return (
+      <Link
+        href={item.href}
+        onClick={onNavigate}
+        className={cn('sidebar-link ml-2', isActive && 'active')}
+      >
+        <item.icon className="h-5 w-5 flex-shrink-0" />
+        <span className="text-sm">{item.name}</span>
+        {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
+      </Link>
+    )
+  }
+
+  // 既定（先頭）タブ。?tab= 未指定で親がアクティブなときは先頭タブを選択中とみなす。
+  const defaultTab = item.children![0].tab
+  const activeTab = isActive ? (currentTab ?? defaultTab) : null
+
+  return (
+    <div>
+      {/* 親行: ページ名はリンク（既定タブへ）、右端シェブロンで子（タブ）の開閉 */}
+      <div className={cn('sidebar-link ml-2 pr-1.5', isActive && 'active')}>
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          title={item.name}
+          className="flex items-center gap-3 flex-1 min-w-0"
+        >
+          <item.icon className="h-5 w-5 flex-shrink-0" />
+          <span className="text-sm truncate">{item.name}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? 'タブを閉じる' : 'タブを開く'}
+          aria-expanded={open}
+          className="p-0.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0"
+        >
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+      </div>
+      {open && (
+        <div className="ml-6 pl-2 mt-0.5 space-y-0.5 border-l border-border/60">
+          {item.children!.map((child) => {
+            const childActive = activeTab === child.tab
+            return (
+              <Link
+                key={child.tab}
+                href={`${item.href}?tab=${child.tab}`}
+                onClick={onNavigate}
+                title={child.name}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors',
+                  'text-muted-foreground hover:text-foreground hover:bg-secondary',
+                  childActive && 'text-primary font-medium bg-primary/10',
+                )}
+              >
+                <span className="truncate">{child.name}</span>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ====== 会議別ドキュメント（サイドメニューにぶら下げるツリー）======
+
+type MeetingLite = { id: string; name: string; order?: number }
+type MeetingDocLite = { id: string; meetingId: string; title: string; kind: string }
+
+// 会議 + 会議別ドキュメントを取得（projectId 変更時のみ）。
+function useMeetingDocsTree(projectId: string | null) {
+  const [meetings, setMeetings] = useState<MeetingLite[]>([])
+  const [docs, setDocs] = useState<MeetingDocLite[]>([])
+
+  useEffect(() => {
+    if (!projectId) {
+      setMeetings([])
+      setDocs([])
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      try {
+        const [mRes, dRes] = await Promise.all([
+          fetch(`${API_URL}/api/projects/${projectId}/meetings`, { headers: authHeaders() }),
+          fetch(`${API_URL}/api/projects/${projectId}/meeting-documents`, {
+            headers: authHeaders(),
+          }),
+        ])
+        if (!cancelled && mRes.ok) {
+          const d = await mRes.json()
+          setMeetings(Array.isArray(d) ? d : [])
+        }
+        if (!cancelled && dRes.ok) {
+          const d = await dRes.json()
+          setDocs(Array.isArray(d) ? d : [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch meeting docs tree:', err)
+      }
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  return { meetings, docs }
+}
+
+// 1会議ノード（折りたたみ → 配下の会議別ドキュメント）。
+function MeetingDocNode({
+  meeting,
+  docs,
+  base,
+  onPage,
+  currentDoc,
+  onNavigate,
+}: {
+  meeting: MeetingLite
+  docs: MeetingDocLite[]
+  base: string
+  onPage: boolean
+  currentDoc: string | null
+  onNavigate: () => void
+}) {
+  const containsActive = onPage && docs.some((d) => d.id === currentDoc)
+  const [open, setOpen] = useState(containsActive)
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={meeting.name}
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+        )}
+        <CalendarClock className="h-3.5 w-3.5 flex-shrink-0 text-primary/70" />
+        <span className="truncate">{meeting.name}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground/70">{docs.length}</span>
+      </button>
+      {open && (
+        <div className="ml-2 mt-0.5 space-y-0.5 border-l border-border/60 pl-3">
+          {docs.length === 0 ? (
+            <div className="px-2 py-1 text-[11px] text-muted-foreground/70">（なし）</div>
+          ) : (
+            docs.map((d) => {
+              const href = `${base}?doc=${d.id}`
+              const isActive = onPage && currentDoc === d.id
+              return (
+                <Link
+                  key={d.id}
+                  href={href}
+                  onClick={onNavigate}
+                  title={d.title || '無題のドキュメント'}
+                  className={cn(
+                    'flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors',
+                    'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                    isActive && 'bg-primary/10 font-medium text-primary',
+                  )}
+                >
+                  <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                  <span className="truncate">{d.title || '無題のドキュメント'}</span>
+                </Link>
+              )
+            })
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 会議別ドキュメントのツリー全体（ミーティングドキュメント項目の下にぶら下げる）。
+function MeetingDocsTree({
+  projectId,
+  meetings,
+  docs,
+  pathname,
+  currentDoc,
+  onNavigate,
+}: {
+  projectId: string
+  meetings: MeetingLite[]
+  docs: MeetingDocLite[]
+  pathname: string
+  currentDoc: string | null
+  onNavigate: () => void
+}) {
+  if (meetings.length === 0 && docs.length === 0) return null
+
+  const base = `/dashboard/projects/${projectId}/meeting-documents`
+  const onPage = pathname === base
+  const docsByMeeting = new Map<string, MeetingDocLite[]>()
+  for (const d of docs) {
+    const arr = docsByMeeting.get(d.meetingId) ?? []
+    arr.push(d)
+    docsByMeeting.set(d.meetingId, arr)
+  }
+  docsByMeeting.forEach((arr) =>
+    arr.sort((a, b) => a.title.localeCompare(b.title, 'ja')),
+  )
+  const sorted = [...meetings].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name, 'ja'),
+  )
+
+  return (
+    <div className="ml-2 space-y-0.5">
+      <div className="flex items-center gap-1.5 px-3 pt-1 text-[11px] font-semibold tracking-wide text-gray-400">
+        <CalendarClock className="h-3.5 w-3.5 text-primary/70" />
+        会議別ドキュメント
+      </div>
+      <div className="ml-2 mt-1 max-h-[32vh] space-y-1 overflow-y-auto border-l border-border pl-2">
+        {sorted.map((m) => (
+          <MeetingDocNode
+            key={m.id}
+            meeting={m}
+            docs={docsByMeeting.get(m.id) ?? []}
+            base={base}
+            onPage={onPage}
+            currentDoc={currentDoc}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -592,6 +937,7 @@ export default function DashboardLayout({
   const projectId = useMemo(() => extractProjectId(pathname), [pathname])
   const projectName = useProjectName(projectId)
   const { subProjects, flows } = useFlowTree(projectId)
+  const { meetings: mtgDocsMeetings, docs: mtgDocs } = useMeetingDocsTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
 
   // プロジェクト非依存のトップナビ（フラット）
@@ -624,7 +970,16 @@ export default function DashboardLayout({
           { name: '背景・目的', href: `${base}/background`, icon: Landmark },
           { name: 'ナレッジ取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
           { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
-          { name: 'ナレッジ一覧編集', href: `${base}/knowledge/list`, icon: ListTodo },
+          {
+            name: 'ナレッジ一覧編集',
+            href: `${base}/knowledge/list`,
+            icon: ListTodo,
+            children: [
+              { name: 'ノード', tab: 'nodes' },
+              { name: '文書', tab: 'documents' },
+              { name: '関係', tab: 'relations' },
+            ],
+          },
           { name: 'ナレッジ設定', href: `${base}/knowledge/settings`, icon: Settings },
         ],
       },
@@ -641,6 +996,22 @@ export default function DashboardLayout({
         ],
       },
       {
+        label: '課題・打ち手',
+        items: [
+          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
+          {
+            name: 'GAP（課題）',
+            href: `${base}/gap-items`,
+            icon: GitCompare,
+            children: [
+              { name: 'GAP一覧', tab: 'list' },
+              { name: '分析', tab: 'analysis' },
+              { name: '課題一覧 / 対応表', tab: 'ledger' },
+            ],
+          },
+        ],
+      },
+      {
         label: '現状把握',
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
@@ -653,6 +1024,7 @@ export default function DashboardLayout({
         label: '現状システム把握',
         items: [
           { name: 'コード連携', href: `${base}/integrations`, icon: Github },
+          { name: 'ページ別スクリーンショット', href: `${base}/page-screenshots`, icon: ImageIcon },
           { name: 'DFD', href: `${base}/dfd`, icon: Share2 },
           { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
           { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
@@ -672,16 +1044,19 @@ export default function DashboardLayout({
         ],
       },
       {
-        label: '課題・打ち手',
-        items: [
-          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
-          { name: 'GAP', href: `${base}/gap-items`, icon: GitCompare },
-        ],
-      },
-      {
         label: '推進',
         items: [
-          { name: 'ステークホルダーマネジメント', href: `${base}/stakeholder-management`, icon: Users },
+          {
+            name: 'ステークホルダーマネジメント',
+            href: `${base}/stakeholder-management`,
+            icon: Users,
+            children: [
+              { name: 'ステークホルダー', tab: 'stakeholders' },
+              { name: '関心ごと', tab: 'interests' },
+              { name: '会議・報告', tab: 'meetings' },
+              { name: '導入状況', tab: 'adoption' },
+            ],
+          },
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
           { name: 'アジャイル', href: `${base}/tasks/agile`, icon: Layers },
@@ -694,7 +1069,15 @@ export default function DashboardLayout({
         items: [
           { name: '処理状況', href: `${base}/jobs`, icon: Activity },
           { name: 'AI使用量', href: `${base}/ai-usage`, icon: BarChart3 },
-          { name: '設定', href: `${base}/settings`, icon: Settings },
+          {
+            name: '設定',
+            href: `${base}/settings`,
+            icon: Settings,
+            children: [
+              { name: '一般', tab: 'general' },
+              { name: 'ロール', tab: 'roles' },
+            ],
+          },
           { name: 'メンバー権限', href: `${base}/members`, icon: Users },
         ],
       },
@@ -751,18 +1134,24 @@ export default function DashboardLayout({
       >
         {/* ===== 展開表示（モバイルは常にこちら。lg は非縮小時のみ） ===== */}
         <div className={cn('flex flex-col h-full', sidebarCollapsed && 'lg:hidden')}>
-          {/* Logo */}
+          {/* Logo（プロジェクトを開いている間は左上をプロジェクト名にする） */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-            <Link href="/dashboard" className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
+            <Link
+              href={projectId ? `/dashboard/projects/${projectId}` : '/dashboard'}
+              title={projectId ? projectName || 'プロジェクト' : 'Brain Pro'}
+              className="flex min-w-0 flex-1 items-center gap-3"
+            >
+              <div className="w-9 h-9 flex-shrink-0 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30 glow-cyan">
                 <Database className="h-5 w-5 text-primary" />
               </div>
-              <span className="font-mono text-lg font-semibold text-foreground">Brain Pro</span>
+              <span className="truncate font-mono text-lg font-semibold text-foreground">
+                {projectId ? projectName || 'プロジェクト' : 'Brain Pro'}
+              </span>
             </Link>
             <button
               onClick={() => setSidebarCollapsed(true)}
               title="メニューを縮小"
-              className="hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              className="ml-1 hidden lg:flex p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors flex-shrink-0"
             >
               <PanelLeftClose className="h-4 w-4" />
             </button>
@@ -787,15 +1176,9 @@ export default function DashboardLayout({
               )
             })}
 
-            {/* プロジェクト名ヘッダー */}
-            {projectId && (
-              <div className="pt-4 pb-2 px-1">
-                <div className="section-title text-xs">
-                  <FolderOpen className="h-3.5 w-3.5 text-primary" />
-                  <span className="truncate">{projectName || 'プロジェクト'}</span>
-                </div>
-              </div>
-            )}
+            {/* プロジェクト名は左上ロゴ位置に表示するため、ここでの重複ヘッダーは廃止。
+                プロジェクトを開いている間の区切りとして薄い境界線だけ残す。 */}
+            {projectId && <div className="pt-2 mb-1 border-t border-border/60" />}
 
             {/* ステージごとにグループ化したプロジェクトナビ
                 （業務フローブラウザは「現状把握」グループ配下に階層表示する。下記参照） */}
@@ -806,22 +1189,15 @@ export default function DashboardLayout({
                   <div className="text-[11px] font-semibold text-gray-400 tracking-wide px-3 pt-3">
                     {group.label}
                   </div>
-                  {group.items.map((item) => {
-                    const isActive = isLinkActive(item.href)
-                    return (
-                      <div key={item.name}>
-                        <Link
-                          href={item.href}
-                          onClick={() => setSidebarOpen(false)}
-                          className={cn('sidebar-link ml-2', isActive && 'active')}
-                        >
-                          <item.icon className="h-5 w-5 flex-shrink-0" />
-                          <span className="text-sm">{item.name}</span>
-                          {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
-                        </Link>
-                      </div>
-                    )
-                  })}
+                  {group.items.map((item) => (
+                    <ProjectNavItem
+                      key={item.name}
+                      item={item}
+                      isActive={isLinkActive(item.href)}
+                      currentTab={searchParams.get('tab')}
+                      onNavigate={() => setSidebarOpen(false)}
+                    />
+                  ))}
                   {/* 業務フローブラウザ（領域 → サブ領域 → ASIS/TOBE → フロー）は
                       ASIS/TOBE 業務フローの一覧なので「現状把握」グループ配下に階層表示する。
                       以前はサイドメニュー最上部に浮いていたのをここへ移動。 */}
@@ -839,6 +1215,18 @@ export default function DashboardLayout({
                         onNavigate={() => setSidebarOpen(false)}
                       />
                     </div>
+                  )}
+                  {/* 会議別ドキュメント（ミーティングドキュメント項目の下にぶら下げる）。
+                      ミーティングドキュメントは「共通マスタ」グループの最後の項目なので、ここに描画する。 */}
+                  {group.label === '共通マスタ' && projectId && (
+                    <MeetingDocsTree
+                      projectId={projectId}
+                      meetings={mtgDocsMeetings}
+                      docs={mtgDocs}
+                      pathname={pathname}
+                      currentDoc={searchParams.get('doc')}
+                      onNavigate={() => setSidebarOpen(false)}
+                    />
                   )}
                 </div>
               ))}

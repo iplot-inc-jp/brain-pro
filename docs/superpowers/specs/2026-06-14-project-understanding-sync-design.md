@@ -11,7 +11,7 @@ ipro-bot は Slack / Microsoft Teams / Google Chat / Google Calendar / トラッ
 - `project_memory` … 定期ジョブがチャンネル履歴を Claude で要約（decision / fact / open issue）
 - `project_context` … 日次ジョブが memory+手動ピンを Claude(Haiku) で5〜8項目に要約し `source='auto'` 行を置換
 
-つまり **「Slack 等の全情報からのプロジェクト理解」は ipro-bot 内に既に出来ている**。本設計のゴールは、その理解を **Brain Pro（ai-data-flow）に1プロジェクト=1枚のフリーテキスト「AI理解ノート」として定期自動で保存** し、Brain Pro 上で人間が確認・確定できるようにすることである。
+つまり **「Slack 等の全情報からのプロジェクト理解」は ipro-bot 内に既に出来ている**。本設計のゴールは、その理解を **Brain Pro（brain-pro）に1プロジェクト=1枚のフリーテキスト「AI理解ノート」として定期自動で保存** し、Brain Pro 上で人間が確認・確定できるようにすることである。
 
 現状、両システムを繋ぐ実装は存在しない（grep で参照ゼロ）。本設計はその橋渡しを新規に作る。
 
