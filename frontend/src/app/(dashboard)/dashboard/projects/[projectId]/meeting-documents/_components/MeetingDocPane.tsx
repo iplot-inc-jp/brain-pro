@@ -6,7 +6,7 @@
 // GOOGLE_DOC = 外部 Google Document/Spreadsheet/Drive の URL（自動保存＋読み取り専用プレビュー）。
 //
 // window 依存（Liveblocks/Tiptap）のため、親ページから next/dynamic(ssr:false) で読み込むこと。
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClientSideSuspense } from '@liveblocks/react';
 import { RoomProvider } from '@/lib/liveblocks.config';
 import { useLiveblocksExtension } from '@liveblocks/react-tiptap';
@@ -35,12 +35,16 @@ import {
   Check,
   Download,
   AlertCircle,
+  ZoomIn,
+  ZoomOut,
+  HardDrive,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard';
 import { meetingDocumentApi, type MeetingDocument } from '@/lib/meeting-documents';
+import { driveApi } from '@/lib/knowledge';
 
 interface Props {
   doc: MeetingDocument;
@@ -348,6 +352,62 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
     }
   };
 
+  // Google Drive 連携状態（本文取り込みに必要）。getAuthUrl は authUrl＋接続状態を返す。
+  // refresh token は AES-256-GCM でサーバーに暗号化保存され、レスポンスには出ない。
+  const [drive, setDrive] = useState<
+    { connected: boolean; email: string | null; authUrl: string } | null
+  >(null);
+  const [connecting, setConnecting] = useState(false);
+  const loadDrive = useCallback(async () => {
+    try {
+      const res = await driveApi.getAuthUrl(doc.projectId);
+      setDrive({
+        connected: !!res.connected,
+        email: res.email ?? null,
+        authUrl: res.authUrl,
+      });
+    } catch {
+      // Drive 機能が未構成（管理者の環境設定が必要）の場合は連携 UI を出さない。
+      setDrive(null);
+    }
+  }, [doc.projectId]);
+  useEffect(() => {
+    void loadDrive();
+  }, [loadDrive]);
+
+  // 認証ウィンドウで OAuth → 完了をポーリングして接続状態を反映。
+  const handleConnect = useCallback(() => {
+    if (!drive?.authUrl) return;
+    window.open(drive.authUrl, 'drive-oauth', 'width=520,height=680');
+    setConnecting(true);
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries += 1;
+      try {
+        const res = await driveApi.getAuthUrl(doc.projectId);
+        if (res.connected) {
+          setDrive({ connected: true, email: res.email ?? null, authUrl: res.authUrl });
+          setConnecting(false);
+          clearInterval(timer);
+        }
+      } catch {
+        // ポーリング継続
+      }
+      if (tries > 40) {
+        setConnecting(false);
+        clearInterval(timer);
+      }
+    }, 2500);
+  }, [drive, doc.projectId]);
+
+  // プレビューの拡大率（スプレッドシート等。50%〜200%）。ドキュメント切替でリセット。
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    setZoom(1);
+  }, [doc.id]);
+  const zoomBy = (delta: number) =>
+    setZoom((z) => Math.min(2, Math.max(0.5, Math.round((z + delta) * 100) / 100)));
+
   return (
     <div className="flex h-full flex-col bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 p-3">
@@ -355,7 +415,7 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           disabled={!canEdit}
-          placeholder="https://docs.google.com/（document / spreadsheets / drive）..."
+          placeholder="https://docs.google.com/（ドキュメント / スライド / スプレッドシート）..."
           className="h-8 min-w-0 flex-1 text-sm"
         />
         {canEdit && (
@@ -391,6 +451,33 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
             本文を取り込む
           </Button>
         )}
+        {/* Google Drive 連携状態（本文取り込みに必要）。 */}
+        {drive &&
+          (drive.connected ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+              title={drive.email ? `連携アカウント: ${drive.email}` : 'Google Drive 連携済み'}
+            >
+              <HardDrive className="h-3.5 w-3.5" />
+              Drive連携済み
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+              title="Google Drive と連携すると、ドキュメント/スライド/シートの本文を取り込めます（refresh token はサーバーに暗号化保存）"
+            >
+              {connecting ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <HardDrive className="mr-1 h-3.5 w-3.5" />
+              )}
+              {connecting ? '連携待ち…' : 'Google Driveと連携'}
+            </Button>
+          ))}
         {url && (
           <a
             href={url}
@@ -401,6 +488,33 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
             <ExternalLink className="h-3.5 w-3.5" />
             Google で開く
           </a>
+        )}
+        {isValid && (
+          <div className="ml-auto flex items-center gap-0.5 rounded-md border border-gray-200 bg-white px-1 py-0.5">
+            <button
+              type="button"
+              onClick={() => zoomBy(-0.1)}
+              disabled={zoom <= 0.5}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+              title="縮小"
+              aria-label="縮小"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            <span className="w-10 text-center text-[11px] tabular-nums text-gray-600">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => zoomBy(0.1)}
+              disabled={zoom >= 2}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+              title="拡大"
+              aria-label="拡大"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
       </div>
       {/* 取り込み状態（保存済み / 結果 / エラー） */}
@@ -423,19 +537,26 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
           </span>
         </div>
       )}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden bg-gray-50">
         {isValid ? (
           <iframe
             // 読み取り専用プレビュー（編集権限が無くても閲覧可能。スプレッドシート/スライドも対応）。
+            // 拡大率は CSS transform で実現（width/height を 1/zoom にして scale で埋める）。
             src={previewSrc}
             title={doc.title || 'Google Document'}
-            className="h-full w-full border-0"
+            style={{
+              width: `${100 / zoom}%`,
+              height: `${100 / zoom}%`,
+              transformOrigin: 'top left',
+              transform: `scale(${zoom})`,
+            }}
+            className="border-0"
           />
         ) : (
           <div className="flex h-full items-center justify-center p-6 text-center text-sm text-gray-400">
-            Google ドキュメント / スプレッドシート / Drive の URL を貼り付けてください（自動保存）。
+            Google ドキュメント / スライド / スプレッドシート / Drive の URL を貼り付けてください（自動保存）。
             <br />
-            （docs.google.com / drive.google.com のリンク。閲覧のみでも読み取り専用で表示されます）
+            （docs.google.com / drive.google.com のリンク。閲覧のみでも読み取り専用で表示されます。「本文を取り込む」でシート等の内容をアプリのDBに保存して検索対象にできます）
           </div>
         )}
       </div>

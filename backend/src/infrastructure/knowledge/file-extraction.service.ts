@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { xlsxBufferToMarkdown } from './lib/xlsx-to-markdown';
+import { pptxBufferToText } from './lib/pptx-to-text';
 import { planArchiveEntries, ArchivePlan } from './lib/archive';
 
 /**
@@ -17,6 +18,7 @@ export type FileKind =
   | 'pdf'
   | 'image'
   | 'spreadsheet'
+  | 'presentation'
   | 'doc'
   | 'text'
   | 'archive'
@@ -36,6 +38,8 @@ const PDF_MIME = /^application\/pdf$/i;
 const ARCHIVE_MIME = /^application\/(zip|x-zip-compressed|x-zip)$/i;
 const SPREADSHEET_MIME =
   /(spreadsheetml|ms-excel|vnd\.oasis\.opendocument\.spreadsheet|text\/csv)/i;
+const PRESENTATION_MIME =
+  /(presentationml|ms-powerpoint|vnd\.oasis\.opendocument\.presentation)/i;
 const DOC_MIME =
   /(wordprocessingml|msword|vnd\.oasis\.opendocument\.text)/i;
 const TEXT_MIME = /^(text\/|application\/(json|xml|x-yaml|yaml))/i;
@@ -60,6 +64,8 @@ export class FileExtractionService {
     if (ARCHIVE_MIME.test(m) || ext === 'zip') return 'archive';
     if (SPREADSHEET_MIME.test(m) || ['xlsx', 'xls', 'csv', 'ods'].includes(ext))
       return 'spreadsheet';
+    if (PRESENTATION_MIME.test(m) || ['pptx', 'ppt', 'odp'].includes(ext))
+      return 'presentation';
     if (DOC_MIME.test(m) || ['docx', 'doc', 'odt'].includes(ext)) return 'doc';
     if (TEXT_MIME.test(m) || ['txt', 'md', 'markdown', 'json', 'xml', 'yaml', 'yml', 'csv'].includes(ext))
       return 'text';
@@ -86,6 +92,14 @@ export class FileExtractionService {
 
       case 'spreadsheet':
         return { text: xlsxBufferToMarkdown(buf) };
+
+      case 'presentation': {
+        // pptx（Google スライドの Drive export）はスライド本文テキストを抽出。
+        const text = pptxBufferToText(buf);
+        return text.trim()
+          ? { text }
+          : { reason: 'スライドからテキストを抽出できませんでした（画像のみ等）' };
+      }
 
       case 'doc': {
         // mammoth は遅延 import（依存未導入環境で import 時に落ちないよう）。
