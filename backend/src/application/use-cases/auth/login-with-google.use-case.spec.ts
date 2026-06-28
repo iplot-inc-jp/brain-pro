@@ -59,4 +59,38 @@ describe('LoginWithGoogleUseCase', () => {
     expect(acceptInvite.execute).toHaveBeenCalledWith({ token: 'inv', userId: 'new-id' });
     expect(res.joinedOrganizationId).toBe('org-9');
   });
+
+  it('既存メールで googleId が設定済みなら再リンクしない（上書きしない）', async () => {
+    const existing = User.createWithGoogle(
+      { email: 'g@x.com', name: 'G', avatarUrl: null, googleId: 'g-existing' },
+      'gid',
+    );
+    verifier.verifyIdToken.mockResolvedValue({
+      googleId: 'g-new', email: 'g@x.com', emailVerified: true, name: 'G', picture: null,
+    });
+    userRepo.findByEmail.mockResolvedValue(existing);
+
+    await useCase.execute({ idToken: 't' });
+
+    expect(existing.googleId).toBe('g-existing'); // 上書きされない
+  });
+
+  it('既存ユーザーの avatar/name は Google プロフィールで上書きしない', async () => {
+    const existing = User.create(
+      { email: 'k@x.com', password: 'p', name: '既存名' },
+      'hashed',
+      'kid',
+    );
+    existing.changeAvatarUrl('http://existing/avatar.png');
+    verifier.verifyIdToken.mockResolvedValue({
+      googleId: 'g9', email: 'k@x.com', emailVerified: true, name: 'GoogleName', picture: 'http://google/p.png',
+    });
+    userRepo.findByEmail.mockResolvedValue(existing);
+
+    await useCase.execute({ idToken: 't' });
+
+    expect(existing.name).toBe('既存名');
+    expect(existing.avatarUrl).toBe('http://existing/avatar.png');
+    expect(existing.googleId).toBe('g9'); // 未設定だったのでリンクはされる
+  });
 });
