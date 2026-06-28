@@ -20,10 +20,26 @@ const REASON_TEXT: Record<string, string> = {
   maxed: 'この招待リンクは利用上限に達しています。',
 };
 
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 text-gray-900">
+      <div className="w-full max-w-sm bg-white border border-gray-200 rounded-2xl shadow-sm p-8">
+        <div className="flex flex-col items-center mb-6 text-center">
+          <span className="w-10 h-10 rounded-lg flex items-center justify-center text-white mb-3" style={{ backgroundColor: NAVY }}>
+            <Database className="h-5 w-5" />
+          </span>
+          <h1 className="text-xl font-bold tracking-tight" style={{ color: NAVY }}>Brain Pro</h1>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export default function InvitePage() {
   const params = useParams();
   const router = useRouter();
-  const token = (params?.token as string) || '';
+  const token = Array.isArray(params?.token) ? params.token[0] : ((params?.token as string) ?? '');
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(true);
@@ -33,7 +49,7 @@ export default function InvitePage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setHasToken(Boolean(typeof window !== 'undefined' && localStorage.getItem('accessToken')));
+    setHasToken(Boolean(localStorage.getItem('accessToken')));
     invitesApi
       .preview(token)
       .then(setPreview)
