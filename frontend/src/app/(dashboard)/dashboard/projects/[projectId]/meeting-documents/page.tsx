@@ -112,6 +112,14 @@ export default function MeetingDocumentsPage() {
     [projectId],
   );
 
+  // 左サイドバーの「会議別ドキュメント」ツリーへ変更を通知し、即時に再取得させる
+  // （ダッシュボードレイアウトは画面遷移で再マウントされず、自前では更新されないため）。
+  const broadcastDocsChanged = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('meeting-docs-changed'));
+    }
+  }, []);
+
   useEffect(() => {
     void loadList();
   }, [loadList]);
@@ -188,12 +196,13 @@ export default function MeetingDocumentsPage() {
       });
       setCreatingIn(null);
       await loadList(created.id);
+      broadcastDocsChanged();
     } catch {
       /* noop（一覧エラーは loadList が拾う） */
     } finally {
       setCreating(false);
     }
-  }, [creatingIn, projectId, createKind, createTitle, createUrl, loadList]);
+  }, [creatingIn, projectId, createKind, createTitle, createUrl, loadList, broadcastDocsChanged]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -202,11 +211,12 @@ export default function MeetingDocumentsPage() {
         await meetingDocumentApi.remove(id);
         if (selectedId === id) setSelectedId(null);
         await loadList();
+        broadcastDocsChanged();
       } catch {
         /* noop */
       }
     },
-    [selectedId, loadList],
+    [selectedId, loadList, broadcastDocsChanged],
   );
 
   const toggleFolder = useCallback((key: string) => {
@@ -223,10 +233,11 @@ export default function MeetingDocumentsPage() {
       setDocuments((list) =>
         list.map((d) => (d.id === selectedDoc.id ? { ...d, title: next } : d)),
       );
+      broadcastDocsChanged();
     } catch {
       /* noop */
     }
-  }, [selectedDoc, titleDraft]);
+  }, [selectedDoc, titleDraft, broadcastDocsChanged]);
 
   // GOOGLE_DOC の URL 保存（自動保存）。ローカル一覧を即時更新（全件再取得しないので
   // 入力中に iframe が再読込されてチラつくのを防ぐ）。

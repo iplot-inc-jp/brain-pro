@@ -792,9 +792,17 @@ function useMeetingDocsTree(projectId: string | null) {
         console.error('Failed to fetch meeting docs tree:', err)
       }
     }
-    run()
+    void run()
+    // ドキュメントの作成・削除・改名時に meeting-documents ページが 'meeting-docs-changed' を
+    // 発火する。ダッシュボードレイアウトは画面遷移で再マウントされないため、これを購読して
+    // サイドバーのツリー（Google ドキュメント含む）を即時更新する。
+    const onChanged = () => {
+      void run()
+    }
+    window.addEventListener('meeting-docs-changed', onChanged)
     return () => {
       cancelled = true
+      window.removeEventListener('meeting-docs-changed', onChanged)
     }
   }, [projectId])
 
@@ -856,7 +864,16 @@ function MeetingDocNode({
                     isActive && 'bg-primary/10 font-medium text-primary',
                   )}
                 >
-                  <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                  {d.kind === 'GOOGLE_DOC' ? (
+                    <span
+                      className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-sm bg-blue-100 text-[8px] font-bold leading-none text-blue-600"
+                      title="Google ドキュメント"
+                    >
+                      G
+                    </span>
+                  ) : (
+                    <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                  )}
                   <span className="truncate">{d.title || '無題のドキュメント'}</span>
                 </Link>
               )
