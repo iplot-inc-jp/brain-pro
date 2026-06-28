@@ -273,6 +273,13 @@ import {
   // KnowledgeSettings（課金ガード設定）
   GetOrCreateSettingsUseCase,
   UpdateSettingsUseCase,
+  // Invite
+  PreviewInviteUseCase,
+  AcceptInviteUseCase,
+  CreateInviteUseCase,
+  ListInvitesUseCase,
+  RevokeInviteUseCase,
+  LoginWithGoogleUseCase,
 } from './application';
 
 // Infrastructure
@@ -332,6 +339,7 @@ import {
 // Presentation
 import {
   AuthController,
+  InviteController,
   OrganizationController,
   ProjectController,
   ProjectByIdController,
@@ -527,6 +535,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     HealthController,
     CronController,
     AuthController,
+    InviteController,
     OrganizationController,
     ProjectController,
     ProjectByIdController,
@@ -1059,6 +1068,13 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // KnowledgeSettings（課金ガード設定）
     GetOrCreateSettingsUseCase,
     UpdateSettingsUseCase,
+    // Invite
+    PreviewInviteUseCase,
+    AcceptInviteUseCase,
+    CreateInviteUseCase,
+    ListInvitesUseCase,
+    RevokeInviteUseCase,
+    LoginWithGoogleUseCase,
 
     // ========== Services ==========
     ProjectAccessService,
