@@ -100,22 +100,6 @@ export default function InvitePage() {
     }
   }
 
-  function Shell({ children }: { children: React.ReactNode }) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 text-gray-900">
-        <div className="w-full max-w-sm bg-white border border-gray-200 rounded-2xl shadow-sm p-8">
-          <div className="flex flex-col items-center mb-6 text-center">
-            <span className="w-10 h-10 rounded-lg flex items-center justify-center text-white mb-3" style={{ backgroundColor: NAVY }}>
-              <Database className="h-5 w-5" />
-            </span>
-            <h1 className="text-xl font-bold tracking-tight" style={{ color: NAVY }}>Brain Pro</h1>
-          </div>
-          {children}
-        </div>
-      </div>
-    );
-  }
-
   if (loadingPreview) {
     return (
       <Shell>
