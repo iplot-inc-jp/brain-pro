@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
+import { InviteLinksPanel } from '@/components/company/InviteLinksPanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -589,6 +590,7 @@ export default function CompanySettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <InviteLinksPanel orgId={orgId} />
               {/* 追加フォーム */}
               <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
                 <div className="grid gap-3 sm:grid-cols-[1fr_200px_auto] sm:items-end">
