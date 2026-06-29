@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   DragDropContext,
   Droppable,
@@ -115,6 +115,7 @@ export function RoleOrderDialog({
                         <div
                           ref={p.innerRef}
                           {...p.draggableProps}
+                          style={p.draggableProps.style as CSSProperties}
                           className={
                             'flex items-center gap-2 rounded-lg border px-3 py-2 bg-white ' +
                             (snapshot.isDragging
