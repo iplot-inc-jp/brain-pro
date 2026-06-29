@@ -39,8 +39,10 @@ import {
   Table2,
   Network,
   ChevronRight,
+  ArrowDownUp,
 } from 'lucide-react';
 import { SwimlaneCanvas, type NodeLinksResult, type NodeImageRef } from '@/components/flow-editor/SwimlaneCanvas';
+import { RoleOrderDialog } from '@/components/flow-editor/RoleOrderDialog';
 import { nodeAttachmentApi } from '@/lib/node-attachments';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
@@ -1019,6 +1021,7 @@ export default function ProjectFlowDetailPage() {
 
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [roleOrderOpen, setRoleOrderOpen] = useState(false);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
 
   // ノードの画像添付（ノードID → 画像）。ノード右上にバッジを出し、ホバーで拡大プレビューする。
@@ -3055,10 +3058,31 @@ export default function ProjectFlowDetailPage() {
 
       {/* フロービューアー（フロー図タブ） */}
       <div
-        className={`h-[calc(100vh-240px)] border border-gray-200 rounded-lg overflow-hidden ${
+        className={`relative h-[calc(100vh-240px)] border border-gray-200 rounded-lg overflow-hidden ${
           activeTab === 'flow' ? '' : 'hidden'
         }`}
       >
+        {activeTab === 'flow' && canEdit && (
+          <div className="absolute top-2 right-2 z-20">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRoleOrderOpen(true)}
+              className="h-8 bg-white/95 backdrop-blur border-gray-300 text-gray-700 shadow-sm hover:bg-white"
+              title="レーン（ロール）の並び順を変更"
+            >
+              <ArrowDownUp className="h-4 w-4 mr-1.5" />
+              レーンの順番
+            </Button>
+          </div>
+        )}
+        <RoleOrderDialog
+          projectId={projectId}
+          roles={roles}
+          open={roleOrderOpen}
+          onOpenChange={setRoleOrderOpen}
+          onReordered={fetchRoles}
+        />
         <SwimlaneCanvas
           flowData={flowData}
           roles={visibleRoles}

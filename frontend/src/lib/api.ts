@@ -241,6 +241,12 @@ export const rolesApi = {
       body: JSON.stringify(data),
     }),
   delete: (id: string) => api<void>(`/roles/${id}`, { method: 'DELETE' }),
+  /** ロール（スイムレーン）の並び順を一括更新。roleIds の順に order=0,1,2... を割り当てる。 */
+  updateOrder: (projectId: string, roleIds: string[]) =>
+    api<Role[]>(`/roles/project/${projectId}/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds }),
+    }),
 }
 
 // Flows
