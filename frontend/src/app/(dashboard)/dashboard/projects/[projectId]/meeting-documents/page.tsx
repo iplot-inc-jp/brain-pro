@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
@@ -126,12 +126,30 @@ export default function MeetingDocumentsPage() {
 
   // 左サイドメニューの「会議別ドキュメント」からの遷移（?doc=<id>）で該当ドキュメントを選択。
   const searchParams = useSearchParams();
+  const router = useRouter();
   const docParam = searchParams.get('doc');
   useEffect(() => {
     if (docParam && documents.some((d) => d.id === docParam)) {
       setSelectedId(docParam);
     }
   }, [docParam, documents]);
+
+  // Google タブ（?gtab=<tabId|gid>）。URL の doc と選択中ドキュメントが一致するときだけ有効
+  // （ページ内リストでの選択切替は URL を書き換えないため、他ドキュメントの gtab を誤適用しない）。
+  const gtabParam = searchParams.get('gtab');
+  const gtab = docParam && docParam === selectedId ? gtabParam : null;
+
+  // ペインのタブバー/サイドメニューから Google タブを切り替える（URL を正として同期する）。
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      if (!selectedId) return;
+      router.replace(
+        `/dashboard/projects/${projectId}/meeting-documents?doc=${selectedId}&gtab=${encodeURIComponent(tabId)}`,
+        { scroll: false },
+      );
+    },
+    [router, projectId, selectedId],
+  );
 
   // 会議を order→name でソート。
   const sortedMeetings = useMemo(
@@ -501,6 +519,8 @@ export default function MeetingDocumentsPage() {
                   doc={selectedDoc}
                   canEdit={canEdit}
                   onSaveGoogleUrl={handleSaveGoogleUrl}
+                  gtab={gtab}
+                  onSelectTab={handleSelectTab}
                 />
               </div>
             </>

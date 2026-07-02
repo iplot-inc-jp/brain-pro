@@ -53,10 +53,13 @@ import {
   Activity,
   ListChecks,
   Image as ImageIcon,
+  Search,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { CompanySwitcher } from '@/components/company/CompanySwitcher'
+import { meetingDocumentApi, type GoogleTabs } from '@/lib/meeting-documents'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
@@ -759,7 +762,14 @@ function ProjectNavItem({
 // ====== 会議別ドキュメント（サイドメニューにぶら下げるツリー）======
 
 type MeetingLite = { id: string; name: string; order?: number }
-type MeetingDocLite = { id: string; meetingId: string; title: string; kind: string }
+type MeetingDocLite = {
+  id: string
+  meetingId: string
+  title: string
+  kind: string
+  // GOOGLE_DOC のとき：Google 側のタブ構成キャッシュ（Docsのタブ / Sheetsのシート）。
+  googleTabs?: GoogleTabs | null
+}
 
 // 会議 + 会議別ドキュメントを取得（projectId 変更時のみ）。
 function useMeetingDocsTree(projectId: string | null) {
@@ -817,6 +827,7 @@ function MeetingDocNode({
   base,
   onPage,
   currentDoc,
+  currentGtab,
   onNavigate,
 }: {
   meeting: MeetingLite
@@ -824,6 +835,7 @@ function MeetingDocNode({
   base: string
   onPage: boolean
   currentDoc: string | null
+  currentGtab: string | null
   onNavigate: () => void
 }) {
   const containsActive = onPage && docs.some((d) => d.id === currentDoc)
@@ -850,37 +862,205 @@ function MeetingDocNode({
           {docs.length === 0 ? (
             <div className="px-2 py-1 text-[11px] text-muted-foreground/70">（なし）</div>
           ) : (
-            docs.map((d) => {
-              const href = `${base}?doc=${d.id}`
-              const isActive = onPage && currentDoc === d.id
-              return (
-                <Link
-                  key={d.id}
-                  href={href}
-                  onClick={onNavigate}
-                  title={d.title || '無題のドキュメント'}
-                  className={cn(
-                    'flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors',
-                    'text-muted-foreground hover:bg-secondary hover:text-foreground',
-                    isActive && 'bg-primary/10 font-medium text-primary',
-                  )}
-                >
-                  {d.kind === 'GOOGLE_DOC' ? (
-                    <span
-                      className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-sm bg-blue-100 text-[8px] font-bold leading-none text-blue-600"
-                      title="Google ドキュメント"
-                    >
-                      G
-                    </span>
-                  ) : (
-                    <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                  )}
-                  <span className="truncate">{d.title || '無題のドキュメント'}</span>
-                </Link>
-              )
-            })
+            docs.map((d) => (
+              <MeetingDocLeaf
+                key={d.id}
+                doc={d}
+                base={base}
+                isActive={onPage && currentDoc === d.id}
+                currentGtab={onPage && currentDoc === d.id ? currentGtab : null}
+                onNavigate={onNavigate}
+              />
+            ))
           )}
         </div>
+      )}
+    </div>
+  )
+}
+
+// 1ドキュメント行。GOOGLE_DOC は Google 側のタブ（Docsのタブ / Sheetsのシート）を
+// 第3階層としてぶら下げる（?doc=<id>&gtab=<tabId|gid> で該当タブを開く）。
+function MeetingDocLeaf({
+  doc,
+  base,
+  isActive,
+  currentGtab,
+  onNavigate,
+}: {
+  doc: MeetingDocLite
+  base: string
+  isActive: boolean
+  currentGtab: string | null
+  onNavigate: () => void
+}) {
+  const isGoogle = doc.kind === 'GOOGLE_DOC'
+  const [open, setOpen] = useState(isActive)
+  // キャッシュ未取得のドキュメントを展開したときの遅延取得結果（一覧の再取得を待たず即表示する）。
+  const [fetched, setFetched] = useState<GoogleTabs | null>(null)
+  const [loading, setLoading] = useState(false)
+  const failedRef = useRef(false)
+  // 多重取得ガードは ref で行う。state の loading を effect 依存に入れると
+  // setLoading(true) 自身が前回 effect の cleanup（cancelled=true）を走らせ、
+  // 取得結果が捨てられてスピナーが止まらなくなる。
+  const inFlightRef = useRef(false)
+  // 一覧（'meeting-docs-changed' で再取得される）を優先し、遅延取得の結果はその繋ぎに使う。
+  const tabs = doc.googleTabs ?? fetched
+
+  // 選択中ドキュメントはタブを自動展開（サイドメニューから今開いている場所を辿れるように）。
+  useEffect(() => {
+    if (isActive) setOpen(true)
+  }, [isActive])
+
+  // 展開時にキャッシュが無ければ一度だけ Google から取得（失敗してもリトライループしない）。
+  useEffect(() => {
+    if (!isGoogle || !open || tabs || inFlightRef.current || failedRef.current) return
+    let cancelled = false
+    inFlightRef.current = true
+    setLoading(true)
+    meetingDocumentApi
+      .refreshGoogleTabs(doc.id)
+      .then((updated) => {
+        if (!cancelled) setFetched(updated.googleTabs ?? { kind: 'other', tabs: [] })
+      })
+      .catch(() => {
+        // 未連携・共有漏れ等。サイドメニューでは黙って畳む（ページ側で案内される）。
+        failedRef.current = true
+        if (!cancelled) setFetched({ kind: 'other', tabs: [] })
+      })
+      .finally(() => {
+        inFlightRef.current = false
+        setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isGoogle, open, tabs, doc.id])
+
+  const hasTabs = isGoogle && !!tabs && tabs.kind !== 'other' && tabs.tabs.length > 0
+  // キャッシュ取得前でも Google ドキュメントには展開ボタンを出す（開いた時に取得）。
+  const showChevron = isGoogle && (hasTabs || !tabs)
+
+  return (
+    <div>
+      <div
+        className={cn(
+          'flex items-center gap-1 rounded-md pr-1 transition-colors',
+          'text-muted-foreground hover:bg-secondary hover:text-foreground',
+          isActive && 'bg-primary/10 font-medium text-primary',
+        )}
+      >
+        <Link
+          href={`${base}?doc=${doc.id}`}
+          onClick={onNavigate}
+          title={doc.title || '無題のドキュメント'}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-xs"
+        >
+          {isGoogle ? (
+            <span
+              className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-sm bg-blue-100 text-[8px] font-bold leading-none text-blue-600"
+              title="Google ドキュメント"
+            >
+              G
+            </span>
+          ) : (
+            <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+          )}
+          <span className="truncate">{doc.title || '無題のドキュメント'}</span>
+        </Link>
+        {showChevron && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? 'タブを閉じる' : 'タブを表示'}
+            className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
+          >
+            {loading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : open ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+          </button>
+        )}
+      </div>
+      {open && hasTabs && (
+        <GoogleTabList
+          docId={doc.id}
+          base={base}
+          googleTabs={tabs}
+          currentGtab={currentGtab}
+          onNavigate={onNavigate}
+        />
+      )}
+    </div>
+  )
+}
+
+// タブが多いとき（シート数の多いスプレッドシート等）に検索ボックスを出す閾値。
+const GOOGLE_TAB_SEARCH_MIN = 6
+
+// Google タブの一覧（第3階層）。クリックで ?doc=&gtab= を開く。多数なら名前で絞り込み可能。
+function GoogleTabList({
+  docId,
+  base,
+  googleTabs,
+  currentGtab,
+  onNavigate,
+}: {
+  docId: string
+  base: string
+  googleTabs: GoogleTabs
+  currentGtab: string | null
+  onNavigate: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const sorted = useMemo(
+    () => [...googleTabs.tabs].sort((a, b) => a.index - b.index),
+    [googleTabs.tabs],
+  )
+  const q = query.trim().toLowerCase()
+  const filtered = q ? sorted.filter((t) => t.title.toLowerCase().includes(q)) : sorted
+  const isSheet = googleTabs.kind === 'spreadsheet'
+
+  return (
+    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/60 pl-1.5">
+      {sorted.length >= GOOGLE_TAB_SEARCH_MIN && (
+        <div className="flex items-center gap-1 px-1 py-0.5">
+          <Search className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={isSheet ? 'シートを検索' : 'タブを検索'}
+            className="w-full min-w-0 rounded border border-border/60 bg-background px-1.5 py-0.5 text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
+          />
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <div className="px-2 py-1 text-[11px] text-muted-foreground/70">
+          （該当するタブがありません）
+        </div>
+      ) : (
+        filtered.map((t) => {
+          const tabActive = currentGtab === t.id
+          return (
+            <Link
+              key={t.id}
+              href={`${base}?doc=${docId}&gtab=${encodeURIComponent(t.id)}`}
+              onClick={onNavigate}
+              title={t.title || '（無題のタブ）'}
+              // Docs のタブは入れ子（level）に応じてインデント。
+              style={{ paddingLeft: `${8 + t.level * 12}px` }}
+              className={cn(
+                'block truncate rounded-md py-1 pr-2 text-[11px] transition-colors',
+                'text-muted-foreground hover:bg-secondary hover:text-foreground',
+                tabActive && 'bg-primary/10 font-medium text-primary',
+              )}
+            >
+              {t.title || '（無題のタブ）'}
+            </Link>
+          )
+        })
       )}
     </div>
   )
@@ -893,6 +1073,7 @@ function MeetingDocsTree({
   docs,
   pathname,
   currentDoc,
+  currentGtab,
   onNavigate,
 }: {
   projectId: string
@@ -900,6 +1081,7 @@ function MeetingDocsTree({
   docs: MeetingDocLite[]
   pathname: string
   currentDoc: string | null
+  currentGtab: string | null
   onNavigate: () => void
 }) {
   if (meetings.length === 0 && docs.length === 0) return null
@@ -934,6 +1116,7 @@ function MeetingDocsTree({
             base={base}
             onPage={onPage}
             currentDoc={currentDoc}
+            currentGtab={currentGtab}
             onNavigate={onNavigate}
           />
         ))}
@@ -1245,6 +1428,7 @@ export default function DashboardLayout({
                       docs={mtgDocs}
                       pathname={pathname}
                       currentDoc={searchParams.get('doc')}
+                      currentGtab={searchParams.get('gtab')}
                       onNavigate={() => setSidebarOpen(false)}
                     />
                   )}

@@ -39,6 +39,15 @@ export function classifyDriveFetchError(rawMessage: string): DriveFetchErrorInfo
     };
   }
 
+  // GCP プロジェクト側で API が無効（Docs/Sheets API 未有効化）。403 だが共有設定の問題ではない。
+  if (/SERVICE_DISABLED|accessNotConfigured|has not been used in project/i.test(m)) {
+    return {
+      kind: 'unconfigured',
+      userMessage:
+        'サーバー側の Google Cloud プロジェクトで必要な API（Google Docs API / Google Sheets API）が有効化されていません。管理者にお問い合わせください。',
+    };
+  }
+
   // ファイルにアクセスできない（未共有 / 権限不足 / 不在）。
   if (/files\.get|（401）|（403）|（404）|not found|forbidden|permission/i.test(m)) {
     return {

@@ -83,6 +83,13 @@ class PatchMeetingDocumentDto {
   order?: number;
 }
 
+// Google 側のタブ構成（googleTabsJson の中身。Docs のタブ / Sheets のシート）。
+// id は Docs なら tabId（"t.xxx"）、Sheets なら gid（数値の文字列）。
+type GoogleTabs = {
+  kind: 'document' | 'spreadsheet' | 'other';
+  tabs: { id: string; title: string; index: number; level: number }[];
+};
+
 type DocRow = {
   id: string;
   projectId: string;
@@ -94,6 +101,8 @@ type DocRow = {
   fetchedTitle: string | null;
   fetchedMime: string | null;
   fetchedAt: Date | null;
+  googleTabsJson: Prisma.JsonValue | null;
+  googleTabsAt: Date | null;
   order: number;
   createdAt: Date;
   updatedAt: Date;
@@ -117,6 +126,9 @@ function docToResponse(d: DocRow, includeContent = false) {
     fetchedTitle: d.fetchedTitle,
     fetchedMime: d.fetchedMime,
     fetchedAt: d.fetchedAt ? d.fetchedAt.toISOString() : null,
+    // Google 側のタブ構成キャッシュ（サイドメニューの第3階層表示に使う。一覧でも返す）。
+    googleTabs: (d.googleTabsJson as GoogleTabs | null) ?? null,
+    googleTabsAt: d.googleTabsAt ? d.googleTabsAt.toISOString() : null,
     ...(includeContent ? { fetchedContent: d.fetchedContent } : {}),
     createdAt: d.createdAt.toISOString(),
     updatedAt: d.updatedAt.toISOString(),
@@ -130,6 +142,13 @@ function parseDriveFileId(url: string): string | null {
   const byQuery = url.match(/[?&]id=([A-Za-z0-9_-]+)/);
   if (byQuery) return byQuery[1];
   return null;
+}
+
+// URL からタブを持ちうる Google ファイル種別を判定（スライド/Drive ファイル等は 'other'）。
+function googleDocTypeOf(url: string): GoogleTabs['kind'] {
+  if (/docs\.google\.com\/document\//.test(url)) return 'document';
+  if (/docs\.google\.com\/spreadsheets\//.test(url)) return 'spreadsheet';
+  return 'other';
 }
 
 // ========================================================================
@@ -276,6 +295,58 @@ export class MeetingDocumentByIdController {
     return docToResponse(updated as DocRow, true);
   }
 
+  @Post(':id/google-tabs')
+  @ApiOperation({
+    summary:
+      'GOOGLE_DOC のタブ構成（Docsのタブ / Sheetsのシート）を Google から再取得してキャッシュ（要プロジェクトの Drive 連携）',
+  })
+  @ApiParam({ name: 'id', description: 'ドキュメントID' })
+  async refreshGoogleTabs(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    // タブ構成は閲覧側のキャッシュなので view 権限で更新可（閲覧のみのユーザーにもタブを出す）。
+    const { projectId } = await this.assertDocAccess(id, user.id, 'view');
+    const doc = await this.prisma.meetingDocument.findUnique({ where: { id } });
+    if (!doc) throw new NotFoundException('ドキュメントが見つかりません');
+    if (doc.kind !== 'GOOGLE_DOC' || !doc.googleDocUrl) {
+      throw new BadRequestException('GOOGLE_DOC のドキュメントのみタブ構成を取得できます');
+    }
+    const fileId = parseDriveFileId(doc.googleDocUrl);
+    if (!fileId) {
+      throw new BadRequestException('URL から Google ファイルIDを特定できませんでした');
+    }
+
+    const type = googleDocTypeOf(doc.googleDocUrl);
+    let tabs: GoogleTabs['tabs'] = [];
+    if (type !== 'other') {
+      try {
+        tabs =
+          type === 'document'
+            ? await this.drive.listDocumentTabs(projectId, fileId)
+            : await this.drive.listSpreadsheetSheets(projectId, fileId);
+      } catch (e) {
+        const info = classifyDriveFetchError(
+          e instanceof Error ? e.message : String(e),
+        );
+        if (info.kind === 'unconfigured') {
+          throw new ServiceUnavailableException(info.userMessage);
+        }
+        throw new BadRequestException(info.userMessage);
+      }
+    }
+    // スライド/Drive ファイル等（other）もタブ0件として保存し、サイドバーが再取得を繰り返さないようにする。
+    const googleTabs: GoogleTabs = { kind: type, tabs };
+    const updated = await this.prisma.meetingDocument.update({
+      where: { id },
+      data: {
+        googleTabsJson: googleTabs as unknown as Prisma.InputJsonValue,
+        googleTabsAt: new Date(),
+      },
+    });
+    return docToResponse(updated as DocRow);
+  }
+
   @Patch(':id')
   @ApiOperation({ summary: 'ドキュメント更新（title/googleDocUrl/meetingId/order）' })
   @ApiParam({ name: 'id', description: 'ドキュメントID' })
@@ -287,7 +358,12 @@ export class MeetingDocumentByIdController {
     const doc = await this.assertDocAccess(id, user.id, 'edit');
     const data: Prisma.MeetingDocumentUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
-    if (dto.googleDocUrl !== undefined) data.googleDocUrl = dto.googleDocUrl;
+    if (dto.googleDocUrl !== undefined) {
+      data.googleDocUrl = dto.googleDocUrl;
+      // URL が変わると旧ファイルのタブ構成キャッシュは無効。クリアしてフロントに再取得させる。
+      data.googleTabsJson = Prisma.DbNull;
+      data.googleTabsAt = null;
+    }
     if (dto.order !== undefined) data.order = dto.order;
     if (dto.meetingId !== undefined) {
       // 移動先の会議も同一プロジェクトであること。

@@ -3056,6 +3056,11 @@ model MeetingDocument {
   fetchedTitle   String?           @map("fetched_title")
   fetchedMime    String?           @map("fetched_mime")
   fetchedAt      DateTime?         @map("fetched_at")
+  // GOOGLE_DOC のとき：Google 側のタブ構成のキャッシュ
+  // （Docs のドキュメントタブ / Sheets のシートタブ）。サイドメニューの第3階層表示に使う。
+  // 形: { kind: 'document'|'spreadsheet'|'other', tabs: [{ id, title, index, level }] }
+  googleTabsJson Json?             @map("google_tabs_json")
+  googleTabsAt   DateTime?         @map("google_tabs_at")
   order        Int                 @default(0)
   createdAt    DateTime            @default(now()) @map("created_at")
   updatedAt    DateTime            @updatedAt @map("updated_at")

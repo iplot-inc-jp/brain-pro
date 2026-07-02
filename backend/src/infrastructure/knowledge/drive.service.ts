@@ -26,6 +26,9 @@ import { assertSafeOutboundUrl } from '../services/url-safety';
 const GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3';
+// Docs のドキュメントタブ / Sheets のシートタブ一覧の取得に使う（drive.readonly スコープで呼べる）。
+const GOOGLE_DOCS_API = 'https://docs.googleapis.com/v1';
+const GOOGLE_SHEETS_API = 'https://sheets.googleapis.com/v4';
 // drive.readonly（読み取り専用）。最小権限。
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 // ユーザー識別子（email）取得用の最小スコープも合わせて要求。
@@ -55,6 +58,24 @@ export interface DriveDownload {
   bytes: Buffer;
   mimeType: string;
   filename: string;
+}
+
+/**
+ * Google ドキュメントのタブ / スプレッドシートのシートの1件（フロント契約と一致）。
+ * id は Docs なら tabId（例 "t.0"）、Sheets なら gid（数値の文字列）。
+ * level は Docs のタブ入れ子の深さ（0=トップ。Sheets は常に 0）。
+ */
+export interface GoogleTabRef {
+  id: string;
+  title: string;
+  index: number;
+  level: number;
+}
+
+/** Docs API documents.get のタブ部分（tabProperties のみに field mask 済み）。 */
+interface DocsApiTab {
+  tabProperties?: { tabId?: string; title?: string; index?: number };
+  childTabs?: DocsApiTab[];
 }
 
 /** base64url（パディング無し）エンコード。 */
@@ -443,6 +464,92 @@ export class DriveService {
     }
     const ab = await res.arrayBuffer();
     return { bytes: Buffer.from(ab), mimeType: resultMime, filename };
+  }
+
+  /**
+   * Google ドキュメントのタブ一覧（documents.get）。
+   * includeTabsContent=true が必須（false だと tabs が空になる仕様）だが、
+   * field mask で tabProperties のみに絞るため本文は転送されない。
+   * タブの入れ子は仕様上 3 階層まで。mask は余裕を見て 4 階層分持つ。
+   */
+  async listDocumentTabs(projectId: string, documentId: string): Promise<GoogleTabRef[]> {
+    this.ensureEnabled();
+    const accessToken = await this.accessTokenFor(projectId);
+
+    const props = 'tabProperties(tabId,title,index)';
+    const fields = `tabs(${props},childTabs(${props},childTabs(${props},childTabs(${props}))))`;
+    const params = new URLSearchParams({
+      includeTabsContent: 'true',
+      fields,
+    });
+    const url = `${GOOGLE_DOCS_API}/documents/${encodeURIComponent(documentId)}?${params.toString()}`;
+    const res = await safeFetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `Docs documents.get に失敗しました（${res.status}）: ${text.slice(0, 300)}`,
+      );
+    }
+    const json = (await res.json()) as { tabs?: DocsApiTab[] };
+    const flat: GoogleTabRef[] = [];
+    const walk = (tabs: DocsApiTab[], level: number) => {
+      for (const t of tabs) {
+        const p = t.tabProperties;
+        if (p?.tabId) {
+          flat.push({
+            id: p.tabId,
+            title: p.title ?? '',
+            index: p.index ?? flat.length,
+            level,
+          });
+        }
+        if (t.childTabs?.length) walk(t.childTabs, level + 1);
+      }
+    };
+    walk(json.tabs ?? [], 0);
+    return flat;
+  }
+
+  /**
+   * スプレッドシートのシート（タブ）一覧（spreadsheets.get、properties のみ）。
+   * 非表示シートはプレビューで開けないため除外する。id は gid（数値の文字列）。
+   */
+  async listSpreadsheetSheets(
+    projectId: string,
+    spreadsheetId: string,
+  ): Promise<GoogleTabRef[]> {
+    this.ensureEnabled();
+    const accessToken = await this.accessTokenFor(projectId);
+
+    const params = new URLSearchParams({
+      fields: 'sheets.properties(sheetId,title,index,hidden)',
+    });
+    const url = `${GOOGLE_SHEETS_API}/spreadsheets/${encodeURIComponent(spreadsheetId)}?${params.toString()}`;
+    const res = await safeFetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `Sheets spreadsheets.get に失敗しました（${res.status}）: ${text.slice(0, 300)}`,
+      );
+    }
+    const json = (await res.json()) as {
+      sheets?: {
+        properties?: { sheetId?: number; title?: string; index?: number; hidden?: boolean };
+      }[];
+    };
+    return (json.sheets ?? [])
+      .map((s) => s.properties)
+      .filter((p): p is NonNullable<typeof p> => !!p && p.sheetId !== undefined && !p.hidden)
+      .map((p, i) => ({
+        id: String(p.sheetId),
+        title: p.title ?? '',
+        index: p.index ?? i,
+        level: 0,
+      }));
   }
 
   /** プロジェクトの Drive 接続を削除（フロント「切断」）。 */

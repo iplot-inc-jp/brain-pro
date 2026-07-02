@@ -6,7 +6,7 @@
 // GOOGLE_DOC = 外部 Google Document/Spreadsheet/Drive の URL（自動保存＋読み取り専用プレビュー）。
 //
 // window 依存（Liveblocks/Tiptap）のため、親ページから next/dynamic(ssr:false) で読み込むこと。
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClientSideSuspense } from '@liveblocks/react';
 import { RoomProvider } from '@/lib/liveblocks.config';
 import { useLiveblocksExtension } from '@liveblocks/react-tiptap';
@@ -38,12 +38,17 @@ import {
   ZoomIn,
   ZoomOut,
   HardDrive,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard';
-import { meetingDocumentApi, type MeetingDocument } from '@/lib/meeting-documents';
+import {
+  meetingDocumentApi,
+  type MeetingDocument,
+  type GoogleTabs,
+} from '@/lib/meeting-documents';
 import { driveApi } from '@/lib/knowledge';
 
 interface Props {
@@ -51,11 +56,23 @@ interface Props {
   canEdit: boolean;
   /** GOOGLE_DOC の URL 保存（親で PATCH）。 */
   onSaveGoogleUrl: (url: string) => void;
+  /** 選択中の Google タブ（Docs の tabId / Sheets の gid。URL の ?gtab= と同期）。 */
+  gtab?: string | null;
+  /** タブバー/サイドメニューからのタブ切替（親で URL の ?gtab= を書き換える）。 */
+  onSelectTab?: (tabId: string) => void;
 }
 
-export default function MeetingDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
+export default function MeetingDocPane({ doc, canEdit, onSaveGoogleUrl, gtab, onSelectTab }: Props) {
   if (doc.kind === 'GOOGLE_DOC') {
-    return <GoogleDocPane doc={doc} canEdit={canEdit} onSaveGoogleUrl={onSaveGoogleUrl} />;
+    return (
+      <GoogleDocPane
+        doc={doc}
+        canEdit={canEdit}
+        onSaveGoogleUrl={onSaveGoogleUrl}
+        gtab={gtab}
+        onSelectTab={onSelectTab}
+      />
+    );
   }
   // INTERNAL: ドキュメントごとの Liveblocks ルームへ接続。
   return (
@@ -279,13 +296,25 @@ function EditorToolbar({ editor }: { editor: Editor }) {
 // 例: .../document/d/<id>/edit → .../document/d/<id>/preview
 //     .../spreadsheets/d/<id>/edit#gid=0 → .../spreadsheets/d/<id>/preview
 //     drive.google.com/file/d/<id>/view → /preview、open?id=<id> → /file/d/<id>/preview
-export function toGooglePreviewUrl(raw: string): string {
+// gtab（Docs の tabId / Sheets の gid）指定時は該当タブを開く。
+// Sheets の gid はフラグメントだけだと iframe の src 変更が再読込にならないため query にも付ける。
+export function toGooglePreviewUrl(raw: string, gtab?: string | null): string {
   const u = raw.trim();
   // docs.google.com/{document|spreadsheets|presentation}/d/<id>... または drive.google.com/file/d/<id>...
   const m = u.match(
-    /^(https?:\/\/(?:docs|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[A-Za-z0-9_-]+)/,
+    /^(https?:\/\/(?:docs|drive)\.google\.com\/(document|spreadsheets|presentation|file)\/d\/[A-Za-z0-9_-]+)/,
   );
-  if (m) return `${m[1]}/preview`;
+  if (m) {
+    const base = `${m[1]}/preview`;
+    if (gtab && m[2] === 'document') {
+      return `${base}?tab=${encodeURIComponent(gtab)}`;
+    }
+    if (gtab && m[2] === 'spreadsheets') {
+      const gid = encodeURIComponent(gtab);
+      return `${base}?gid=${gid}#gid=${gid}`;
+    }
+    return base;
+  }
   // drive.google.com/open?id=<id> / uc?id=<id> 形式
   const id = u.match(/[?&]id=([A-Za-z0-9_-]+)/);
   if (id && /drive\.google\.com/.test(u)) {
@@ -296,7 +325,7 @@ export function toGooglePreviewUrl(raw: string): string {
 
 const GOOGLE_URL_RE = /^https?:\/\/(docs|drive)\.google\.com\//;
 
-function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
+function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl, gtab, onSelectTab }: Props) {
   const saved = doc.googleDocUrl ?? '';
   const [draft, setDraft] = useState(saved);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -329,7 +358,28 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
 
   const url = saved.trim();
   const isValid = GOOGLE_URL_RE.test(url);
-  const previewSrc = isValid ? toGooglePreviewUrl(url) : '';
+  const previewSrc = isValid ? toGooglePreviewUrl(url, gtab) : '';
+
+  // Google 側のタブ構成（Docsのタブ / Sheetsのシート）。一覧のキャッシュを初期値に、
+  // 表示時に自動で再取得して最新化する（タブバーとサイドメニューの元データ）。
+  const [tabsInfo, setTabsInfo] = useState<GoogleTabs | null>(doc.googleTabs ?? null);
+  const [tabsRefreshing, setTabsRefreshing] = useState(false);
+  // 同一 doc+URL での多重取得を防ぐ（drive 状態の再セット等で effect が再発火するため）。
+  const tabsRefreshedKeyRef = useRef<string | null>(null);
+
+  const refreshTabs = useCallback(async () => {
+    setTabsRefreshing(true);
+    try {
+      const updated = await meetingDocumentApi.refreshGoogleTabs(doc.id);
+      setTabsInfo(updated.googleTabs ?? null);
+      // サイドメニューの「会議別ドキュメント」ツリーにもタブを反映させる。
+      window.dispatchEvent(new Event('meeting-docs-changed'));
+    } catch {
+      // 未連携・共有漏れ等はタブバーを出さないだけ（本文取り込み側で具体的に案内される）。
+    } finally {
+      setTabsRefreshing(false);
+    }
+  }, [doc.id]);
 
   // 本文の DB 取り込み（Drive 連携経由）。
   const [fetching, setFetching] = useState(false);
@@ -374,6 +424,23 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
   useEffect(() => {
     void loadDrive();
   }, [loadDrive]);
+
+  // 表示時（および保存URLの変更時）にタブ構成を自動更新（Drive 連携済みのときだけ）。
+  // URL 変更時はサーバー側でキャッシュがクリアされるため、ここで取り直して即反映する。
+  useEffect(() => {
+    if (!isValid || !drive?.connected) return;
+    const key = `${doc.id}:${url}`;
+    if (tabsRefreshedKeyRef.current === key) return;
+    tabsRefreshedKeyRef.current = key;
+    void refreshTabs();
+  }, [isValid, drive?.connected, doc.id, url, refreshTabs]);
+
+  // タブバーの表示順（Google 側の並び順）。
+  const sortedTabs = useMemo(
+    () => (tabsInfo ? [...tabsInfo.tabs].sort((a, b) => a.index - b.index) : []),
+    [tabsInfo],
+  );
+  const showTabBar = isValid && !!tabsInfo && tabsInfo.kind !== 'other' && sortedTabs.length > 0;
 
   // 認証ウィンドウで OAuth → 完了をポーリングして接続状態を反映。
   const handleConnect = useCallback(() => {
@@ -517,6 +584,46 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
           </div>
         )}
       </div>
+      {/* Google タブバー（Docsのドキュメントタブ / Sheetsのシート）。
+          iframe 内の Google 純正タブUIは absolute 配置で位置が使いにくいため、
+          アプリ側の通常フローに横スクロール可能なタブバーを置く（?gtab= でサイドメニューとも連動）。 */}
+      {showTabBar && (
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-gray-100 bg-gray-50/60 px-2 py-1.5">
+          <span className="flex-shrink-0 pr-1 text-[10px] font-semibold text-gray-400">
+            {tabsInfo?.kind === 'spreadsheet' ? 'シート' : 'タブ'}
+          </span>
+          {sortedTabs.map((t, i) => {
+            // gtab 未指定時は先頭タブが表示されている（Google preview の既定）。
+            const active = gtab ? gtab === t.id : i === 0;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelectTab?.(t.id)}
+                title={t.title || '（無題のタブ）'}
+                className={cn(
+                  'max-w-[180px] flex-shrink-0 truncate rounded-full border px-2.5 py-0.5 text-[11px] transition-colors',
+                  active
+                    ? 'border-blue-300 bg-blue-100 font-medium text-blue-800'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50',
+                )}
+              >
+                {t.level > 0 ? `${'›'.repeat(t.level)} ` : ''}
+                {t.title || '（無題）'}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => void refreshTabs()}
+            disabled={tabsRefreshing}
+            title="タブ構成を Google から再取得"
+            className="ml-auto flex-shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3 w-3', tabsRefreshing && 'animate-spin')} />
+          </button>
+        </div>
+      )}
       {/* 取り込み状態（保存済み / 結果 / エラー） */}
       {(fetchMsg || doc.hasFetchedContent) && (
         <div
