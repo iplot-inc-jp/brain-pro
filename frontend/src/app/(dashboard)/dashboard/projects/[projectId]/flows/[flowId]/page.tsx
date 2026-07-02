@@ -1611,8 +1611,10 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders, roles]
   );
 
-  // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）→ 再取得。
+  // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）。
   // SwimlaneCanvas が computeFlowLayout の綺麗な座標を渡してくる（ぐちゃぐちゃ修正の安全網）。
+  // 体感速度のため先にローカルへ楽観反映して即座に動かし、保存は裏で行う
+  // （以前は PUT → フロー/ロール/注釈の全再取得を待つまで 1〜3 秒キャンバスが動かなかった）。
   const handleTidyNodes = useCallback(
     async (
       positions: Array<{
@@ -1630,10 +1632,48 @@ export default function ProjectFlowDetailPage() {
       }>
     ) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 1) 楽観反映: flowData に新レイアウトをマージ → キャンバスは即座に整形後の姿になる。
+      //    （SwimlaneCanvas の effectivePositions は flowData.nodes 由来のため、これで十分）
+      const posById = new Map(positions.map((p) => [p.id, p]));
+      const edgeById = new Map((edges ?? []).map((e) => [e.id, e]));
+      setFlowData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n) => {
+            const p = posById.get(n.id);
+            if (!p) return n;
+            return {
+              ...n,
+              positionX: p.positionX,
+              positionY: p.positionY,
+              ...(p.order !== undefined ? { order: p.order } : {}),
+              ...(p.roleId !== undefined
+                ? {
+                    roleId: p.roleId ?? undefined,
+                    role: p.roleId ? roles.find((r) => r.id === p.roleId) ?? n.role : undefined,
+                  }
+                : {}),
+            };
+          }),
+          edges: prev.edges.map((e) => {
+            const pe = edgeById.get(e.id);
+            if (!pe) return e;
+            return {
+              ...e,
+              ...(pe.sourceHandle !== undefined ? { sourceHandle: pe.sourceHandle } : {}),
+              ...(pe.targetHandle !== undefined ? { targetHandle: pe.targetHandle } : {}),
+            };
+          }),
+        };
+      });
+      // 2) 保存（返す Promise は SwimlaneCanvas の layoutSaving 連打ガードに使われる。
+      //    保存完了前に次の整形/縦横が走って PUT が競合しないよう、PUT の完了までを含める）。
       try {
         const headers = getHeaders();
         const res = await fetch(
-          `${API_URL}/api/business-flows/${flowData.id}/nodes/positions`,
+          `${API_URL}/api/business-flows/${flowId}/nodes/positions`,
           {
             method: 'PUT',
             headers,
@@ -1643,16 +1683,14 @@ export default function ProjectFlowDetailPage() {
           }
         );
         if (!res.ok) throw new Error('Failed to tidy node positions');
-        // 再取得完了まで await して返す Promise に含める。
-        // SwimlaneCanvas 側はこの Promise の解決を「flowData の座標が新レイアウトへ
-        // 入れ替わった」合図として整形/縦横ボタンの連打ガードに使う（解決前に次の
-        // 縦横切替が走ると、旧座標のノードと移動済みの注釈を突き合わせてしまう）。
-        await fetchFlowData(flowData.id);
+        // 成功時は再取得しない（楽観反映済み＝サーバと同一。整形はロール/注釈を変えない）。
       } catch (err) {
+        // 失敗時のみサーバの真実へ巻き戻す（静かに再取得）。
         console.error('Failed to tidy node positions:', err);
+        await fetchFlowData(flowId, true);
       }
     },
-    [flowData, fetchFlowData, getHeaders]
+    [flowData, fetchFlowData, getHeaders, roles]
   );
 
   // ノード作成（構造ベース：位置はサーバ側0固定、描画は自動レイアウト）

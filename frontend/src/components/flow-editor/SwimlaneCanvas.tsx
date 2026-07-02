@@ -545,12 +545,23 @@ const NODE_STYLE: Record<string, string> = {
 
 // 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
 // id は安定値（'top'|'right'|'bottom'|'left'）で、保存された接続側の復元に使う。
-const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
+type HandleSide = 'top' | 'right' | 'bottom' | 'left';
+const HANDLE_SIDES: Array<{ id: HandleSide; position: Position }> = [
   { id: 'top', position: Position.Top },
   { id: 'right', position: Position.Right },
   { id: 'bottom', position: Position.Bottom },
   { id: 'left', position: Position.Left },
 ];
+
+// ドロップ位置（client 座標）がノード矩形のどの辺に最も近いかを返す。
+// 端点ドラッグでの「接続辺の指定」に使う（矩形サイズで正規化して縦横の偏りを吸収）。
+function nearestSideOf(nodeEl: HTMLElement, clientX: number, clientY: number): HandleSide {
+  const r = nodeEl.getBoundingClientRect();
+  const dx = (clientX - (r.left + r.width / 2)) / Math.max(r.width, 1);
+  const dy = (clientY - (r.top + r.height / 2)) / Math.max(r.height, 1);
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
+  return dy >= 0 ? 'bottom' : 'top';
+}
 
 function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData; selected?: boolean }) {
   const cls = NODE_STYLE[data.ntype] ?? NODE_STYLE.PROCESS;
@@ -855,8 +866,14 @@ function EditableEdge({
     informationTypeName?: string | null;
     /** この矢印に紐づく API エンドポイント数（>0 でパス中央付近に「API n」バッジを出す）。 */
     apiLinkCount?: number;
-    /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
-    onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
+    /**
+     * 矢印の先端（終点）をドラッグして付け替える。ドロップ先ノードIDと、
+     * ドロップ位置に最も近い辺（top|right|bottom|left）を渡す。
+     * 同じノードの別の辺へのドロップ＝接続辺の変更にもなる。
+     */
+    onReconnectTarget?: (edgeId: string, newTargetNodeId: string, side: HandleSide) => void;
+    /** 矢印の始点をドラッグして付け替える（先端と同様、ノードID＋最近接の辺）。 */
+    onReconnectSource?: (edgeId: string, newSourceNodeId: string, side: HandleSide) => void;
     /** 先端をノードから離れた場所にドロップした時、矢印自体を削除する。 */
     onDeleteSelf?: (edgeId: string) => void;
     /** ラベル/チップなど線以外の部分をクリックしても矢印を選択できるようにする。 */
@@ -885,6 +902,7 @@ function EditableEdge({
   const movedRef = useRef(false);
 
   const onReconnectTarget = data?.onReconnectTarget;
+  const onReconnectSource = data?.onReconnectSource;
   const onDeleteSelf = data?.onDeleteSelf;
   const onMoveLabel = data?.onMoveLabel;
   const onMoveInfo = data?.onMoveInfo;
@@ -972,16 +990,23 @@ function EditableEdge({
     [rf, nearestT, id],
   );
 
-  // 先端アンカーのドラッグ: ノードにドロップ=付け替え / 何もない所=削除。
-  const onTargetAnchorDown = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!onReconnectTarget && !onDeleteSelf) return;
+  // 端点アンカーのドラッグ: ノードにドロップ=付け替え（ドロップ位置の最近接の辺へ接続）。
+  // 同じノードの別の辺へのドロップは「接続辺の変更」になる。
+  // 終点を何もない所（レーン背景含む）へドロップ=削除。始点の空きドロップは何もしない。
+  const startAnchorDrag = useCallback(
+    (e: ReactPointerEvent, end: 'source' | 'target') => {
+      const reconnect = end === 'target' ? onReconnectTarget : onReconnectSource;
+      if (!reconnect && !(end === 'target' && onDeleteSelf)) return;
       e.stopPropagation();
       e.preventDefault();
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
-      dragStartRef.current = { x: sx, y: sy };
+      // ゴースト線は「動かさない側の端点」から引く（screen 座標へ変換）。
+      const fixed = rf.flowToScreenPosition(
+        end === 'target' ? { x: sourceX, y: sourceY } : { x: targetX, y: targetY },
+      );
+      dragStartRef.current = { x: fixed.x, y: fixed.y };
       setDragPos({ x: sx, y: sy });
       const move = (ev: PointerEvent) => {
         if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 6) moved = true;
@@ -994,15 +1019,19 @@ function EditableEdge({
         dragStartRef.current = null;
         if (!moved) return; // ただのクリックは無視（誤削除/誤付け替え防止）
         const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
-        const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+        // レーン背景も .react-flow__node なので、コンテンツノードだけを付け替え先にする。
+        const nodeEl = el?.closest('.react-flow__node-content') as HTMLElement | null;
         const newId = nodeEl?.getAttribute('data-id');
-        if (newId && onReconnectTarget) onReconnectTarget(id, newId);
-        else if (onDeleteSelf) onDeleteSelf(id);
+        if (nodeEl && newId && reconnect) {
+          reconnect(id, newId, nearestSideOf(nodeEl, ev.clientX, ev.clientY));
+        } else if (end === 'target' && onDeleteSelf) {
+          onDeleteSelf(id);
+        }
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     },
-    [onReconnectTarget, onDeleteSelf, id],
+    [onReconnectTarget, onReconnectSource, onDeleteSelf, id, rf, sourceX, sourceY, targetX, targetY],
   );
 
   const dragging = dragPos !== null;
@@ -1139,15 +1168,15 @@ function EditableEdge({
             )
           )}
         </div>
-        {/* 矢印の先端（終点）をドラッグ: ノードへドロップ=付け替え / 何もない所=削除。
-            選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。 */}
+        {/* 矢印の先端（終点）をドラッグ: ノードへドロップ=付け替え（ドロップした辺に接続）/
+            何もない所=削除。選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。 */}
         {(onReconnectTarget || onDeleteSelf) && (selected || dragging) && (
           <div
             className={`nodrag nopan flex items-center justify-center ${
               dragging ? 'cursor-grabbing' : 'cursor-grab'
             }`}
-            title="ドラッグ: ノードへ=付け替え / 何もない所へ=削除"
-            onPointerDown={onTargetAnchorDown}
+            title="ドラッグ: ノードへ=付け替え（ドロップした辺に接続）/ 何もない所へ=削除"
+            onPointerDown={(e) => startAnchorDrag(e, 'target')}
             style={{
               position: 'absolute',
               transform: `translate(-50%,-50%) translate(${targetX}px,${targetY}px)`,
@@ -1161,6 +1190,31 @@ function EditableEdge({
                 dragging
                   ? 'h-3.5 w-3.5 bg-blue-500 ring-blue-300'
                   : 'h-3 w-3 bg-blue-500/80 ring-blue-200'
+              }`}
+            />
+          </div>
+        )}
+        {/* 矢印の始点も同様にドラッグで付け替え可能（同じノードの別の辺へ=出る辺の変更）。 */}
+        {onReconnectSource && (selected || dragging) && (
+          <div
+            className={`nodrag nopan flex items-center justify-center ${
+              dragging ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            title="ドラッグ: ノードへ=始点の付け替え（ドロップした辺から出る）"
+            onPointerDown={(e) => startAnchorDrag(e, 'source')}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${sourceX}px,${sourceY}px)`,
+              pointerEvents: 'all',
+              width: 22,
+              height: 22,
+            }}
+          >
+            <span
+              className={`block rounded-full ring-2 transition-all ${
+                dragging
+                  ? 'h-3.5 w-3.5 bg-emerald-500 ring-emerald-300'
+                  : 'h-3 w-3 bg-emerald-500/80 ring-emerald-200'
               }`}
             />
           </div>
@@ -2936,15 +2990,29 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onMoveInfo: props.onUpdateEdge
             ? (edgeId: string, t: number) => props.onUpdateEdge?.(edgeId, { infoT: t })
             : undefined,
-          // 先端ドラッグでの付け替え（ドロップ先ノードへ target を変更）。
+          // 先端ドラッグでの付け替え。ドロップ先ノード＋ドロップ位置の最近接の辺へ接続する
+          // （同じノードへのドロップでも辺が変われば「入る辺の変更」として反映）。
           onReconnectTarget: props.onReconnectEdge
-            ? (edgeId: string, newTargetNodeId: string) => {
+            ? (edgeId: string, newTargetNodeId: string, side: string) => {
                 const cur = flowData.edges.find((x) => x.id === edgeId);
                 if (!cur || newTargetNodeId === cur.sourceNodeId) return;
                 props.onReconnectEdge?.(edgeId, {
                   sourceNodeId: cur.sourceNodeId,
                   targetNodeId: newTargetNodeId,
                   sourceHandle: cur.sourceHandle ?? null,
+                  targetHandle: side,
+                });
+              }
+            : undefined,
+          // 始点ドラッグでの付け替え（出るノード/辺の変更）。
+          onReconnectSource: props.onReconnectEdge
+            ? (edgeId: string, newSourceNodeId: string, side: string) => {
+                const cur = flowData.edges.find((x) => x.id === edgeId);
+                if (!cur || newSourceNodeId === cur.targetNodeId) return;
+                props.onReconnectEdge?.(edgeId, {
+                  sourceNodeId: newSourceNodeId,
+                  targetNodeId: cur.targetNodeId,
+                  sourceHandle: side,
                   targetHandle: cur.targetHandle ?? null,
                 });
               }
@@ -3428,30 +3496,61 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
   // 与えられたレイアウト（computeFlowLayout の結果）を一括保存ペイロードへ変換する。
   // ノード位置（中心→左上）と、最近接サイド接続ハンドル（edges）を同一リクエストで送る。
+  // 現在値と変わらない行は送らない（既に整形済みのフローで再度「整形」しても no-op で即完了）。
   const persistLayout = useCallback(
     (layout: FlowLayoutView) => {
-      const positions: NodePositionPatch[] = layout.nodes.map((pn) => ({
-        id: pn.id,
-        // computeFlowLayout は中心座標 → サーバ保存は左上基準
-        positionX: pn.x - pn.width / 2,
-        positionY: pn.y - pn.height / 2,
-        // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
-        roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
-        order: typeof pn.order === 'number' ? pn.order : undefined,
-      }));
-      const edges: EdgeHandlePatch[] = layout.edges.map((e) => ({
-        id: e.id,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-      }));
-      // 保存往復（PUT + 再取得）の完了まで layoutSaving を立て、整形/縦横の連打を防ぐ。
+      const nodeById = new Map(flowData.nodes.map((n) => [n.id, n]));
+      const edgeById = new Map(flowData.edges.map((e) => [e.id, e]));
+      // 座標は float の丸め差が出るため 0.5px 未満の差は「同じ」とみなす。
+      const near = (a: number | null | undefined, b: number) =>
+        typeof a === 'number' && Math.abs(a - b) < 0.5;
+
+      const positions: NodePositionPatch[] = layout.nodes
+        .map((pn) => ({
+          id: pn.id,
+          // computeFlowLayout は中心座標 → サーバ保存は左上基準
+          positionX: pn.x - pn.width / 2,
+          positionY: pn.y - pn.height / 2,
+          // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
+          roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
+          order: typeof pn.order === 'number' ? pn.order : undefined,
+        }))
+        .filter((p) => {
+          const cur = nodeById.get(p.id);
+          if (!cur) return true;
+          const curRole = cur.roleId ?? cur.role?.id ?? null;
+          return !(
+            near(cur.positionX, p.positionX) &&
+            near(cur.positionY, p.positionY) &&
+            curRole === (p.roleId ?? null) &&
+            (p.order === undefined || cur.order === p.order)
+          );
+        });
+      const edges: EdgeHandlePatch[] = layout.edges
+        .map((e) => ({
+          id: e.id,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        }))
+        .filter((e) => {
+          const cur = edgeById.get(e.id);
+          if (!cur) return true;
+          return (
+            (cur.sourceHandle ?? null) !== (e.sourceHandle ?? null) ||
+            (cur.targetHandle ?? null) !== (e.targetHandle ?? null)
+          );
+        });
+      if (positions.length === 0 && edges.length === 0) return; // 変更なし＝保存不要
+
+      // 保存往復の完了まで layoutSaving を立て、整形/縦横の連打（PUT の競合）を防ぐ。
+      // 描画は onTidyNodes 側が楽観反映するため、この間もキャンバスは新レイアウトで表示される。
       const pending = props.onTidyNodes?.(positions, edges);
       if (pending) {
         setLayoutSaving(true);
         void Promise.resolve(pending).finally(() => setLayoutSaving(false));
       }
     },
-    [roles, props],
+    [roles, props, flowData.nodes, flowData.edges],
   );
 
   // --- 「整形」: computeFlowLayout で綺麗な座標を作り、一括保存して再取得 ---
