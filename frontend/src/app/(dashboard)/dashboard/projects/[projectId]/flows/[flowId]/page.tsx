@@ -1725,17 +1725,31 @@ export default function ProjectFlowDetailPage() {
   const handleNodeDelete = useCallback(
     async (nodeId: string) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 楽観反映: ノードと接続矢印を即座に消す（サーバ側はカスケード削除。
+      // 全再取得を待つとキャンバスが固まって見えるため先にローカルへ反映する）。
+      setFlowData((prev) =>
+        prev
+          ? {
+              ...prev,
+              nodes: prev.nodes.filter((n) => n.id !== nodeId),
+              edges: prev.edges.filter(
+                (e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId
+              ),
+            }
+          : prev
+      );
       try {
         const headers = getHeaders();
-        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}`, {
+        const res = await fetch(`${API_URL}/api/business-flows/${flowId}/nodes/${nodeId}`, {
           method: 'DELETE',
           headers,
         });
-
         if (!res.ok) throw new Error('Failed to delete node');
-        fetchFlowData(flowData.id);
       } catch (err) {
+        // 失敗時のみサーバの真実へ巻き戻す（静かに再取得）。
         console.error('Failed to delete node:', err);
+        await fetchFlowData(flowId, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1870,9 +1884,30 @@ export default function ProjectFlowDetailPage() {
       }
     ) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 楽観反映を先に行い、矢印の付け替え（端点・接続辺）を即座に描画へ反映する。
+      // PATCH は裏で実行し、失敗時のみサーバの真実へ巻き戻す。
+      setFlowData((prev) =>
+        prev
+          ? {
+              ...prev,
+              edges: prev.edges.map((e) =>
+                e.id === edgeId
+                  ? {
+                      ...e,
+                      sourceNodeId: next.sourceNodeId,
+                      targetNodeId: next.targetNodeId,
+                      sourceHandle: next.sourceHandle ?? null,
+                      targetHandle: next.targetHandle ?? null,
+                    }
+                  : e
+              ),
+            }
+          : prev
+      );
       try {
         const headers = getHeaders();
-        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges/${edgeId}`, {
+        const res = await fetch(`${API_URL}/api/business-flows/${flowId}/edges/${edgeId}`, {
           method: 'PATCH',
           headers,
           body: JSON.stringify({
@@ -1882,30 +1917,10 @@ export default function ProjectFlowDetailPage() {
             targetHandle: next.targetHandle ?? null,
           }),
         });
-
         if (!res.ok) throw new Error('Failed to reconnect edge');
-        // 楽観更新: 端点（source/target/接続側）をローカルに反映（全体再取得を避ける）。
-        setFlowData((prev) =>
-          prev
-            ? {
-                ...prev,
-                edges: prev.edges.map((e) =>
-                  e.id === edgeId
-                    ? {
-                        ...e,
-                        sourceNodeId: next.sourceNodeId,
-                        targetNodeId: next.targetNodeId,
-                        sourceHandle: next.sourceHandle ?? null,
-                        targetHandle: next.targetHandle ?? null,
-                      }
-                    : e
-                ),
-              }
-            : prev
-        );
       } catch (err) {
         console.error('Failed to reconnect edge:', err);
-        if (flowData) fetchFlowData(flowData.id, true);
+        await fetchFlowData(flowId, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]

@@ -3083,12 +3083,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedEdgeId, onDeleteEdge]);
 
-  // 選択中の自由配置要素（画像 / 注釈=DB/人/アイコン・付箋・コメント・スコープ）を
-  // Delete / Backspace で削除する。コンテンツノード（業務ブロック）は誤削除防止のため
-  // 対象外（従来どおりパネル/右クリックから削除）。React Flow の選択(node.selected)を見る。
+  // 選択中の要素（コンテンツノード / 画像 / 注釈=DB/人/アイコン・付箋・コメント・スコープ）を
+  // Delete / Backspace で削除する。React Flow の選択(node.selected)を見る。
   const dragNodesRef = useRef(dragNodes);
   dragNodesRef.current = dragNodes;
   const onDeleteAnnotationKb = props.onDeleteAnnotation;
+  const onDeleteNodeKb = props.onDeleteNode;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -3097,7 +3097,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       const selected = dragNodesRef.current.filter((n) => n.selected);
       const imgIds = selected.filter((n) => n.type === 'imageElement').map((n) => n.id);
       const annoIds = selected.filter((n) => n.type === 'annotation').map((n) => n.id);
-      if (imgIds.length === 0 && annoIds.length === 0) return;
+      // コンテンツノード（業務ブロック）も削除対象（閲覧のみ＝onDeleteNode 未設定なら対象外）。
+      const contentIds = onDeleteNodeKb
+        ? selected.filter((n) => n.type === 'content').map((n) => n.id)
+        : [];
+      if (imgIds.length === 0 && annoIds.length === 0 && contentIds.length === 0) return;
       e.preventDefault();
       if (imgIds.length > 0) {
         // 逆操作（id 保持で復活）のため削除前 DTO を ref から同期取得してから消す。
@@ -3112,10 +3116,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         }
       }
       for (const id of annoIds) onDeleteAnnotationKb?.(id);
+      for (const id of contentIds) onDeleteNodeKb?.(id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onDeleteAnnotationKb]);
+  }, [onDeleteAnnotationKb, onDeleteNodeKb]);
 
   // 接続ドラッグを開始したノード/ハンドルを覚えておく。
   // - 向きの正規化（開始ノード → ドロップ先）に使う。
