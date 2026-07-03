@@ -136,6 +136,16 @@ export default function LoginPage() {
             新規登録
           </Link>
         </p>
+
+        <div className="mt-6 border-t border-gray-100 pt-4 text-center text-xs text-gray-400">
+          <Link href="/privacy" className="hover:underline">
+            プライバシーポリシー
+          </Link>
+          <span className="mx-2">·</span>
+          <Link href="/terms" className="hover:underline">
+            利用規約
+          </Link>
+        </div>
       </div>
     </div>
   );
