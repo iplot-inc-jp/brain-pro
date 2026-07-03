@@ -3,4 +3,5 @@ export * from './jwt-token.service';
 export * from './project-access.service';
 export * from './project-bundle.service';
 export * from './entity-json.service';
+export * from './google-verifier.service';
 

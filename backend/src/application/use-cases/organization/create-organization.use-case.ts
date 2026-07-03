@@ -7,7 +7,6 @@ import {
   USER_REPOSITORY,
   EntityAlreadyExistsError,
   EntityNotFoundError,
-  ForbiddenError,
 } from '../../../domain';
 
 export interface CreateOrganizationInput {
@@ -37,13 +36,11 @@ export class CreateOrganizationUseCase {
   ) {}
 
   async execute(input: CreateOrganizationInput): Promise<CreateOrganizationOutput> {
-    // 0. 会社の作成は全体管理者のみ可能
+    // 0. 作成者ユーザーの存在確認（認証済みユーザーは誰でも会社を作成でき、
+    //    作成者は下記ステップ5で自動的に OWNER メンバーになる＝セルフサーブ）
     const actor = await this.userRepository.findById(input.userId);
     if (!actor) {
       throw new EntityNotFoundError('User', input.userId);
-    }
-    if (!actor.isSuperAdmin) {
-      throw new ForbiddenError('会社の作成は全体管理者のみ可能です');
     }
 
     // 1. スラッグ重複チェック

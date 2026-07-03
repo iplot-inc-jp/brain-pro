@@ -61,6 +61,7 @@ import { toPng } from 'html-to-image';
 import {
   ChevronLeft,
   Layers,
+  Image as ImageIcon,
   Plus,
   Trash2,
   GitBranch,
@@ -88,6 +89,7 @@ import {
   MessageSquarePlus,
   GripVertical,
   Pencil,
+  ArrowDownUp,
   Check,
   Star,
   Flag,
@@ -229,6 +231,8 @@ export interface SwimlaneCanvasProps {
   roles: Role[];
   /** 現在のプロジェクトID（連携先フロー絞り込み・子フロー遷移URL組み立てに使用）。 */
   projectId?: string;
+  /** ノードID → 添付画像。ノード右上にバッジを出し、ホバーで拡大プレビューする。 */
+  nodeImages?: Map<string, NodeImageRef[]>;
   /** 画像Undo(op-log)の操作可否が変わるたびに親へ通知（ツールバー活性/⌘Z のチャンネル統合用）。 */
   onImageUndoStateChange?: (s: { canUndo: boolean; canRedo: boolean }) => void;
   /** 親が ⌘Z ルーターから画像Undoの undo/redo/peek を呼ぶための命令的ハンドル。 */
@@ -449,6 +453,12 @@ export interface SwimlaneCanvasProps {
    * true のとき編集系UIを描画しない（MiniMap/Controls/ロール編集パネルは従来どおり）。
    */
   embedded?: boolean;
+  /**
+   * 「レーン（ロール）の順番」ダイアログを開く。ロールパネルの専用ボタンから呼ぶ。
+   * 並び替え対象は全ロールなので、表示中ロールに限定される SwimlaneCanvas ではなく
+   * ページ側が RoleOrderDialog を所有し、このコールバックで開く。
+   */
+  onOpenRoleOrder?: () => void;
 }
 
 // ===========================================
@@ -505,6 +515,9 @@ interface FlowLayoutView {
 // ノードの見た目
 // ===========================================
 
+/** ノードに添付された画像（ホバープレビュー用の最小情報）。 */
+export type NodeImageRef = { id: string; url: string; filename: string };
+
 type ContentNodeData = {
   label: string;
   ntype: string;
@@ -512,8 +525,12 @@ type ContentNodeData = {
   hasLinks?: boolean;
   roleColor?: string;
   orientation: FlowOrientation;
+  /** このノードに添付された画像（あればノード右上にバッジ＋ホバーで拡大プレビュー）。 */
+  attachmentImages?: NodeImageRef[];
   /** リサイズ確定時に呼ぶ（width/height を永続化）。embedded（閲覧）では未設定。 */
   onResizeEnd?: (id: string, size: { width: number; height: number }) => void;
+  /** ノードの名前（label）を変更する。embedded（閲覧）では未設定。 */
+  onRename?: (id: string, label: string) => void;
 };
 
 const NODE_STYLE: Record<string, string> = {
@@ -528,15 +545,40 @@ const NODE_STYLE: Record<string, string> = {
 
 // 4辺の接続ハンドル定義。ConnectionMode.Loose 下では各ハンドルが source/target 両用。
 // id は安定値（'top'|'right'|'bottom'|'left'）で、保存された接続側の復元に使う。
-const HANDLE_SIDES: Array<{ id: string; position: Position }> = [
+type HandleSide = 'top' | 'right' | 'bottom' | 'left';
+const HANDLE_SIDES: Array<{ id: HandleSide; position: Position }> = [
   { id: 'top', position: Position.Top },
   { id: 'right', position: Position.Right },
   { id: 'bottom', position: Position.Bottom },
   { id: 'left', position: Position.Left },
 ];
 
+// ドロップ位置（client 座標）がノード矩形のどの辺に最も近いかを返す。
+// 端点ドラッグでの「接続辺の指定」に使う（矩形サイズで正規化して縦横の偏りを吸収）。
+function nearestSideOf(nodeEl: HTMLElement, clientX: number, clientY: number): HandleSide {
+  const r = nodeEl.getBoundingClientRect();
+  const dx = (clientX - (r.left + r.width / 2)) / Math.max(r.width, 1);
+  const dy = (clientY - (r.top + r.height / 2)) / Math.max(r.height, 1);
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'right' : 'left';
+  return dy >= 0 ? 'bottom' : 'top';
+}
+
 function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData; selected?: boolean }) {
   const cls = NODE_STYLE[data.ntype] ?? NODE_STYLE.PROCESS;
+  // ノード名のインライン編集。ダブルクリックは詳細フロー展開に使われるため、
+  // 改名はホバー/選択時に出るペンシルから入る（onRename があるときだけ）。
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(data.label);
+  useEffect(() => {
+    // 再取得などで外部 label が変わったら追従（編集中は上書きしない）。
+    if (!editing) setValue(data.label);
+  }, [data.label, editing]);
+  const commitRename = () => {
+    setEditing(false);
+    const v = value.trim();
+    if (v && v !== data.label) data.onRename?.(id, v);
+    else setValue(data.label);
+  };
   return (
     <div
       className={`group/node px-3 py-2 rounded-lg border-2 shadow-sm w-full h-full flex flex-col items-center justify-center text-center transition-all ${cls} ${
@@ -581,7 +623,79 @@ function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData
           className="nodrag !w-2 !h-2 !min-w-0 !min-h-0 !bg-transparent !border-0"
         />
       ))}
-      <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
+      {/* 画像添付バッジ（右上）。ホバーすると画像をポップアップで拡大プレビュー。 */}
+      {data.attachmentImages && data.attachmentImages.length > 0 && (
+        <div className="group/att nodrag absolute -right-1.5 -top-1.5 z-10">
+          <div
+            className="flex h-5 w-5 cursor-help items-center justify-center rounded-full border border-white bg-blue-600 text-white shadow"
+            title={`画像 ${data.attachmentImages.length} 件`}
+          >
+            <ImageIcon className="h-3 w-3" />
+            {data.attachmentImages.length > 1 && (
+              <span className="absolute -bottom-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gray-800 px-0.5 text-[8px] font-bold leading-none text-white">
+                {data.attachmentImages.length}
+              </span>
+            )}
+          </div>
+          {/* ホバーポップアップ（先頭画像を拡大表示。複数枚は枚数を併記） */}
+          <div className="pointer-events-none invisible absolute right-0 top-6 z-50 opacity-0 transition-opacity duration-100 group-hover/att:visible group-hover/att:opacity-100">
+            <div className="rounded-lg border border-gray-200 bg-white p-1.5 shadow-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={data.attachmentImages[0].url}
+                alt={data.attachmentImages[0].filename}
+                className="max-h-56 max-w-[260px] rounded object-contain"
+              />
+              <div className="mt-1 max-w-[260px] truncate text-center text-[10px] text-gray-500">
+                {data.attachmentImages[0].filename}
+                {data.attachmentImages.length > 1 && ` ほか ${data.attachmentImages.length - 1} 件`}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {data.onRename && editing ? (
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setValue(data.label);
+              setEditing(false);
+            }
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          className="nodrag w-full rounded border border-blue-300 px-1 py-0.5 text-center text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      ) : (
+        <div className="font-medium text-sm leading-tight line-clamp-2">{data.label}</div>
+      )}
+      {/* 名前を変更（ホバー/選択中に左上のペンシル）。ダブルクリックは詳細フロー展開のため別操作にする。 */}
+      {data.onRename && !editing && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setValue(data.label);
+            setEditing(true);
+          }}
+          title="名前を変更"
+          className={`nodrag absolute -left-1.5 -top-1.5 z-10 h-5 w-5 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow hover:text-gray-800 ${
+            selected ? 'flex' : 'hidden group-hover/node:flex'
+          }`}
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      )}
       {(data.hasChildFlow || data.hasLinks) && (
         <div className="mt-0.5 flex items-center justify-center gap-1.5">
           {data.hasChildFlow && (
@@ -752,8 +866,14 @@ function EditableEdge({
     informationTypeName?: string | null;
     /** この矢印に紐づく API エンドポイント数（>0 でパス中央付近に「API n」バッジを出す）。 */
     apiLinkCount?: number;
-    /** 矢印の先端（終点）をドラッグして別ノードへ付け替える。ドロップ先ノードIDを渡す。 */
-    onReconnectTarget?: (edgeId: string, newTargetNodeId: string) => void;
+    /**
+     * 矢印の先端（終点）をドラッグして付け替える。ドロップ先ノードIDと、
+     * ドロップ位置に最も近い辺（top|right|bottom|left）を渡す。
+     * 同じノードの別の辺へのドロップ＝接続辺の変更にもなる。
+     */
+    onReconnectTarget?: (edgeId: string, newTargetNodeId: string, side: HandleSide) => void;
+    /** 矢印の始点をドラッグして付け替える（先端と同様、ノードID＋最近接の辺）。 */
+    onReconnectSource?: (edgeId: string, newSourceNodeId: string, side: HandleSide) => void;
     /** 先端をノードから離れた場所にドロップした時、矢印自体を削除する。 */
     onDeleteSelf?: (edgeId: string) => void;
     /** ラベル/チップなど線以外の部分をクリックしても矢印を選択できるようにする。 */
@@ -782,6 +902,7 @@ function EditableEdge({
   const movedRef = useRef(false);
 
   const onReconnectTarget = data?.onReconnectTarget;
+  const onReconnectSource = data?.onReconnectSource;
   const onDeleteSelf = data?.onDeleteSelf;
   const onMoveLabel = data?.onMoveLabel;
   const onMoveInfo = data?.onMoveInfo;
@@ -869,16 +990,23 @@ function EditableEdge({
     [rf, nearestT, id],
   );
 
-  // 先端アンカーのドラッグ: ノードにドロップ=付け替え / 何もない所=削除。
-  const onTargetAnchorDown = useCallback(
-    (e: ReactPointerEvent) => {
-      if (!onReconnectTarget && !onDeleteSelf) return;
+  // 端点アンカーのドラッグ: ノードにドロップ=付け替え（ドロップ位置の最近接の辺へ接続）。
+  // 同じノードの別の辺へのドロップは「接続辺の変更」になる。
+  // 終点を何もない所（レーン背景含む）へドロップ=削除。始点の空きドロップは何もしない。
+  const startAnchorDrag = useCallback(
+    (e: ReactPointerEvent, end: 'source' | 'target') => {
+      const reconnect = end === 'target' ? onReconnectTarget : onReconnectSource;
+      if (!reconnect && !(end === 'target' && onDeleteSelf)) return;
       e.stopPropagation();
       e.preventDefault();
       const sx = e.clientX;
       const sy = e.clientY;
       let moved = false;
-      dragStartRef.current = { x: sx, y: sy };
+      // ゴースト線は「動かさない側の端点」から引く（screen 座標へ変換）。
+      const fixed = rf.flowToScreenPosition(
+        end === 'target' ? { x: sourceX, y: sourceY } : { x: targetX, y: targetY },
+      );
+      dragStartRef.current = { x: fixed.x, y: fixed.y };
       setDragPos({ x: sx, y: sy });
       const move = (ev: PointerEvent) => {
         if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) >= 6) moved = true;
@@ -891,15 +1019,19 @@ function EditableEdge({
         dragStartRef.current = null;
         if (!moved) return; // ただのクリックは無視（誤削除/誤付け替え防止）
         const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
-        const nodeEl = el?.closest('.react-flow__node') as HTMLElement | null;
+        // レーン背景も .react-flow__node なので、コンテンツノードだけを付け替え先にする。
+        const nodeEl = el?.closest('.react-flow__node-content') as HTMLElement | null;
         const newId = nodeEl?.getAttribute('data-id');
-        if (newId && onReconnectTarget) onReconnectTarget(id, newId);
-        else if (onDeleteSelf) onDeleteSelf(id);
+        if (nodeEl && newId && reconnect) {
+          reconnect(id, newId, nearestSideOf(nodeEl, ev.clientX, ev.clientY));
+        } else if (end === 'target' && onDeleteSelf) {
+          onDeleteSelf(id);
+        }
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     },
-    [onReconnectTarget, onDeleteSelf, id],
+    [onReconnectTarget, onReconnectSource, onDeleteSelf, id, rf, sourceX, sourceY, targetX, targetY],
   );
 
   const dragging = dragPos !== null;
@@ -1036,15 +1168,15 @@ function EditableEdge({
             )
           )}
         </div>
-        {/* 矢印の先端（終点）をドラッグ: ノードへドロップ=付け替え / 何もない所=削除。
-            選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。 */}
+        {/* 矢印の先端（終点）をドラッグ: ノードへドロップ=付け替え（ドロップした辺に接続）/
+            何もない所=削除。選択中の矢印だけに出す（未選択ノードの接続ハンドルを塞がないため）。 */}
         {(onReconnectTarget || onDeleteSelf) && (selected || dragging) && (
           <div
             className={`nodrag nopan flex items-center justify-center ${
               dragging ? 'cursor-grabbing' : 'cursor-grab'
             }`}
-            title="ドラッグ: ノードへ=付け替え / 何もない所へ=削除"
-            onPointerDown={onTargetAnchorDown}
+            title="ドラッグ: ノードへ=付け替え（ドロップした辺に接続）/ 何もない所へ=削除"
+            onPointerDown={(e) => startAnchorDrag(e, 'target')}
             style={{
               position: 'absolute',
               transform: `translate(-50%,-50%) translate(${targetX}px,${targetY}px)`,
@@ -1058,6 +1190,31 @@ function EditableEdge({
                 dragging
                   ? 'h-3.5 w-3.5 bg-blue-500 ring-blue-300'
                   : 'h-3 w-3 bg-blue-500/80 ring-blue-200'
+              }`}
+            />
+          </div>
+        )}
+        {/* 矢印の始点も同様にドラッグで付け替え可能（同じノードの別の辺へ=出る辺の変更）。 */}
+        {onReconnectSource && (selected || dragging) && (
+          <div
+            className={`nodrag nopan flex items-center justify-center ${
+              dragging ? 'cursor-grabbing' : 'cursor-grab'
+            }`}
+            title="ドラッグ: ノードへ=始点の付け替え（ドロップした辺から出る）"
+            onPointerDown={(e) => startAnchorDrag(e, 'source')}
+            style={{
+              position: 'absolute',
+              transform: `translate(-50%,-50%) translate(${sourceX}px,${sourceY}px)`,
+              pointerEvents: 'all',
+              width: 22,
+              height: 22,
+            }}
+          >
+            <span
+              className={`block rounded-full ring-2 transition-all ${
+                dragging
+                  ? 'h-3.5 w-3.5 bg-emerald-500 ring-emerald-300'
+                  : 'h-3 w-3 bg-emerald-500/80 ring-emerald-200'
               }`}
             />
           </div>
@@ -1622,18 +1779,34 @@ function DraggableFloating({
   style?: CSSProperties;
 }) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    originLeft: number;
+    originTop: number;
+    elW: number;
+    elH: number;
+  } | null>(null);
 
   const onHeaderPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       // 左クリック以外は無視。React Flow のパンへ伝播させない。
       if (e.button !== 0) return;
       e.stopPropagation();
+      const rect = rootRef.current?.getBoundingClientRect();
       dragRef.current = {
         startX: e.clientX,
         startY: e.clientY,
         baseX: offset.x,
         baseY: offset.y,
+        // 現在の transform(offset) を差し引いた「素のレイアウト原点」をビューポート座標で保持。
+        originLeft: (rect?.left ?? 0) - offset.x,
+        originTop: (rect?.top ?? 0) - offset.y,
+        elW: rect?.width ?? 0,
+        elH: rect?.height ?? 0,
       };
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     },
@@ -1644,10 +1817,18 @@ function DraggableFloating({
     const d = dragRef.current;
     if (!d) return;
     e.stopPropagation();
-    setOffset({
-      x: d.baseX + (e.clientX - d.startX),
-      y: d.baseY + (e.clientY - d.startY),
-    });
+    const nx = d.baseX + (e.clientX - d.startX);
+    const ny = d.baseY + (e.clientY - d.startY);
+    // パネルが画面外へ完全に消えないようクランプ（最低 KEEP px はビューポート内に残す）。
+    const KEEP = 48;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : Infinity;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : Infinity;
+    let left = d.originLeft + nx;
+    let top = d.originTop + ny;
+    left = Math.min(vw - KEEP, Math.max(KEEP - d.elW, left));
+    // ヘッダー（掴む所）が常に見えるよう上端は 0 以上、下端は画面内に KEEP 残す。
+    top = Math.min(vh - KEEP, Math.max(0, top));
+    setOffset({ x: left - d.originLeft, y: top - d.originTop });
   }, []);
 
   const endDrag = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1659,7 +1840,7 @@ function DraggableFloating({
   const transform = `${baseTransform} translate(${offset.x}px, ${offset.y}px)`.trim();
 
   return (
-    <div className={`nodrag nopan ${className}`} style={{ ...style, transform }}>
+    <div ref={rootRef} className={`nodrag nopan ${className}`} style={{ ...style, transform }}>
       <div
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
@@ -2027,6 +2208,7 @@ function AddRoleControl({
   onDeleteRole,
   editingRoleId,
   onEditRole,
+  onOpenRoleOrder,
 }: {
   roles: Role[];
   onAddRole?: (name: string, type: RoleType) => Promise<void>;
@@ -2037,6 +2219,8 @@ function AddRoleControl({
   editingRoleId?: string | null;
   /** 編集対象ロールIDの変更を親へ通知（チップクリック / 閉じる）。 */
   onEditRole?: (roleId: string | null) => void;
+  /** 「レーンの順番」ダイアログを開く（並び替え対象は全ロール）。 */
+  onOpenRoleOrder?: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -2176,6 +2360,18 @@ function AddRoleControl({
         >
           <Plus className="h-3 w-3" />
           ロール追加
+        </button>
+      )}
+      {/* レーン（ロール）の並び順を変更（保存すると自動で整形され、ノードが新順へ追従）。 */}
+      {onOpenRoleOrder && roles.length > 1 && (
+        <button
+          type="button"
+          onClick={onOpenRoleOrder}
+          className="flex items-center justify-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50"
+          title="レーン（ロール）の並び順を変更"
+        >
+          <ArrowDownUp className="h-3 w-3" />
+          レーンの順番
         </button>
       )}
     </DraggableFloating>
@@ -2613,10 +2809,15 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           hasLinks: (src.links?.length ?? 0) > 0,
           roleColor: src.role?.color,
           orientation,
+          attachmentImages: props.nodeImages?.get(src.id),
           // embedded（閲覧）ではリサイズ不可（ハンドルを出さない）。
           onResizeEnd: props.embedded
             ? undefined
             : (id, size) => props.onUpdateNode?.(id, { width: size.width, height: size.height }),
+          // ノード上で直接「名前を変更」できるようにする（embedded=閲覧では不可）。
+          onRename: props.embedded
+            ? undefined
+            : (id, nextLabel) => props.onUpdateNode?.(id, { label: nextLabel }),
         } as ContentNodeData,
         width: w,
         height: h,
@@ -2702,6 +2903,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     props.annotations,
     props.onUpdateAnnotation,
     props.onDeleteAnnotation,
+    props.nodeImages,
   ]);
 
   // 画像要素ノード（type:'imageElement'）— flow ノード/注釈とは別系統。connectable:false。
@@ -2788,15 +2990,29 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
           onMoveInfo: props.onUpdateEdge
             ? (edgeId: string, t: number) => props.onUpdateEdge?.(edgeId, { infoT: t })
             : undefined,
-          // 先端ドラッグでの付け替え（ドロップ先ノードへ target を変更）。
+          // 先端ドラッグでの付け替え。ドロップ先ノード＋ドロップ位置の最近接の辺へ接続する
+          // （同じノードへのドロップでも辺が変われば「入る辺の変更」として反映）。
           onReconnectTarget: props.onReconnectEdge
-            ? (edgeId: string, newTargetNodeId: string) => {
+            ? (edgeId: string, newTargetNodeId: string, side: string) => {
                 const cur = flowData.edges.find((x) => x.id === edgeId);
                 if (!cur || newTargetNodeId === cur.sourceNodeId) return;
                 props.onReconnectEdge?.(edgeId, {
                   sourceNodeId: cur.sourceNodeId,
                   targetNodeId: newTargetNodeId,
                   sourceHandle: cur.sourceHandle ?? null,
+                  targetHandle: side,
+                });
+              }
+            : undefined,
+          // 始点ドラッグでの付け替え（出るノード/辺の変更）。
+          onReconnectSource: props.onReconnectEdge
+            ? (edgeId: string, newSourceNodeId: string, side: string) => {
+                const cur = flowData.edges.find((x) => x.id === edgeId);
+                if (!cur || newSourceNodeId === cur.targetNodeId) return;
+                props.onReconnectEdge?.(edgeId, {
+                  sourceNodeId: newSourceNodeId,
+                  targetNodeId: cur.targetNodeId,
+                  sourceHandle: side,
                   targetHandle: cur.targetHandle ?? null,
                 });
               }
@@ -2867,12 +3083,12 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedEdgeId, onDeleteEdge]);
 
-  // 選択中の自由配置要素（画像 / 注釈=DB/人/アイコン・付箋・コメント・スコープ）を
-  // Delete / Backspace で削除する。コンテンツノード（業務ブロック）は誤削除防止のため
-  // 対象外（従来どおりパネル/右クリックから削除）。React Flow の選択(node.selected)を見る。
+  // 選択中の要素（コンテンツノード / 画像 / 注釈=DB/人/アイコン・付箋・コメント・スコープ）を
+  // Delete / Backspace で削除する。React Flow の選択(node.selected)を見る。
   const dragNodesRef = useRef(dragNodes);
   dragNodesRef.current = dragNodes;
   const onDeleteAnnotationKb = props.onDeleteAnnotation;
+  const onDeleteNodeKb = props.onDeleteNode;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -2881,7 +3097,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       const selected = dragNodesRef.current.filter((n) => n.selected);
       const imgIds = selected.filter((n) => n.type === 'imageElement').map((n) => n.id);
       const annoIds = selected.filter((n) => n.type === 'annotation').map((n) => n.id);
-      if (imgIds.length === 0 && annoIds.length === 0) return;
+      // コンテンツノード（業務ブロック）も削除対象（閲覧のみ＝onDeleteNode 未設定なら対象外）。
+      const contentIds = onDeleteNodeKb
+        ? selected.filter((n) => n.type === 'content').map((n) => n.id)
+        : [];
+      if (imgIds.length === 0 && annoIds.length === 0 && contentIds.length === 0) return;
       e.preventDefault();
       if (imgIds.length > 0) {
         // 逆操作（id 保持で復活）のため削除前 DTO を ref から同期取得してから消す。
@@ -2896,10 +3116,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         }
       }
       for (const id of annoIds) onDeleteAnnotationKb?.(id);
+      for (const id of contentIds) onDeleteNodeKb?.(id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onDeleteAnnotationKb]);
+  }, [onDeleteAnnotationKb, onDeleteNodeKb]);
 
   // 接続ドラッグを開始したノード/ハンドルを覚えておく。
   // - 向きの正規化（開始ノード → ドロップ先）に使う。
@@ -3280,30 +3501,61 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
   // 与えられたレイアウト（computeFlowLayout の結果）を一括保存ペイロードへ変換する。
   // ノード位置（中心→左上）と、最近接サイド接続ハンドル（edges）を同一リクエストで送る。
+  // 現在値と変わらない行は送らない（既に整形済みのフローで再度「整形」しても no-op で即完了）。
   const persistLayout = useCallback(
     (layout: FlowLayoutView) => {
-      const positions: NodePositionPatch[] = layout.nodes.map((pn) => ({
-        id: pn.id,
-        // computeFlowLayout は中心座標 → サーバ保存は左上基準
-        positionX: pn.x - pn.width / 2,
-        positionY: pn.y - pn.height / 2,
-        // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
-        roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
-        order: typeof pn.order === 'number' ? pn.order : undefined,
-      }));
-      const edges: EdgeHandlePatch[] = layout.edges.map((e) => ({
-        id: e.id,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-      }));
-      // 保存往復（PUT + 再取得）の完了まで layoutSaving を立て、整形/縦横の連打を防ぐ。
+      const nodeById = new Map(flowData.nodes.map((n) => [n.id, n]));
+      const edgeById = new Map(flowData.edges.map((e) => [e.id, e]));
+      // 座標は float の丸め差が出るため 0.5px 未満の差は「同じ」とみなす。
+      const near = (a: number | null | undefined, b: number) =>
+        typeof a === 'number' && Math.abs(a - b) < 0.5;
+
+      const positions: NodePositionPatch[] = layout.nodes
+        .map((pn) => ({
+          id: pn.id,
+          // computeFlowLayout は中心座標 → サーバ保存は左上基準
+          positionX: pn.x - pn.width / 2,
+          positionY: pn.y - pn.height / 2,
+          // 未割当レーンの roleId はノードへ書き戻さない（null のまま）
+          roleId: roles.some((r) => r.id === pn.roleId) ? pn.roleId : null,
+          order: typeof pn.order === 'number' ? pn.order : undefined,
+        }))
+        .filter((p) => {
+          const cur = nodeById.get(p.id);
+          if (!cur) return true;
+          const curRole = cur.roleId ?? cur.role?.id ?? null;
+          return !(
+            near(cur.positionX, p.positionX) &&
+            near(cur.positionY, p.positionY) &&
+            curRole === (p.roleId ?? null) &&
+            (p.order === undefined || cur.order === p.order)
+          );
+        });
+      const edges: EdgeHandlePatch[] = layout.edges
+        .map((e) => ({
+          id: e.id,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+        }))
+        .filter((e) => {
+          const cur = edgeById.get(e.id);
+          if (!cur) return true;
+          return (
+            (cur.sourceHandle ?? null) !== (e.sourceHandle ?? null) ||
+            (cur.targetHandle ?? null) !== (e.targetHandle ?? null)
+          );
+        });
+      if (positions.length === 0 && edges.length === 0) return; // 変更なし＝保存不要
+
+      // 保存往復の完了まで layoutSaving を立て、整形/縦横の連打（PUT の競合）を防ぐ。
+      // 描画は onTidyNodes 側が楽観反映するため、この間もキャンバスは新レイアウトで表示される。
       const pending = props.onTidyNodes?.(positions, edges);
       if (pending) {
         setLayoutSaving(true);
         void Promise.resolve(pending).finally(() => setLayoutSaving(false));
       }
     },
-    [roles, props],
+    [roles, props, flowData.nodes, flowData.edges],
   );
 
   // --- 「整形」: computeFlowLayout で綺麗な座標を作り、一括保存して再取得 ---
@@ -3723,7 +3975,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
         {/* ロール一覧 + フロー途中でのロール追加 + ロール編集（左上、パンくずの下）。
             ヘッダーを掴んで自由に動かせる（box は AddRoleControl 内の DraggableFloating が持つ）。 */}
-        {(props.onAddRole || props.onUpdateRole) && (
+        {(props.onAddRole || props.onUpdateRole || props.onOpenRoleOrder) && (
           <Panel position="top-left" className="mt-14">
             <AddRoleControl
               roles={roles}
@@ -3733,6 +3985,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               onDeleteRole={props.onDeleteRole}
               editingRoleId={editingRoleId}
               onEditRole={setEditingRoleId}
+              onOpenRoleOrder={props.onOpenRoleOrder}
             />
           </Panel>
         )}
@@ -4169,7 +4422,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       )}
 
       <div className="absolute bottom-4 right-4 bg-white/90 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 z-10">
-        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ クリックで編集 ｜ ハンドルで接続 ｜ 接続線の「＋」で途中にノード挿入 ｜ レーン境界をドラッグで高さ調整 ｜ 右クリックで追加/削除
+        💡 ノードは自由にドラッグして配置（位置は保存されます）｜ 別レーンへ落とすとロール変更 ｜ 乱れたら「整形」で自動整列 ｜ ✎ボタン/クリックで名前など編集 ｜ ハンドルで接続 ｜ 接続線の「＋」で途中にノード挿入 ｜ レーン境界をドラッグで高さ調整 ｜ 右クリックで追加/削除
       </div>
     </div>
   );
@@ -5139,6 +5392,59 @@ function EdgePropertyPanel({
           </div>
         )}
 
+        {/* 接続位置（矢印が出入りするノードの辺）を手動で固定する。 */}
+        {onRepoint && (
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 mb-1">
+              接続位置（矢印が出入りする辺）
+            </label>
+            {([
+              { key: 'source' as const, rowLabel: '起点側', cur: edge.sourceHandle },
+              { key: 'target' as const, rowLabel: '先側', cur: edge.targetHandle },
+            ]).map((row) => (
+              <div key={row.key} className="flex items-center gap-1.5 mb-1">
+                <span className="w-9 shrink-0 text-[11px] text-gray-500">{row.rowLabel}</span>
+                <div className="grid grid-cols-4 gap-1 flex-1">
+                  {([
+                    { v: 'top', label: '上' },
+                    { v: 'right', label: '右' },
+                    { v: 'bottom', label: '下' },
+                    { v: 'left', label: '左' },
+                  ] as const).map((opt) => {
+                    const active = (row.cur ?? '') === opt.v;
+                    return (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() =>
+                          onRepoint({
+                            sourceNodeId: edge.sourceNodeId,
+                            targetNodeId: edge.targetNodeId,
+                            sourceHandle:
+                              row.key === 'source' ? opt.v : edge.sourceHandle ?? null,
+                            targetHandle:
+                              row.key === 'target' ? opt.v : edge.targetHandle ?? null,
+                          })
+                        }
+                        className={`px-1 py-1 text-xs rounded border transition-colors ${
+                          active
+                            ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+                            : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <p className="text-[10px] text-gray-400 leading-snug">
+              矢印がノードのどの辺から出入りするかを固定します。「整形」やレーン並び替えをすると最近接の辺に戻ります。
+            </p>
+          </div>
+        )}
+
         {/* 跨がない矢印でも API は紐づけ可能（通常位置に表示）。 */}
         {!crossesHumanSystem && apiSection}
 
@@ -5262,6 +5568,13 @@ function NodePropertyPanel({
   const [inputIds, setInputIds] = useState<string[]>(initialInputIds);
   const [outputIds, setOutputIds] = useState<string[]>(initialOutputIds);
 
+  // ノード上の ✎ によるインライン改名など、外部で label が変わったら追従する。
+  // これが無いと、開いたままのパネルが持つ古い label が次のフィールド保存時に
+  // patch.label として送られ、インライン改名を黙って巻き戻してしまう。
+  useEffect(() => {
+    setLabel(node?.label ?? '');
+  }, [node?.label]);
+
   // 情報種別リンクが初期値から変化したか（変化時のみ保存して再取得を抑える）
   const sameIds = (a: string[], b: string[]) =>
     a.length === b.length && a.every((id, i) => id === b[i]);
@@ -5345,11 +5658,12 @@ function NodePropertyPanel({
 
       <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
         <div>
-          <label className="block text-[11px] font-medium text-gray-500 mb-1">ラベル</label>
+          <label className="block text-[11px] font-medium text-gray-500 mb-1">名前</label>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onBlur={save}
+            placeholder="例: 注文を受け付ける"
             className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>

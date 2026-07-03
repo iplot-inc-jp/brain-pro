@@ -15,6 +15,7 @@ export interface ReconstructUserProps {
   name: string | null;
   avatarUrl: string | null;
   isSuperAdmin?: boolean;
+  googleId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +30,7 @@ export class User extends BaseEntity {
   private _name: string | null;
   private _avatarUrl: string | null;
   private _isSuperAdmin: boolean;
+  private _googleId: string | null;
 
   private constructor(
     id: string,
@@ -37,6 +39,7 @@ export class User extends BaseEntity {
     name: string | null,
     avatarUrl: string | null,
     isSuperAdmin: boolean,
+    googleId: string | null,
     createdAt: Date,
     updatedAt: Date,
   ) {
@@ -46,6 +49,7 @@ export class User extends BaseEntity {
     this._name = name;
     this._avatarUrl = avatarUrl;
     this._isSuperAdmin = isSuperAdmin;
+    this._googleId = googleId;
   }
 
   /**
@@ -67,7 +71,7 @@ export class User extends BaseEntity {
     }
 
     const now = new Date();
-    return new User(id, email, hashedPassword, name, null, false, now, now);
+    return new User(id, email, hashedPassword, name, null, false, null, now, now);
   }
 
   /**
@@ -81,9 +85,26 @@ export class User extends BaseEntity {
       props.name,
       props.avatarUrl,
       props.isSuperAdmin ?? false,
+      props.googleId ?? null,
       props.createdAt,
       props.updatedAt,
     );
+  }
+
+  /**
+   * Google アカウントからユーザーを新規作成（パスワード未設定）。
+   */
+  static createWithGoogle(
+    props: { email: string; name?: string | null; avatarUrl?: string | null; googleId: string },
+    id: string,
+  ): User {
+    const email = Email.create(props.email);
+    const name = props.name?.trim() || null;
+    if (name && name.length > 100) {
+      throw new ValidationError('Name must be at most 100 characters');
+    }
+    const now = new Date();
+    return new User(id, email, '', name, props.avatarUrl ?? null, false, props.googleId, now, now);
   }
 
   // ========== ビジネスロジック ==========
@@ -118,6 +139,14 @@ export class User extends BaseEntity {
       throw new ValidationError('Avatar URL is too long');
     }
     this._avatarUrl = url;
+    this.touch();
+  }
+
+  /**
+   * Google アカウントを既存ユーザーに紐付ける。
+   */
+  linkGoogle(googleId: string): void {
+    this._googleId = googleId;
     this.touch();
   }
 
@@ -161,6 +190,10 @@ export class User extends BaseEntity {
 
   get isSuperAdmin(): boolean {
     return this._isSuperAdmin;
+  }
+
+  get googleId(): string | null {
+    return this._googleId;
   }
 }
 

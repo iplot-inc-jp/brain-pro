@@ -292,9 +292,13 @@ export interface KnowledgeSearchResult {
 // Google Drive（Phase 3）型
 // ---------------------------------------------------------------------------
 
-/** Drive 認証 URL（未接続のとき新規ウィンドウで開く）。 */
+/** Drive 認証 URL（未接続のとき新規ウィンドウで開く）。接続状態も併せて返る。 */
 export interface DriveAuthUrl {
   authUrl: string;
+  /** 既に接続済みか（接続済みなら認証ウィンドウを開く必要はない）。 */
+  connected?: boolean;
+  /** 接続済みアカウントのメール（未接続は null）。 */
+  email?: string | null;
 }
 
 /** Drive のファイル/フォルダ 1 件（files.list 由来。folder は再帰のため）。 */

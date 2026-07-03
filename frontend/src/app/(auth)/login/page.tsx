@@ -7,6 +7,7 @@ import { Database, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { GoogleSignInButton, isGoogleEnabled } from '@/components/auth/GoogleSignInButton';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 const NAVY = '#050f3e';
@@ -113,6 +114,21 @@ export default function LoginPage() {
             )}
           </Button>
         </form>
+
+        {isGoogleEnabled && (
+          <div className="mt-6">
+            <div className="relative flex items-center justify-center">
+              <span className="absolute inset-x-0 top-1/2 h-px bg-gray-200" />
+              <span className="relative bg-white px-3 text-xs text-gray-400">または</span>
+            </div>
+            <div className="mt-4 flex justify-center">
+              <GoogleSignInButton
+                onAuthed={() => router.push('/dashboard')}
+                onError={(msg) => setError(msg)}
+              />
+            </div>
+          </div>
+        )}
 
         <p className="mt-6 text-center text-sm text-gray-500">
           アカウントをお持ちでない方は{' '}

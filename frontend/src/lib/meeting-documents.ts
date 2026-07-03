@@ -11,6 +11,24 @@ function headers(): Record<string, string> {
 
 export type MeetingDocumentKind = 'INTERNAL' | 'GOOGLE_DOC';
 
+/**
+ * Google 側のタブ1件。id は Docs ならタブID（"t.xxx" → プレビューURLの ?tab=）、
+ * Sheets なら gid（数値の文字列 → プレビューURLの gid）。
+ * level は Docs のタブ入れ子の深さ（0=トップ。Sheets は常に 0）。
+ */
+export interface GoogleTabInfo {
+  id: string;
+  title: string;
+  index: number;
+  level: number;
+}
+
+/** Google 側のタブ構成キャッシュ（Docs のドキュメントタブ / Sheets のシートタブ）。 */
+export interface GoogleTabs {
+  kind: 'document' | 'spreadsheet' | 'other';
+  tabs: GoogleTabInfo[];
+}
+
 export interface MeetingDocument {
   id: string;
   projectId: string;
@@ -26,6 +44,9 @@ export interface MeetingDocument {
   fetchedTitle?: string | null;
   fetchedMime?: string | null;
   fetchedAt?: string | null;
+  /** Google 側のタブ構成キャッシュ（GOOGLE_DOC のみ。未取得なら null）。 */
+  googleTabs?: GoogleTabs | null;
+  googleTabsAt?: string | null;
   /** 単体取得（get）/取り込み（fetchGoogle）時のみ本文を含む。 */
   fetchedContent?: string | null;
   createdAt: string;
@@ -113,6 +134,25 @@ export const meetingDocumentApi = {
       throw new Error(
         (data && (Array.isArray(data.message) ? data.message.join(' / ') : data.message)) ||
           'Google ドキュメント本文の取り込みに失敗しました',
+      );
+    }
+    return res.json();
+  },
+
+  /**
+   * GOOGLE_DOC のタブ構成（Docsのタブ / Sheetsのシート）を Google から再取得してキャッシュ。
+   * サイドメニューの第3階層（タブ一覧）の元データ。要: プロジェクトの Drive 連携。
+   */
+  async refreshGoogleTabs(id: string): Promise<MeetingDocument> {
+    const res = await fetch(`${API_URL}/api/meeting-documents/${id}/google-tabs`, {
+      method: 'POST',
+      headers: headers(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(
+        (data && (Array.isArray(data.message) ? data.message.join(' / ') : data.message)) ||
+          'Google タブ構成の取得に失敗しました',
       );
     }
     return res.json();

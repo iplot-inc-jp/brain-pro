@@ -6,7 +6,7 @@
 // GOOGLE_DOC = 外部 Google Document/Spreadsheet/Drive の URL（自動保存＋読み取り専用プレビュー）。
 //
 // window 依存（Liveblocks/Tiptap）のため、親ページから next/dynamic(ssr:false) で読み込むこと。
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClientSideSuspense } from '@liveblocks/react';
 import { RoomProvider } from '@/lib/liveblocks.config';
 import { useLiveblocksExtension } from '@liveblocks/react-tiptap';
@@ -35,23 +35,44 @@ import {
   Check,
   Download,
   AlertCircle,
+  ZoomIn,
+  ZoomOut,
+  HardDrive,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard';
-import { meetingDocumentApi, type MeetingDocument } from '@/lib/meeting-documents';
+import {
+  meetingDocumentApi,
+  type MeetingDocument,
+  type GoogleTabs,
+} from '@/lib/meeting-documents';
+import { driveApi } from '@/lib/knowledge';
 
 interface Props {
   doc: MeetingDocument;
   canEdit: boolean;
   /** GOOGLE_DOC の URL 保存（親で PATCH）。 */
   onSaveGoogleUrl: (url: string) => void;
+  /** 選択中の Google タブ（Docs の tabId / Sheets の gid。URL の ?gtab= と同期）。 */
+  gtab?: string | null;
+  /** タブバー/サイドメニューからのタブ切替（親で URL の ?gtab= を書き換える）。 */
+  onSelectTab?: (tabId: string) => void;
 }
 
-export default function MeetingDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
+export default function MeetingDocPane({ doc, canEdit, onSaveGoogleUrl, gtab, onSelectTab }: Props) {
   if (doc.kind === 'GOOGLE_DOC') {
-    return <GoogleDocPane doc={doc} canEdit={canEdit} onSaveGoogleUrl={onSaveGoogleUrl} />;
+    return (
+      <GoogleDocPane
+        doc={doc}
+        canEdit={canEdit}
+        onSaveGoogleUrl={onSaveGoogleUrl}
+        gtab={gtab}
+        onSelectTab={onSelectTab}
+      />
+    );
   }
   // INTERNAL: ドキュメントごとの Liveblocks ルームへ接続。
   return (
@@ -275,13 +296,25 @@ function EditorToolbar({ editor }: { editor: Editor }) {
 // 例: .../document/d/<id>/edit → .../document/d/<id>/preview
 //     .../spreadsheets/d/<id>/edit#gid=0 → .../spreadsheets/d/<id>/preview
 //     drive.google.com/file/d/<id>/view → /preview、open?id=<id> → /file/d/<id>/preview
-export function toGooglePreviewUrl(raw: string): string {
+// gtab（Docs の tabId / Sheets の gid）指定時は該当タブを開く。
+// Sheets の gid はフラグメントだけだと iframe の src 変更が再読込にならないため query にも付ける。
+export function toGooglePreviewUrl(raw: string, gtab?: string | null): string {
   const u = raw.trim();
   // docs.google.com/{document|spreadsheets|presentation}/d/<id>... または drive.google.com/file/d/<id>...
   const m = u.match(
-    /^(https?:\/\/(?:docs|drive)\.google\.com\/(?:document|spreadsheets|presentation|file)\/d\/[A-Za-z0-9_-]+)/,
+    /^(https?:\/\/(?:docs|drive)\.google\.com\/(document|spreadsheets|presentation|file)\/d\/[A-Za-z0-9_-]+)/,
   );
-  if (m) return `${m[1]}/preview`;
+  if (m) {
+    const base = `${m[1]}/preview`;
+    if (gtab && m[2] === 'document') {
+      return `${base}?tab=${encodeURIComponent(gtab)}`;
+    }
+    if (gtab && m[2] === 'spreadsheets') {
+      const gid = encodeURIComponent(gtab);
+      return `${base}?gid=${gid}#gid=${gid}`;
+    }
+    return base;
+  }
   // drive.google.com/open?id=<id> / uc?id=<id> 形式
   const id = u.match(/[?&]id=([A-Za-z0-9_-]+)/);
   if (id && /drive\.google\.com/.test(u)) {
@@ -292,7 +325,7 @@ export function toGooglePreviewUrl(raw: string): string {
 
 const GOOGLE_URL_RE = /^https?:\/\/(docs|drive)\.google\.com\//;
 
-function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
+function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl, gtab, onSelectTab }: Props) {
   const saved = doc.googleDocUrl ?? '';
   const [draft, setDraft] = useState(saved);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -325,7 +358,28 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
 
   const url = saved.trim();
   const isValid = GOOGLE_URL_RE.test(url);
-  const previewSrc = isValid ? toGooglePreviewUrl(url) : '';
+  const previewSrc = isValid ? toGooglePreviewUrl(url, gtab) : '';
+
+  // Google 側のタブ構成（Docsのタブ / Sheetsのシート）。一覧のキャッシュを初期値に、
+  // 表示時に自動で再取得して最新化する（タブバーとサイドメニューの元データ）。
+  const [tabsInfo, setTabsInfo] = useState<GoogleTabs | null>(doc.googleTabs ?? null);
+  const [tabsRefreshing, setTabsRefreshing] = useState(false);
+  // 同一 doc+URL での多重取得を防ぐ（drive 状態の再セット等で effect が再発火するため）。
+  const tabsRefreshedKeyRef = useRef<string | null>(null);
+
+  const refreshTabs = useCallback(async () => {
+    setTabsRefreshing(true);
+    try {
+      const updated = await meetingDocumentApi.refreshGoogleTabs(doc.id);
+      setTabsInfo(updated.googleTabs ?? null);
+      // サイドメニューの「会議別ドキュメント」ツリーにもタブを反映させる。
+      window.dispatchEvent(new Event('meeting-docs-changed'));
+    } catch {
+      // 未連携・共有漏れ等はタブバーを出さないだけ（本文取り込み側で具体的に案内される）。
+    } finally {
+      setTabsRefreshing(false);
+    }
+  }, [doc.id]);
 
   // 本文の DB 取り込み（Drive 連携経由）。
   const [fetching, setFetching] = useState(false);
@@ -348,6 +402,79 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
     }
   };
 
+  // Google Drive 連携状態（本文取り込みに必要）。getAuthUrl は authUrl＋接続状態を返す。
+  // refresh token は AES-256-GCM でサーバーに暗号化保存され、レスポンスには出ない。
+  const [drive, setDrive] = useState<
+    { connected: boolean; email: string | null; authUrl: string } | null
+  >(null);
+  const [connecting, setConnecting] = useState(false);
+  const loadDrive = useCallback(async () => {
+    try {
+      const res = await driveApi.getAuthUrl(doc.projectId);
+      setDrive({
+        connected: !!res.connected,
+        email: res.email ?? null,
+        authUrl: res.authUrl,
+      });
+    } catch {
+      // Drive 機能が未構成（管理者の環境設定が必要）の場合は連携 UI を出さない。
+      setDrive(null);
+    }
+  }, [doc.projectId]);
+  useEffect(() => {
+    void loadDrive();
+  }, [loadDrive]);
+
+  // 表示時（および保存URLの変更時）にタブ構成を自動更新（Drive 連携済みのときだけ）。
+  // URL 変更時はサーバー側でキャッシュがクリアされるため、ここで取り直して即反映する。
+  useEffect(() => {
+    if (!isValid || !drive?.connected) return;
+    const key = `${doc.id}:${url}`;
+    if (tabsRefreshedKeyRef.current === key) return;
+    tabsRefreshedKeyRef.current = key;
+    void refreshTabs();
+  }, [isValid, drive?.connected, doc.id, url, refreshTabs]);
+
+  // タブバーの表示順（Google 側の並び順）。
+  const sortedTabs = useMemo(
+    () => (tabsInfo ? [...tabsInfo.tabs].sort((a, b) => a.index - b.index) : []),
+    [tabsInfo],
+  );
+  const showTabBar = isValid && !!tabsInfo && tabsInfo.kind !== 'other' && sortedTabs.length > 0;
+
+  // 認証ウィンドウで OAuth → 完了をポーリングして接続状態を反映。
+  const handleConnect = useCallback(() => {
+    if (!drive?.authUrl) return;
+    window.open(drive.authUrl, 'drive-oauth', 'width=520,height=680');
+    setConnecting(true);
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries += 1;
+      try {
+        const res = await driveApi.getAuthUrl(doc.projectId);
+        if (res.connected) {
+          setDrive({ connected: true, email: res.email ?? null, authUrl: res.authUrl });
+          setConnecting(false);
+          clearInterval(timer);
+        }
+      } catch {
+        // ポーリング継続
+      }
+      if (tries > 40) {
+        setConnecting(false);
+        clearInterval(timer);
+      }
+    }, 2500);
+  }, [drive, doc.projectId]);
+
+  // プレビューの拡大率（スプレッドシート等。50%〜200%）。ドキュメント切替でリセット。
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    setZoom(1);
+  }, [doc.id]);
+  const zoomBy = (delta: number) =>
+    setZoom((z) => Math.min(2, Math.max(0.5, Math.round((z + delta) * 100) / 100)));
+
   return (
     <div className="flex h-full flex-col bg-white">
       <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 p-3">
@@ -355,7 +482,7 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           disabled={!canEdit}
-          placeholder="https://docs.google.com/（document / spreadsheets / drive）..."
+          placeholder="https://docs.google.com/（ドキュメント / スライド / スプレッドシート）..."
           className="h-8 min-w-0 flex-1 text-sm"
         />
         {canEdit && (
@@ -391,6 +518,33 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
             本文を取り込む
           </Button>
         )}
+        {/* Google Drive 連携状態（本文取り込みに必要）。 */}
+        {drive &&
+          (drive.connected ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700"
+              title={drive.email ? `連携アカウント: ${drive.email}` : 'Google Drive 連携済み'}
+            >
+              <HardDrive className="h-3.5 w-3.5" />
+              Drive連携済み
+            </span>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+              title="Google Drive と連携すると、ドキュメント/スライド/シートの本文を取り込めます（refresh token はサーバーに暗号化保存）"
+            >
+              {connecting ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <HardDrive className="mr-1 h-3.5 w-3.5" />
+              )}
+              {connecting ? '連携待ち…' : 'Google Driveと連携'}
+            </Button>
+          ))}
         {url && (
           <a
             href={url}
@@ -402,7 +556,74 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
             Google で開く
           </a>
         )}
+        {isValid && (
+          <div className="ml-auto flex items-center gap-0.5 rounded-md border border-gray-200 bg-white px-1 py-0.5">
+            <button
+              type="button"
+              onClick={() => zoomBy(-0.1)}
+              disabled={zoom <= 0.5}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+              title="縮小"
+              aria-label="縮小"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            <span className="w-10 text-center text-[11px] tabular-nums text-gray-600">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() => zoomBy(0.1)}
+              disabled={zoom >= 2}
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+              title="拡大"
+              aria-label="拡大"
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
+      {/* Google タブバー（Docsのドキュメントタブ / Sheetsのシート）。
+          iframe 内の Google 純正タブUIは absolute 配置で位置が使いにくいため、
+          アプリ側の通常フローに横スクロール可能なタブバーを置く（?gtab= でサイドメニューとも連動）。 */}
+      {showTabBar && (
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-gray-100 bg-gray-50/60 px-2 py-1.5">
+          <span className="flex-shrink-0 pr-1 text-[10px] font-semibold text-gray-400">
+            {tabsInfo?.kind === 'spreadsheet' ? 'シート' : 'タブ'}
+          </span>
+          {sortedTabs.map((t, i) => {
+            // gtab 未指定時は先頭タブが表示されている（Google preview の既定）。
+            const active = gtab ? gtab === t.id : i === 0;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onSelectTab?.(t.id)}
+                title={t.title || '（無題のタブ）'}
+                className={cn(
+                  'max-w-[180px] flex-shrink-0 truncate rounded-full border px-2.5 py-0.5 text-[11px] transition-colors',
+                  active
+                    ? 'border-blue-300 bg-blue-100 font-medium text-blue-800'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50',
+                )}
+              >
+                {t.level > 0 ? `${'›'.repeat(t.level)} ` : ''}
+                {t.title || '（無題）'}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => void refreshTabs()}
+            disabled={tabsRefreshing}
+            title="タブ構成を Google から再取得"
+            className="ml-auto flex-shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-3 w-3', tabsRefreshing && 'animate-spin')} />
+          </button>
+        </div>
+      )}
       {/* 取り込み状態（保存済み / 結果 / エラー） */}
       {(fetchMsg || doc.hasFetchedContent) && (
         <div
@@ -423,19 +644,26 @@ function GoogleDocPane({ doc, canEdit, onSaveGoogleUrl }: Props) {
           </span>
         </div>
       )}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden bg-gray-50">
         {isValid ? (
           <iframe
             // 読み取り専用プレビュー（編集権限が無くても閲覧可能。スプレッドシート/スライドも対応）。
+            // 拡大率は CSS transform で実現（width/height を 1/zoom にして scale で埋める）。
             src={previewSrc}
             title={doc.title || 'Google Document'}
-            className="h-full w-full border-0"
+            style={{
+              width: `${100 / zoom}%`,
+              height: `${100 / zoom}%`,
+              transformOrigin: 'top left',
+              transform: `scale(${zoom})`,
+            }}
+            className="border-0"
           />
         ) : (
           <div className="flex h-full items-center justify-center p-6 text-center text-sm text-gray-400">
-            Google ドキュメント / スプレッドシート / Drive の URL を貼り付けてください（自動保存）。
+            Google ドキュメント / スライド / スプレッドシート / Drive の URL を貼り付けてください（自動保存）。
             <br />
-            （docs.google.com / drive.google.com のリンク。閲覧のみでも読み取り専用で表示されます）
+            （docs.google.com / drive.google.com のリンク。閲覧のみでも読み取り専用で表示されます。「本文を取り込む」でシート等の内容をアプリのDBに保存して検索対象にできます）
           </div>
         )}
       </div>

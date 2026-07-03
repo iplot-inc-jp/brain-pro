@@ -48,8 +48,10 @@ import {
   INGESTION_FILE_REPOSITORY,
   KNOWLEDGE_REPOSITORY,
   PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
+  ORGANIZATION_INVITE_REPOSITORY,
   PASSWORD_HASH_SERVICE,
   TOKEN_SERVICE,
+  GOOGLE_VERIFIER_SERVICE,
 } from './domain';
 
 // Application
@@ -271,6 +273,13 @@ import {
   // KnowledgeSettings（課金ガード設定）
   GetOrCreateSettingsUseCase,
   UpdateSettingsUseCase,
+  // Invite
+  PreviewInviteUseCase,
+  AcceptInviteUseCase,
+  CreateInviteUseCase,
+  ListInvitesUseCase,
+  RevokeInviteUseCase,
+  LoginWithGoogleUseCase,
 } from './application';
 
 // Infrastructure
@@ -318,16 +327,19 @@ import {
   IngestionFileRepositoryImpl,
   KnowledgeRepositoryImpl,
   ProjectKnowledgeSettingsRepositoryImpl,
+  OrganizationInviteRepositoryImpl,
   BcryptPasswordHashService,
   JwtTokenService,
   ProjectAccessService,
   ProjectBundleService,
   EntityJsonService,
+  GoogleAuthLibraryVerifierService,
 } from './infrastructure';
 
 // Presentation
 import {
   AuthController,
+  InviteController,
   OrganizationController,
   ProjectController,
   ProjectByIdController,
@@ -523,6 +535,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     HealthController,
     CronController,
     AuthController,
+    InviteController,
     OrganizationController,
     ProjectController,
     ProjectByIdController,
@@ -659,6 +672,10 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     {
       provide: TOKEN_SERVICE,
       useClass: JwtTokenService,
+    },
+    {
+      provide: GOOGLE_VERIFIER_SERVICE,
+      useClass: GoogleAuthLibraryVerifierService,
     },
 
     // ========== Repository Implementations ==========
@@ -826,6 +843,10 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     {
       provide: PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
       useClass: ProjectKnowledgeSettingsRepositoryImpl,
+    },
+    {
+      provide: ORGANIZATION_INVITE_REPOSITORY,
+      useClass: OrganizationInviteRepositoryImpl,
     },
 
     // ========== Use Cases ==========
@@ -1047,6 +1068,13 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // KnowledgeSettings（課金ガード設定）
     GetOrCreateSettingsUseCase,
     UpdateSettingsUseCase,
+    // Invite
+    PreviewInviteUseCase,
+    AcceptInviteUseCase,
+    CreateInviteUseCase,
+    ListInvitesUseCase,
+    RevokeInviteUseCase,
+    LoginWithGoogleUseCase,
 
     // ========== Services ==========
     ProjectAccessService,

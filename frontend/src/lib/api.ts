@@ -56,6 +56,16 @@ export const authApi = {
       body: JSON.stringify({ email, password, name }),
       auth: false,
     }),
+  google: (idToken: string, inviteToken?: string) =>
+    api<{
+      accessToken: string
+      user: { id: string; email: string; name: string | null }
+      joinedOrganizationId: string | null
+    }>('/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ idToken, inviteToken }),
+      auth: false,
+    }),
   me: () => api<any>('/auth/me'),
 }
 
@@ -75,6 +85,42 @@ export const organizationsApi = {
     }),
   delete: (id: string) =>
     api<void>(`/organizations/${id}`, { method: 'DELETE' }),
+}
+
+// Invites
+export interface InviteView {
+  id: string
+  token: string
+  role: string
+  expiresAt: string | null
+  maxUses: number | null
+  useCount: number
+  revoked: boolean
+  valid: boolean
+}
+
+export interface InvitePreview {
+  valid: boolean
+  reason: string | null
+  organizationName: string | null
+  role: string | null
+}
+
+export const invitesApi = {
+  preview: (token: string) =>
+    api<InvitePreview>(`/invites/${token}`, { auth: false }),
+  accept: (token: string) =>
+    api<{ organizationId: string; alreadyMember: boolean }>(`/invites/${token}/accept`, {
+      method: 'POST',
+    }),
+  list: (orgId: string) => api<InviteView[]>(`/organizations/${orgId}/invites`),
+  create: (orgId: string, body: { role?: string; expiresInDays?: number; maxUses?: number }) =>
+    api<InviteView>(`/organizations/${orgId}/invites`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  revoke: (orgId: string, inviteId: string) =>
+    api<{ success: boolean }>(`/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' }),
 }
 
 // Projects
@@ -195,6 +241,12 @@ export const rolesApi = {
       body: JSON.stringify(data),
     }),
   delete: (id: string) => api<void>(`/roles/${id}`, { method: 'DELETE' }),
+  /** ロール（スイムレーン）の並び順を一括更新。roleIds の順に order=0,1,2... を割り当てる。 */
+  updateOrder: (projectId: string, roleIds: string[]) =>
+    api<Role[]>(`/roles/project/${projectId}/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ roleIds }),
+    }),
 }
 
 // Flows

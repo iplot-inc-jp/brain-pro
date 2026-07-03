@@ -55,9 +55,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setOrganizations(data);
-        // 1つしかない場合は自動選択
-        if (data.length === 1) {
+        // 復元: 保存済み organizationId が一覧にあれば選択、無ければ1つの時だけ自動選択
+        const savedId = typeof window !== 'undefined' ? localStorage.getItem('selectedOrganizationId') : null;
+        const saved = savedId ? data.find((o: Organization) => o.id === savedId) : null;
+        if (saved) {
+          setSelectedOrganization(saved);
+        } else if (data.length === 1) {
           setSelectedOrganization(data[0]);
+          localStorage.setItem('selectedOrganizationId', data[0].id);
         }
       }
     } catch (err) {
@@ -89,8 +94,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const selectOrganization = useCallback((org: Organization) => {
     setSelectedOrganization(org);
+    localStorage.setItem('selectedOrganizationId', org.id);
     setSelectedProject(null);
     setProjects([]);
+    localStorage.removeItem('selectedProjectId');
     fetchProjects(org.id);
   }, [fetchProjects]);
 

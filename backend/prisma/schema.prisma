@@ -20,6 +20,7 @@ model User {
   password  String
   name      String?
   avatarUrl String?  @map("avatar_url")
+  googleId  String?  @unique @map("google_id")
   // 全体管理者（プラットフォーム管理者）。会社の作成等はこの権限のみ。
   isSuperAdmin Boolean @default(false) @map("is_super_admin")
   createdAt DateTime @default(now()) @map("created_at")
@@ -29,6 +30,7 @@ model User {
   settings            UserSetting?
   apiKeys             ApiKey[]
   projectMemberships  ProjectMember[]
+  createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
 
   @@map("users")
 }
@@ -190,6 +192,7 @@ model Organization {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   members  OrganizationMember[]
+  invites  OrganizationInvite[]
   projects Project[]
 
   @@map("organizations")
@@ -208,6 +211,26 @@ model OrganizationMember {
 
   @@unique([organizationId, userId])
   @@map("organization_members")
+}
+
+model OrganizationInvite {
+  id              String     @id @default(uuid())
+  organizationId  String     @map("organization_id")
+  token           String     @unique
+  role            MemberRole @default(MEMBER)
+  createdByUserId String     @map("created_by_user_id")
+  expiresAt       DateTime?  @map("expires_at")
+  maxUses         Int?       @map("max_uses")
+  useCount        Int        @default(0) @map("use_count")
+  revokedAt       DateTime?  @map("revoked_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("InviteCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([organizationId])
+  @@map("organization_invites")
 }
 
 enum MemberRole {
@@ -1165,6 +1188,8 @@ model GapItem {
   tobeNode  FlowNode?     @relation("GapTobeNode", fields: [tobeNodeId], references: [id], onDelete: SetNull)
   issueTree IssueTree?    @relation(fields: [issueTreeId], references: [id], onDelete: SetNull)
   ledger    GapLedger?
+  // このGAPに紐づくタスク（打ち手の実行）
+  tasks     Task[]
 
   @@map("gap_items")
 }
@@ -1592,6 +1617,8 @@ model Task {
   issueNodeId    String?      @map("issue_node_id")
   // リスク対応タスクの紐付け（任意）
   riskId         String?      @map("risk_id")
+  // GAP（課題）への紐付け（任意）
+  gapItemId      String?      @map("gap_item_id")
   // 領域（SubProject）への紐付け。タスクを領域で分けて管理するため。任意。
   subProjectId   String?      @map("sub_project_id")
   startDate      DateTime?    @map("start_date")
@@ -1616,6 +1643,8 @@ model Task {
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
   issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
   risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
+  // GAP（課題）。GAP が消えても task は残す（SetNull）
+  gapItem      GapItem?         @relation(fields: [gapItemId], references: [id], onDelete: SetNull)
   // 領域（SubProject）。領域が消えても task は残す（SetNull）。
   subProject   SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）
@@ -3033,6 +3062,11 @@ model MeetingDocument {
   fetchedTitle   String?           @map("fetched_title")
   fetchedMime    String?           @map("fetched_mime")
   fetchedAt      DateTime?         @map("fetched_at")
+  // GOOGLE_DOC のとき：Google 側のタブ構成のキャッシュ
+  // （Docs のドキュメントタブ / Sheets のシートタブ）。サイドメニューの第3階層表示に使う。
+  // 形: { kind: 'document'|'spreadsheet'|'other', tabs: [{ id, title, index, level }] }
+  googleTabsJson Json?             @map("google_tabs_json")
+  googleTabsAt   DateTime?         @map("google_tabs_at")
   order        Int                 @default(0)
   createdAt    DateTime            @default(now()) @map("created_at")
   updatedAt    DateTime            @updatedAt @map("updated_at")

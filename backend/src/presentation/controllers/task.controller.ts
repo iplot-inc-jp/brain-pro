@@ -209,6 +209,15 @@ class CreateTaskDto {
   riskId?: string | null;
 
   @ApiProperty({
+    description: '紐付ける GAP（課題）ID。null で未紐付け',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  gapItemId?: string | null;
+
+  @ApiProperty({
     description: '開始日（ISO文字列）',
     required: false,
     nullable: true,
@@ -396,6 +405,16 @@ class UpdateTaskDto {
   riskId?: string | null;
 
   @ApiProperty({
+    description:
+      '紐付ける GAP（課題）ID。指定で紐付け差し替え / null で紐付け解除 / 省略で変更なし',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  gapItemId?: string | null;
+
+  @ApiProperty({
     description: '開始日（ISO文字列）',
     required: false,
     nullable: true,
@@ -559,6 +578,7 @@ export class TaskController {
       acceptanceCriteria: dto.acceptanceCriteria,
       subProjectId: dto.subProjectId,
       riskId: dto.riskId,
+      gapItemId: dto.gapItemId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,
@@ -749,6 +769,7 @@ export class TaskByIdController {
       acceptanceCriteria: dto.acceptanceCriteria,
       subProjectId: dto.subProjectId,
       riskId: dto.riskId,
+      gapItemId: dto.gapItemId,
       startDate: toDate(dto.startDate),
       dueDate: toDate(dto.dueDate),
       progress: dto.progress,

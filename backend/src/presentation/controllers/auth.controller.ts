@@ -1,15 +1,17 @@
-import { Controller, Post, Body, Get, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Get, HttpCode, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
   RegisterUserUseCase,
   LoginUserUseCase,
   GetCurrentUserUseCase,
+  LoginWithGoogleUseCase,
 } from '../../application';
 import {
   RegisterRequestDto,
   RegisterResponseDto,
   LoginRequestDto,
   LoginResponseDto,
+  GoogleLoginRequestDto,
 } from '../dto';
 import { Public } from '../decorators/public.decorator';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
@@ -21,6 +23,7 @@ export class AuthController {
     private readonly registerUserUseCase: RegisterUserUseCase,
     private readonly loginUserUseCase: LoginUserUseCase,
     private readonly getCurrentUserUseCase: GetCurrentUserUseCase,
+    private readonly loginWithGoogleUseCase: LoginWithGoogleUseCase,
   ) {}
 
   @Post('register')
@@ -62,6 +65,23 @@ export class AuthController {
       userId: user.id,
     });
     return result;
+  }
+
+  @Post('google')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Googleログイン/サインアップ' })
+  @ApiResponse({ status: 200, description: 'ログイン成功' })
+  @ApiResponse({ status: 401, description: 'Google認証エラー' })
+  @ApiResponse({ status: 503, description: 'Googleログインが無効' })
+  async google(@Body() dto: GoogleLoginRequestDto) {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      throw new ServiceUnavailableException('Googleログインは現在無効です');
+    }
+    return this.loginWithGoogleUseCase.execute({
+      idToken: dto.idToken,
+      inviteToken: dto.inviteToken,
+    });
   }
 }
 

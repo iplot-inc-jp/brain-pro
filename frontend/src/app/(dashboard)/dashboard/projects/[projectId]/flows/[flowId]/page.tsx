@@ -39,8 +39,11 @@ import {
   Table2,
   Network,
   ChevronRight,
+  ArrowDownUp,
 } from 'lucide-react';
-import { SwimlaneCanvas, type NodeLinksResult } from '@/components/flow-editor/SwimlaneCanvas';
+import { SwimlaneCanvas, type NodeLinksResult, type NodeImageRef } from '@/components/flow-editor/SwimlaneCanvas';
+import { RoleOrderDialog } from '@/components/flow-editor/RoleOrderDialog';
+import { nodeAttachmentApi } from '@/lib/node-attachments';
 import { CruoaMatrix } from '@/components/flow-editor/CruoaMatrix';
 import { DfdCanvas } from '@/components/dfd/DfdCanvas';
 import { DataFlowTable } from '@/components/dfd/DataFlowTable';
@@ -62,6 +65,7 @@ import type {
   Role,
 } from '@/components/flow-editor/flow-types';
 import { applyEdgePatch } from '@/components/flow-editor/flow-types';
+import { computeFlowLayout } from '@/components/flow-editor/flow-layout';
 import {
   deriveDefinitionFromFlow,
   hasDerivableContent,
@@ -120,6 +124,18 @@ const MERMAID_SAMPLE = `flowchart TD
     C[出荷指示] --> D[配送手配]
   end
   B --> C`;
+
+// シーケンス図（プロトコル図）サンプル。スイムレーンに最も自然に対応する記法。
+// participant＝レーン（ロール）、各メッセージ＝送信側レーンのノード、出現順＝フロー順。
+const MERMAID_SEQUENCE_SAMPLE = `sequenceDiagram
+  participant 顧客
+  participant 営業
+  participant 物流
+  顧客->>営業: 注文を送る
+  営業->>営業: 与信確認
+  営業->>物流: 出荷を依頼
+  物流->>物流: 配送手配
+  物流-->>顧客: 配送完了を通知`;
 
 // ===========================================
 // DFDタブ：このフローのデータフロー図（get-or-generate）＋ 図 / 一覧表 サブ切替
@@ -1006,7 +1022,47 @@ export default function ProjectFlowDetailPage() {
 
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [roleOrderOpen, setRoleOrderOpen] = useState(false);
   const [otherFlows, setOtherFlows] = useState<FlowSummary[]>([]);
+
+  // ノードの画像添付（ノードID → 画像）。ノード右上にバッジを出し、ホバーで拡大プレビューする。
+  const [nodeImages, setNodeImages] = useState<Map<string, NodeImageRef[]>>(new Map());
+  // ノード集合が変わったときだけまとめて取得（編集のたびの flowData 変化では再取得しない）。
+  const flowNodeIdsKey = (flowData?.nodes ?? []).map((n) => n.id).join(',');
+  useEffect(() => {
+    if (!projectId || !flowNodeIdsKey) {
+      setNodeImages(new Map());
+      return;
+    }
+    const ids = flowNodeIdsKey.split(',');
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        ids.map((id) =>
+          nodeAttachmentApi
+            .list(projectId, 'FLOW_NODE', id)
+            .then((rows) => [id, rows] as const)
+            .catch(() => [id, []] as const),
+        ),
+      );
+      if (cancelled) return;
+      const map = new Map<string, NodeImageRef[]>();
+      for (const [id, rows] of results) {
+        const imgs = rows
+          .filter((r) => r.attachment && r.attachment.kind === 'IMAGE')
+          .map((r) => ({
+            id: r.attachment!.id,
+            url: r.attachment!.url,
+            filename: r.attachment!.displayName || r.attachment!.filename,
+          }));
+        if (imgs.length) map.set(id, imgs);
+      }
+      setNodeImages(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, flowNodeIdsKey]);
   const [informationTypes, setInformationTypes] = useState<InformationType[]>([]);
   // システムマスタ（ロールの type==='SYSTEM' のとき紐づけ先選択肢）
   const [systems, setSystems] = useState<SystemMaster[]>([]);
@@ -1057,13 +1113,15 @@ export default function ProjectFlowDetailPage() {
   }, []);
 
   // ロール一覧取得（フロー途中でのロール追加後の再取得でも再利用する）
-  const fetchRoles = useCallback(async () => {
+  const fetchRoles = useCallback(async (): Promise<Role[] | undefined> => {
     const headers = getHeaders();
     const rolesRes = await fetch(`${API_URL}/api/roles/project/${projectId}`, { headers });
     if (rolesRes.ok) {
-      const rolesData = await rolesRes.json();
+      const rolesData = (await rolesRes.json()) as Role[];
       setRoles(rolesData);
+      return rolesData;
     }
+    return undefined;
   }, [projectId, getHeaders]);
 
   // 注釈（付箋・コメント）一覧を取得（GET /business-flows/:flowId/annotations）。
@@ -1553,8 +1611,10 @@ export default function ProjectFlowDetailPage() {
     [flowData, fetchFlowData, getHeaders, roles]
   );
 
-  // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）→ 再取得。
+  // 「整形」: 全ノードの位置/ロール/順序を一括保存（PUT /:flowId/nodes/positions）。
   // SwimlaneCanvas が computeFlowLayout の綺麗な座標を渡してくる（ぐちゃぐちゃ修正の安全網）。
+  // 体感速度のため先にローカルへ楽観反映して即座に動かし、保存は裏で行う
+  // （以前は PUT → フロー/ロール/注釈の全再取得を待つまで 1〜3 秒キャンバスが動かなかった）。
   const handleTidyNodes = useCallback(
     async (
       positions: Array<{
@@ -1572,10 +1632,48 @@ export default function ProjectFlowDetailPage() {
       }>
     ) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 1) 楽観反映: flowData に新レイアウトをマージ → キャンバスは即座に整形後の姿になる。
+      //    （SwimlaneCanvas の effectivePositions は flowData.nodes 由来のため、これで十分）
+      const posById = new Map(positions.map((p) => [p.id, p]));
+      const edgeById = new Map((edges ?? []).map((e) => [e.id, e]));
+      setFlowData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          nodes: prev.nodes.map((n) => {
+            const p = posById.get(n.id);
+            if (!p) return n;
+            return {
+              ...n,
+              positionX: p.positionX,
+              positionY: p.positionY,
+              ...(p.order !== undefined ? { order: p.order } : {}),
+              ...(p.roleId !== undefined
+                ? {
+                    roleId: p.roleId ?? undefined,
+                    role: p.roleId ? roles.find((r) => r.id === p.roleId) ?? n.role : undefined,
+                  }
+                : {}),
+            };
+          }),
+          edges: prev.edges.map((e) => {
+            const pe = edgeById.get(e.id);
+            if (!pe) return e;
+            return {
+              ...e,
+              ...(pe.sourceHandle !== undefined ? { sourceHandle: pe.sourceHandle } : {}),
+              ...(pe.targetHandle !== undefined ? { targetHandle: pe.targetHandle } : {}),
+            };
+          }),
+        };
+      });
+      // 2) 保存（返す Promise は SwimlaneCanvas の layoutSaving 連打ガードに使われる。
+      //    保存完了前に次の整形/縦横が走って PUT が競合しないよう、PUT の完了までを含める）。
       try {
         const headers = getHeaders();
         const res = await fetch(
-          `${API_URL}/api/business-flows/${flowData.id}/nodes/positions`,
+          `${API_URL}/api/business-flows/${flowId}/nodes/positions`,
           {
             method: 'PUT',
             headers,
@@ -1585,16 +1683,14 @@ export default function ProjectFlowDetailPage() {
           }
         );
         if (!res.ok) throw new Error('Failed to tidy node positions');
-        // 再取得完了まで await して返す Promise に含める。
-        // SwimlaneCanvas 側はこの Promise の解決を「flowData の座標が新レイアウトへ
-        // 入れ替わった」合図として整形/縦横ボタンの連打ガードに使う（解決前に次の
-        // 縦横切替が走ると、旧座標のノードと移動済みの注釈を突き合わせてしまう）。
-        await fetchFlowData(flowData.id);
+        // 成功時は再取得しない（楽観反映済み＝サーバと同一。整形はロール/注釈を変えない）。
       } catch (err) {
+        // 失敗時のみサーバの真実へ巻き戻す（静かに再取得）。
         console.error('Failed to tidy node positions:', err);
+        await fetchFlowData(flowId, true);
       }
     },
-    [flowData, fetchFlowData, getHeaders]
+    [flowData, fetchFlowData, getHeaders, roles]
   );
 
   // ノード作成（構造ベース：位置はサーバ側0固定、描画は自動レイアウト）
@@ -1629,17 +1725,31 @@ export default function ProjectFlowDetailPage() {
   const handleNodeDelete = useCallback(
     async (nodeId: string) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 楽観反映: ノードと接続矢印を即座に消す（サーバ側はカスケード削除。
+      // 全再取得を待つとキャンバスが固まって見えるため先にローカルへ反映する）。
+      setFlowData((prev) =>
+        prev
+          ? {
+              ...prev,
+              nodes: prev.nodes.filter((n) => n.id !== nodeId),
+              edges: prev.edges.filter(
+                (e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId
+              ),
+            }
+          : prev
+      );
       try {
         const headers = getHeaders();
-        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/nodes/${nodeId}`, {
+        const res = await fetch(`${API_URL}/api/business-flows/${flowId}/nodes/${nodeId}`, {
           method: 'DELETE',
           headers,
         });
-
         if (!res.ok) throw new Error('Failed to delete node');
-        fetchFlowData(flowData.id);
       } catch (err) {
+        // 失敗時のみサーバの真実へ巻き戻す（静かに再取得）。
         console.error('Failed to delete node:', err);
+        await fetchFlowData(flowId, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -1774,9 +1884,30 @@ export default function ProjectFlowDetailPage() {
       }
     ) => {
       if (!flowData) return;
+      const flowId = flowData.id;
+      // 楽観反映を先に行い、矢印の付け替え（端点・接続辺）を即座に描画へ反映する。
+      // PATCH は裏で実行し、失敗時のみサーバの真実へ巻き戻す。
+      setFlowData((prev) =>
+        prev
+          ? {
+              ...prev,
+              edges: prev.edges.map((e) =>
+                e.id === edgeId
+                  ? {
+                      ...e,
+                      sourceNodeId: next.sourceNodeId,
+                      targetNodeId: next.targetNodeId,
+                      sourceHandle: next.sourceHandle ?? null,
+                      targetHandle: next.targetHandle ?? null,
+                    }
+                  : e
+              ),
+            }
+          : prev
+      );
       try {
         const headers = getHeaders();
-        const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/edges/${edgeId}`, {
+        const res = await fetch(`${API_URL}/api/business-flows/${flowId}/edges/${edgeId}`, {
           method: 'PATCH',
           headers,
           body: JSON.stringify({
@@ -1786,30 +1917,10 @@ export default function ProjectFlowDetailPage() {
             targetHandle: next.targetHandle ?? null,
           }),
         });
-
         if (!res.ok) throw new Error('Failed to reconnect edge');
-        // 楽観更新: 端点（source/target/接続側）をローカルに反映（全体再取得を避ける）。
-        setFlowData((prev) =>
-          prev
-            ? {
-                ...prev,
-                edges: prev.edges.map((e) =>
-                  e.id === edgeId
-                    ? {
-                        ...e,
-                        sourceNodeId: next.sourceNodeId,
-                        targetNodeId: next.targetNodeId,
-                        sourceHandle: next.sourceHandle ?? null,
-                        targetHandle: next.targetHandle ?? null,
-                      }
-                    : e
-                ),
-              }
-            : prev
-        );
       } catch (err) {
         console.error('Failed to reconnect edge:', err);
-        if (flowData) fetchFlowData(flowData.id, true);
+        await fetchFlowData(flowId, true);
       }
     },
     [flowData, fetchFlowData, getHeaders]
@@ -3003,14 +3114,84 @@ export default function ProjectFlowDetailPage() {
 
       {/* フロービューアー（フロー図タブ） */}
       <div
-        className={`h-[calc(100vh-240px)] border border-gray-200 rounded-lg overflow-hidden ${
+        className={`relative h-[calc(100vh-240px)] border border-gray-200 rounded-lg overflow-hidden ${
           activeTab === 'flow' ? '' : 'hidden'
         }`}
       >
+        {activeTab === 'flow' && canEdit && (
+          <div className="absolute top-2 right-2 z-20">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRoleOrderOpen(true)}
+              className="h-8 bg-white/95 backdrop-blur border-gray-300 text-gray-700 shadow-sm hover:bg-white"
+              title="レーン（ロール）の並び順を変更"
+            >
+              <ArrowDownUp className="h-4 w-4 mr-1.5" />
+              レーンの順番
+            </Button>
+          </div>
+        )}
+        <RoleOrderDialog
+          projectId={projectId}
+          roles={roles}
+          open={roleOrderOpen}
+          onOpenChange={setRoleOrderOpen}
+          onReordered={async () => {
+            // 並び替え保存後、取得し直した「新ロール順」でその場で整形し、ノードを新レーンへ追従させる。
+            // SwimlaneCanvas の tidyLayout と同条件で computeFlowLayout を回す。state 反映の
+            // タイミングに依存しないよう、fetchRoles の戻り値の新ロールを直接使う。
+            const newRoles = await fetchRoles();
+            if (!newRoles || !flowData) return;
+            const orientation =
+              typeof window !== 'undefined' &&
+              window.localStorage.getItem('flow-orientation-' + flowData.id) === 'vertical'
+                ? 'vertical'
+                : 'horizontal';
+            const laneRoles = newRoles.map((r) => ({
+              id: r.id,
+              name: r.name,
+              color: r.color,
+              laneHeight: (r as { laneHeight?: number }).laneHeight,
+            }));
+            const inputNodes = flowData.nodes.map((n) => ({
+              id: n.id,
+              type: n.type,
+              roleId: n.roleId ?? n.role?.id ?? null,
+              order: n.order,
+              width: typeof n.width === 'number' && n.width > 0 ? n.width : undefined,
+              height: typeof n.height === 'number' && n.height > 0 ? n.height : undefined,
+            }));
+            const inputEdges = flowData.edges.map((e) => ({
+              id: e.id,
+              source: e.sourceNodeId,
+              target: e.targetNodeId,
+            }));
+            const layout = computeFlowLayout(inputNodes, inputEdges, laneRoles, {
+              orientation,
+              laneHeightOverrides: flowData.laneHeights ?? {},
+            });
+            const roleIdSet = new Set(newRoles.map((r) => r.id));
+            const positions = layout.nodes.map((pn) => ({
+              id: pn.id,
+              positionX: pn.x - pn.width / 2,
+              positionY: pn.y - pn.height / 2,
+              roleId: roleIdSet.has(pn.roleId) ? pn.roleId : null,
+              order: typeof pn.order === 'number' ? pn.order : undefined,
+            }));
+            const edges = layout.edges.map((e) => ({
+              id: e.id,
+              sourceHandle: e.sourceHandle,
+              targetHandle: e.targetHandle,
+            }));
+            await handleTidyNodes(positions, edges);
+          }}
+        />
         <SwimlaneCanvas
           flowData={flowData}
           roles={visibleRoles}
           projectId={projectId}
+          nodeImages={nodeImages}
           onImageUndoStateChange={handleImageUndoState}
           imageUndoApiRef={imageUndoApiRef}
           otherFlows={otherFlows}
@@ -3053,6 +3234,7 @@ export default function ProjectFlowDetailPage() {
           onDeleteAnnotation={ro(handleDeleteAnnotation)}
           apiEndpoints={apiEndpoints}
           onSaveEdgeApiLinks={ro(handleSaveEdgeApiLinks)}
+          onOpenRoleOrder={ro(() => setRoleOrderOpen(true))}
         />
       </div>
 
@@ -3242,10 +3424,11 @@ export default function ProjectFlowDetailPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5 text-gray-900">
               mermaidから生成
-              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart の定義を貼り付けると、ロール・ノード・接続を解析してこのフローへ一括で追加します。" />
+              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart に加え、sequenceDiagram（シーケンス図／プロトコル図）も解析できます。シーケンス図は participant がそのままレーン（ロール）、各メッセージが送信側レーンのノードになるため、スイムレーンに最も自然に変換できます。" />
             </DialogTitle>
             <DialogDescription className="text-gray-500">
-              Mermaid記法のテキストを貼り付けると、ロール・ノード・接続をこのフローに追加します。
+              Mermaid記法のテキスト（flowchart / sequenceDiagram）を貼り付けると、ロール・ノード・接続をこのフローに追加します。
+              シーケンス図（プロトコル図）はレーンへの変換が特にきれいです。
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -3263,15 +3446,29 @@ export default function ProjectFlowDetailPage() {
             </div>
           )}
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
-              disabled={mermaidImporting}
-              className="mr-auto text-gray-600"
-              title="サンプルで上書きします"
-            >
-              サンプルを表示
-            </Button>
+            <div className="mr-auto flex items-center gap-1">
+              <span className="text-xs text-gray-400">サンプル:</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMermaidImportText(MERMAID_SEQUENCE_SAMPLE)}
+                disabled={mermaidImporting}
+                className="text-gray-600"
+                title="シーケンス図（プロトコル図）のサンプルで上書きします。スイムレーンに最も自然に対応します。"
+              >
+                シーケンス図
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+                disabled={mermaidImporting}
+                className="text-gray-600"
+                title="flowchart のサンプルで上書きします。"
+              >
+                flowchart
+              </Button>
+            </div>
             <Button
               variant="outline"
               onClick={() => setShowMermaidImport(false)}

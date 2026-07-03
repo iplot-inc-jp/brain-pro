@@ -64,6 +64,11 @@ export class RegisterUserUseCase {
       if (existing.password) {
         throw new EntityAlreadyExistsError('User', 'email', input.email);
       }
+      // Google 連携アカウント（password='' だが googleId 設定済み）は
+      // 公開 register からの乗っ取りを防ぐため claim を拒否する。
+      if (existing.googleId) {
+        throw new EntityAlreadyExistsError('User', 'email', input.email);
+      }
       // 招待ユーザーを本登録（パスワード・氏名を設定）
       existing.changePassword(hashedPassword);
       if (input.name) existing.changeName(input.name);

@@ -39,6 +39,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
     assigneeRoleId: string | null;
     issueNodeId: string | null;
     riskId: string | null;
+    gapItemId: string | null;
     startDate: Date | null;
     dueDate: Date | null;
     progress: number;
@@ -77,6 +78,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
           }
         : null,
       riskId: record.riskId,
+      gapItemId: record.gapItemId,
       startDate: record.startDate,
       dueDate: record.dueDate,
       progress: record.progress,
@@ -154,6 +156,7 @@ export class TaskRepositoryImpl implements ITaskRepository {
       assigneeRoleId: task.assigneeRoleId,
       issueNodeId: task.issueNodeId,
       riskId: task.riskId,
+      gapItemId: task.gapItemId,
       startDate: task.startDate,
       dueDate: task.dueDate,
       progress: task.progress,

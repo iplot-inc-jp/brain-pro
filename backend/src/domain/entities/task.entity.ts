@@ -56,6 +56,8 @@ export interface CreateTaskProps {
   issueNodeId?: string | null;
   /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
   riskId?: string | null;
+  /** GAP（課題）への紐付け（任意）。null は未紐付け。 */
+  gapItemId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -95,6 +97,8 @@ export interface ReconstructTaskProps {
   linkedIssueNode?: LinkedIssueNode | null;
   /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
   riskId: string | null;
+  /** GAP（課題）への紐付け（任意）。null は未紐付け。 */
+  gapItemId: string | null;
   startDate: Date | null;
   dueDate: Date | null;
   progress: number;
@@ -133,6 +137,8 @@ export interface UpdateTaskProps {
   issueNodeId?: string | null;
   /** リスク対応タスクの紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
   riskId?: string | null;
+  /** GAP（課題）への紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
+  gapItemId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -183,6 +189,7 @@ export class Task extends BaseEntity {
   private _assigneeRoleId: string | null;
   private _issueNodeId: string | null;
   private _riskId: string | null;
+  private _gapItemId: string | null;
   private _startDate: Date | null;
   private _dueDate: Date | null;
   private _progress: number;
@@ -226,6 +233,7 @@ export class Task extends BaseEntity {
     linkedIssueNode: LinkedIssueNode | null = null,
     acceptanceCriteria: string | null = null,
     subProjectId: string | null = null,
+    gapItemId: string | null = null,
   ) {
     super(id, createdAt, updatedAt);
     this._projectId = projectId;
@@ -253,6 +261,7 @@ export class Task extends BaseEntity {
     this._order = order;
     this._acceptanceCriteria = acceptanceCriteria;
     this._subProjectId = subProjectId;
+    this._gapItemId = gapItemId;
     this._linkedIssueNode = linkedIssueNode;
   }
 
@@ -377,6 +386,7 @@ export class Task extends BaseEntity {
       null, // linkedIssueNode（作成時は join 情報なし）
       props.acceptanceCriteria?.trim() || null,
       props.subProjectId ?? null,
+      props.gapItemId ?? null,
     );
   }
 
@@ -414,6 +424,7 @@ export class Task extends BaseEntity {
       props.linkedIssueNode ?? null,
       props.acceptanceCriteria ?? null,
       props.subProjectId ?? null,
+      props.gapItemId ?? null,
     );
   }
 
@@ -465,6 +476,9 @@ export class Task extends BaseEntity {
     }
     if (props.riskId !== undefined) {
       this._riskId = props.riskId ?? null;
+    }
+    if (props.gapItemId !== undefined) {
+      this._gapItemId = props.gapItemId ?? null;
     }
     if (props.startDate !== undefined) {
       this._startDate = props.startDate ?? null;
@@ -605,6 +619,11 @@ export class Task extends BaseEntity {
   /** リスク対応タスクの紐付け先リスクID（未紐付けは null）。 */
   get riskId(): string | null {
     return this._riskId;
+  }
+
+  /** GAP（課題）への紐付け先 GapItemID（未紐付けは null）。 */
+  get gapItemId(): string | null {
+    return this._gapItemId;
   }
 
   /** read 時に join された紐付けノードの最小情報（無ければ null）。 */

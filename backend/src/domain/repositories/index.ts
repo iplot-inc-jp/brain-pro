@@ -39,3 +39,4 @@ export * from './ingestion-batch.repository';
 export * from './ingestion-file.repository';
 export * from './knowledge.repository';
 export * from './project-knowledge-settings.repository';
+export * from './organization-invite.repository';

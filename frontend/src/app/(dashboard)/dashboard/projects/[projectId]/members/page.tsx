@@ -185,7 +185,7 @@ export default function ProjectMembersPage() {
             </div>
             <p className="text-gray-800 font-medium mb-1">管理者のみ</p>
             <p className="text-sm text-gray-500 max-w-md">
-              メンバー権限の管理は、会社のオーナー・管理者（または全体管理者）のみが行えます。
+              メンバー権限の管理は、会社のオーナー・管理者（またはすべての管理者）のみが行えます。
             </p>
           </CardContent>
         </Card>

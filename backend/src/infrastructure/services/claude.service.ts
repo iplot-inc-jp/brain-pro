@@ -315,7 +315,9 @@ ${naturalLanguageText}`,
   }
 
   /**
-   * Mermaid（flowchart）図を業務フローのロール・ノード・エッジに変換
+   * Mermaid（flowchart または sequenceDiagram/プロトコル図）を
+   * 業務フローのロール・ノード・エッジに変換。
+   * sequenceDiagram は participant→ロール、メッセージ→ノード（送信側＝動作主体）に対応。
    */
   async parseMermaidToFlow(
     mermaid: string,
@@ -326,7 +328,7 @@ ${naturalLanguageText}`,
     const model = this.defaultModel();
 
     const systemPrompt = `あなたは業務フロー図の解析の専門家です。
-与えられた Mermaid の flowchart 図を、スイムレーン業務フロー用の「ロール（役割／レーン）」「ノード」「エッジ」に変換してください。
+与えられた Mermaid 図（flowchart または sequenceDiagram／プロトコル図）を、スイムレーン業務フロー用の「ロール（役割／レーン）」「ノード」「エッジ」に変換してください。
 
 出力は必ず以下のJSON形式で返してください：
 {
@@ -334,21 +336,30 @@ ${naturalLanguageText}`,
     { "name": "ロール名（レーン名）", "type": "HUMAN | SYSTEM | OTHER" }
   ],
   "nodes": [
-    { "key": "mermaidのノードID", "label": "ノードのラベル", "type": "START | END | PROCESS | DECISION | SYSTEM_INTEGRATION | MANUAL_OPERATION | DATA_STORE", "roleName": "所属するロール名" }
+    { "key": "ノードID", "label": "ノードのラベル", "type": "START | END | PROCESS | DECISION | SYSTEM_INTEGRATION | MANUAL_OPERATION | DATA_STORE", "roleName": "所属するロール名" }
   ],
   "edges": [
     { "sourceKey": "始点ノードID", "targetKey": "終点ノードID", "label": "遷移ラベル（任意）" }
   ]
 }
 
-解析ルール：
+【共通ルール】
+A. roleName は roles の name と必ず一致させる。ロール type はシステム/外部システムなら SYSTEM、人手の操作なら HUMAN、判断できなければ HUMAN。
+B. 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。
+
+【flowchart の場合】
 1. node.key は Mermaid のノードID（例: A, node1）をそのまま使う。
 2. label は Mermaid のノードに書かれた表示テキスト（["..."], ("..."), {"..."} などの中身）を使う。
 3. subgraph やラベル（例: [担当者名] のような注記、subgraphタイトル）からスイムレーンのロールを推測する。ロールが明示されていなければ妥当な単一ロール（例: "担当者"）を1つ作り、全ノードをそれに割り当てる。
 4. node.type は形状から推測する：開始/終了の丸は START/END、ひし形({})は DECISION、円柱([(...)])は DATA_STORE、それ以外の四角は PROCESS。判断できなければ PROCESS。
-5. roleName は roles の name と一致させる。type（ロール）はシステム/外部システムなら SYSTEM、人手の操作なら HUMAN、判断できなければ HUMAN。
-6. edges は Mermaid の矢印（-->, -->|label| など）から抽出し、label がある場合のみ含める。
-7. 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
+5. edges は Mermaid の矢印（-->, -->|label| など）から抽出し、label がある場合のみ含める。
+
+【sequenceDiagram（プロトコル図）の場合】★スイムレーンに最も自然に対応する
+6. participant / actor 宣言を「ロール（レーン）」にする。「participant A as 受付」のように別名があれば表示名（受付）を name に使う。順序は宣言順。
+7. 各メッセージ（A->>B: 注文する / A-->>B: ... / A-)B: ... 等）を1つの「ノード」にする。label はメッセージ本文（コロンの右側）。**roleName は送信側（矢印の左側＝動作主体）のロール**にする。node.key は m1, m2, ... と出現順に振る。
+8. ノードの順序＝メッセージの出現順。edges は連続するメッセージ node を出現順に繋ぐ（m1→m2→m3 …）。基本 label は不要（ラベルはノード側が持つため）。
+9. alt / opt / else などの分岐は、その直前に DECISION ノード（label は条件文）を挿入し、各分岐の先頭メッセージへ分岐させる（条件は edge.label にしてよい）。loop はそのまま順次フローとして表現してよい。判断が難しければ無理に分岐させず順次フローにする。
+10. 自己メッセージ（A->>A: ...）や返信（-->>）も、送信側レーンのノードとして扱う。Note/activate/deactivate は無視してよい。`;
 
     const response = await client.messages.create({
       model,

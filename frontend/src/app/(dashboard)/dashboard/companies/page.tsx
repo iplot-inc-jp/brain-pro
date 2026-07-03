@@ -152,7 +152,7 @@ export default function CompaniesPage() {
     );
   }
 
-  // 全体管理者以外はアクセス不可
+  // すべての管理者以外はアクセス不可
   if (!isSuperAdmin) {
     return (
       <div
@@ -162,8 +162,8 @@ export default function CompaniesPage() {
         <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mb-4 border border-amber-200">
           <ShieldAlert className="h-8 w-8 text-amber-500" />
         </div>
-        <h1 className="text-xl font-bold text-gray-900">全体管理者のみ利用できます</h1>
-        <p className="text-gray-500 mt-2">このページは全体管理者のみアクセスできます。</p>
+        <h1 className="text-xl font-bold text-gray-900">すべての管理者のみ利用できます</h1>
+        <p className="text-gray-500 mt-2">このページはすべての管理者のみアクセスできます。</p>
       </div>
     );
   }
@@ -175,7 +175,7 @@ export default function CompaniesPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
             会社管理
-            <HelpTooltip text="会社（組織）の一覧です。全体管理者は会社の作成・停止・再開ができます。各会社の設定からAPIキーやメンバーを管理できます。" />
+            <HelpTooltip text="会社（組織）の一覧です。すべての管理者は会社の作成・停止・再開ができます。各会社の設定からAPIキーやメンバーを管理できます。" />
           </h1>
           <p className="text-gray-500 mt-1">会社（組織）の作成・管理を行います</p>
         </div>

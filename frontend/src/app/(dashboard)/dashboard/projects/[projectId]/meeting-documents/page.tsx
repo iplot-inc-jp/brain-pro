@@ -9,8 +9,8 @@
  * 右カラム = 選択したドキュメント本体（window 依存の MeetingDocPane を ssr:false で動的読込）。
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
@@ -26,12 +26,14 @@ import {
   CalendarClock,
   ChevronRight,
   ChevronDown,
+  Search,
   X,
 } from 'lucide-react';
 import {
   meetingDocumentApi,
   type MeetingDocument,
   type MeetingDocumentKind,
+  type GoogleTabs,
 } from '@/lib/meeting-documents';
 import { listMeetings, type Meeting } from '@/lib/stakeholders';
 
@@ -58,6 +60,196 @@ function KindBadge({ kind }: { kind: MeetingDocumentKind }) {
     <span className="flex-shrink-0 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
       内
     </span>
+  );
+}
+
+// タブが多いとき（シート数の多いスプレッドシート等）に検索ボックスを出す閾値。
+const GOOGLE_TAB_SEARCH_MIN = 6;
+
+/**
+ * Google 側タブの一覧（第3階層）。Docs のタブ / Sheets のシートをぶら下げる。
+ * クリックで対象ドキュメントを選択しつつ ?gtab= を切り替える。多数なら名前で絞り込み可能。
+ */
+function DocTabList({
+  docId,
+  googleTabs,
+  activeGtab,
+  onSelectTab,
+}: {
+  docId: string;
+  googleTabs: GoogleTabs;
+  activeGtab: string | null;
+  onSelectTab: (docId: string, tabId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const sorted = useMemo(
+    () => [...googleTabs.tabs].sort((a, b) => a.index - b.index),
+    [googleTabs.tabs],
+  );
+  const q = query.trim().toLowerCase();
+  const filtered = q ? sorted.filter((t) => t.title.toLowerCase().includes(q)) : sorted;
+  const isSheet = googleTabs.kind === 'spreadsheet';
+
+  return (
+    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-gray-100 pl-1.5">
+      {sorted.length >= GOOGLE_TAB_SEARCH_MIN && (
+        <div className="flex items-center gap-1 px-1 py-0.5">
+          <Search className="h-3 w-3 flex-shrink-0 text-gray-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={isSheet ? 'シートを検索' : 'タブを検索'}
+            className="w-full min-w-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[11px] text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <div className="px-2 py-1 text-[11px] text-gray-400">
+          （該当する{isSheet ? 'シート' : 'タブ'}がありません）
+        </div>
+      ) : (
+        filtered.map((t) => {
+          const active = activeGtab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => onSelectTab(docId, t.id)}
+              title={t.title || '（無題のタブ）'}
+              // Docs のタブは入れ子（level）に応じてインデント。
+              style={{ paddingLeft: `${8 + t.level * 12}px` }}
+              className={cn(
+                'block w-full truncate rounded-md py-1 pr-2 text-left text-[11px] transition-colors',
+                active
+                  ? 'bg-blue-50 font-medium text-blue-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700',
+              )}
+            >
+              {t.title || '（無題のタブ）'}
+            </button>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/**
+ * 1ドキュメント行。GOOGLE_DOC は Google 側のタブ（Docs のタブ / Sheets のシート）を
+ * 第3階層としてぶら下げる。展開時にキャッシュが無ければ一度だけ Google から取得する。
+ */
+function DocRow({
+  doc,
+  selectedId,
+  activeGtab,
+  canEdit,
+  onSelectDoc,
+  onSelectTab,
+  onDelete,
+}: {
+  doc: MeetingDocument;
+  selectedId: string | null;
+  activeGtab: string | null;
+  canEdit: boolean;
+  onSelectDoc: (id: string) => void;
+  onSelectTab: (docId: string, tabId: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const isGoogle = doc.kind === 'GOOGLE_DOC';
+  const isSelected = doc.id === selectedId;
+  const [open, setOpen] = useState(isSelected);
+  // キャッシュ未取得のドキュメントを展開したときの遅延取得結果（一覧の再取得を待たず即表示）。
+  const [fetched, setFetched] = useState<GoogleTabs | null>(null);
+  const [loading, setLoading] = useState(false);
+  const failedRef = useRef(false);
+  // 多重取得ガードは ref で行う（loading を effect 依存に入れると取得結果が捨てられる）。
+  const inFlightRef = useRef(false);
+  // 一覧のキャッシュを優先し、遅延取得の結果はその繋ぎに使う。
+  const tabs = doc.googleTabs ?? fetched;
+
+  // 選択中ドキュメントはタブを自動展開（今開いている場所を辿れるように）。
+  useEffect(() => {
+    if (isSelected) setOpen(true);
+  }, [isSelected]);
+
+  // 展開時にキャッシュが無ければ一度だけ Google から取得（失敗してもリトライループしない）。
+  useEffect(() => {
+    if (!isGoogle || !open || tabs || inFlightRef.current || failedRef.current) return;
+    let cancelled = false;
+    inFlightRef.current = true;
+    setLoading(true);
+    meetingDocumentApi
+      .refreshGoogleTabs(doc.id)
+      .then((updated) => {
+        if (!cancelled) setFetched(updated.googleTabs ?? { kind: 'other', tabs: [] });
+      })
+      .catch(() => {
+        // 未連携・共有漏れ等。黙って畳む（ページ右側で案内される）。
+        failedRef.current = true;
+        if (!cancelled) setFetched({ kind: 'other', tabs: [] });
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGoogle, open, tabs, doc.id]);
+
+  const hasTabs = isGoogle && !!tabs && tabs.kind !== 'other' && tabs.tabs.length > 0;
+  // キャッシュ取得前でも Google ドキュメントには展開ボタンを出す（開いた時に取得）。
+  const showChevron = isGoogle && (hasTabs || !tabs);
+
+  return (
+    <li>
+      <div
+        className={cn(
+          'group flex items-center gap-1.5 rounded-md px-2 py-1 text-sm',
+          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50',
+        )}
+      >
+        <KindBadge kind={doc.kind} />
+        <button
+          className="min-w-0 flex-1 truncate text-left"
+          onClick={() => onSelectDoc(doc.id)}
+          title={doc.title || '無題のドキュメント'}
+        >
+          {doc.title || '無題のドキュメント'}
+        </button>
+        {showChevron && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? 'タブを閉じる' : 'タブを表示'}
+            className="flex-shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            {loading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : open ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+          </button>
+        )}
+        {canEdit && (
+          <button
+            className="flex-shrink-0 text-gray-300 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+            onClick={() => onDelete(doc.id)}
+            title="削除"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {open && hasTabs && tabs && (
+        <DocTabList
+          docId={doc.id}
+          googleTabs={tabs}
+          activeGtab={isSelected ? activeGtab : null}
+          onSelectTab={onSelectTab}
+        />
+      )}
+    </li>
   );
 }
 
@@ -112,18 +304,57 @@ export default function MeetingDocumentsPage() {
     [projectId],
   );
 
+  // 左サイドバーの「会議別ドキュメント」ツリーへ変更を通知し、即時に再取得させる
+  // （ダッシュボードレイアウトは画面遷移で再マウントされず、自前では更新されないため）。
+  const broadcastDocsChanged = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('meeting-docs-changed'));
+    }
+  }, []);
+
   useEffect(() => {
     void loadList();
   }, [loadList]);
 
   // 左サイドメニューの「会議別ドキュメント」からの遷移（?doc=<id>）で該当ドキュメントを選択。
   const searchParams = useSearchParams();
+  const router = useRouter();
   const docParam = searchParams.get('doc');
   useEffect(() => {
     if (docParam && documents.some((d) => d.id === docParam)) {
       setSelectedId(docParam);
     }
   }, [docParam, documents]);
+
+  // Google タブ（?gtab=<tabId|gid>）。URL の doc と選択中ドキュメントが一致するときだけ有効
+  // （ページ内リストでの選択切替は URL を書き換えないため、他ドキュメントの gtab を誤適用しない）。
+  const gtabParam = searchParams.get('gtab');
+  const gtab = docParam && docParam === selectedId ? gtabParam : null;
+
+  // ペインのタブバー/サイドメニューから Google タブを切り替える（URL を正として同期する）。
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      if (!selectedId) return;
+      router.replace(
+        `/dashboard/projects/${projectId}/meeting-documents?doc=${selectedId}&gtab=${encodeURIComponent(tabId)}`,
+        { scroll: false },
+      );
+    },
+    [router, projectId, selectedId],
+  );
+
+  // 左リストの第3階層（Google タブ/シート）クリック：対象ドキュメントを選択しつつ ?gtab= を切替。
+  // selectedId 更新のタイミングに依存しないよう docId を直接 URL に載せる。
+  const handleSelectDocTab = useCallback(
+    (docId: string, tabId: string) => {
+      setSelectedId(docId);
+      router.replace(
+        `/dashboard/projects/${projectId}/meeting-documents?doc=${docId}&gtab=${encodeURIComponent(tabId)}`,
+        { scroll: false },
+      );
+    },
+    [router, projectId],
+  );
 
   // 会議を order→name でソート。
   const sortedMeetings = useMemo(
@@ -188,12 +419,13 @@ export default function MeetingDocumentsPage() {
       });
       setCreatingIn(null);
       await loadList(created.id);
+      broadcastDocsChanged();
     } catch {
       /* noop（一覧エラーは loadList が拾う） */
     } finally {
       setCreating(false);
     }
-  }, [creatingIn, projectId, createKind, createTitle, createUrl, loadList]);
+  }, [creatingIn, projectId, createKind, createTitle, createUrl, loadList, broadcastDocsChanged]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -202,11 +434,12 @@ export default function MeetingDocumentsPage() {
         await meetingDocumentApi.remove(id);
         if (selectedId === id) setSelectedId(null);
         await loadList();
+        broadcastDocsChanged();
       } catch {
         /* noop */
       }
     },
-    [selectedId, loadList],
+    [selectedId, loadList, broadcastDocsChanged],
   );
 
   const toggleFolder = useCallback((key: string) => {
@@ -223,10 +456,11 @@ export default function MeetingDocumentsPage() {
       setDocuments((list) =>
         list.map((d) => (d.id === selectedDoc.id ? { ...d, title: next } : d)),
       );
+      broadcastDocsChanged();
     } catch {
       /* noop */
     }
-  }, [selectedDoc, titleDraft]);
+  }, [selectedDoc, titleDraft, broadcastDocsChanged]);
 
   // GOOGLE_DOC の URL 保存（自動保存）。ローカル一覧を即時更新（全件再取得しないので
   // 入力中に iframe が再読込されてチラつくのを防ぐ）。
@@ -419,34 +653,16 @@ export default function MeetingDocumentsPage() {
                             </li>
                           ) : (
                             meetingDocs.map((d) => (
-                              <li key={d.id}>
-                                <div
-                                  className={cn(
-                                    'group flex items-center gap-1.5 rounded-md px-2 py-1 text-sm',
-                                    d.id === selectedId
-                                      ? 'bg-blue-50 text-blue-700'
-                                      : 'hover:bg-gray-50',
-                                  )}
-                                >
-                                  <KindBadge kind={d.kind} />
-                                  <button
-                                    className="min-w-0 flex-1 truncate text-left"
-                                    onClick={() => setSelectedId(d.id)}
-                                    title={d.title || '無題のドキュメント'}
-                                  >
-                                    {d.title || '無題のドキュメント'}
-                                  </button>
-                                  {canEdit && (
-                                    <button
-                                      className="flex-shrink-0 text-gray-300 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
-                                      onClick={() => handleDelete(d.id)}
-                                      title="削除"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </li>
+                              <DocRow
+                                key={d.id}
+                                doc={d}
+                                selectedId={selectedId}
+                                activeGtab={gtab}
+                                canEdit={canEdit}
+                                onSelectDoc={setSelectedId}
+                                onSelectTab={handleSelectDocTab}
+                                onDelete={handleDelete}
+                              />
                             ))
                           )}
                         </ul>
@@ -490,6 +706,8 @@ export default function MeetingDocumentsPage() {
                   doc={selectedDoc}
                   canEdit={canEdit}
                   onSaveGoogleUrl={handleSaveGoogleUrl}
+                  gtab={gtab}
+                  onSelectTab={handleSelectTab}
                 />
               </div>
             </>

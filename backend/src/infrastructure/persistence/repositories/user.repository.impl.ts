@@ -24,6 +24,7 @@ export class UserRepositoryImpl implements UserRepository {
       name: data.name,
       avatarUrl: data.avatarUrl,
       isSuperAdmin: data.isSuperAdmin,
+      googleId: data.googleId,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -43,6 +44,7 @@ export class UserRepositoryImpl implements UserRepository {
       name: data.name,
       avatarUrl: data.avatarUrl,
       isSuperAdmin: data.isSuperAdmin,
+      googleId: data.googleId,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     });
@@ -64,6 +66,7 @@ export class UserRepositoryImpl implements UserRepository {
         password: user.password,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        googleId: user.googleId,
         isSuperAdmin: user.isSuperAdmin,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
@@ -73,6 +76,7 @@ export class UserRepositoryImpl implements UserRepository {
         password: user.password,
         name: user.name,
         avatarUrl: user.avatarUrl,
+        googleId: user.googleId,
         isSuperAdmin: user.isSuperAdmin,
         updatedAt: user.updatedAt,
       },

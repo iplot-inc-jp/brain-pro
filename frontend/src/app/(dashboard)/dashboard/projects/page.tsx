@@ -22,11 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Folder, Plus, Building2, Loader2, ArrowRight, ShieldAlert } from 'lucide-react';
+import { Folder, Plus, Building2, Loader2, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { CreateCompanyDialog } from '@/components/company/CreateCompanyDialog';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -53,6 +54,7 @@ export default function ProjectsPage() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [createOrgOpen, setCreateOrgOpen] = useState(false);
   const [howToOpen, setHowToOpen] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', slug: '', description: '' });
 
@@ -76,7 +78,7 @@ export default function ProjectsPage() {
     try {
       const headers = getHeaders();
 
-      // 会社作成は全体管理者のみ。ここでは自動作成せず、権限と一覧のみ取得する。
+      // 会社作成はすべての管理者のみ。ここでは自動作成せず、権限と一覧のみ取得する。
       const [meRes, orgRes] = await Promise.all([
         fetch(`${API_URL}/api/auth/me`, { headers }),
         fetch(`${API_URL}/api/organizations`, { headers }),
@@ -92,7 +94,11 @@ export default function ProjectsPage() {
 
       setOrganizations(orgs);
       if (orgs.length > 0) {
-        setSelectedOrg(orgs[0]); // → projects 取得 effect が loading を解除
+        // 「会社」ページ等で選択した会社があればそれを開く。無ければ先頭。
+        const savedId =
+          typeof window !== 'undefined' ? localStorage.getItem('selectedOrganizationId') : null;
+        const saved = savedId ? orgs.find((o) => o.id === savedId) : null;
+        setSelectedOrg(saved ?? orgs[0]); // → projects 取得 effect が loading を解除
       } else {
         setLoading(false); // 会社が無い → スピナー解除（メッセージ表示へ）
       }
@@ -162,45 +168,48 @@ export default function ProjectsPage() {
     );
   }
 
-  // 会社（組織）が1つも無い場合のガイド（会社作成は全体管理者のみ）
+  // 会社（組織）が1つも無い場合：自分で会社を作成して始める（セルフサーブ・OWNERになる）
   if (!loading && organizations.length === 0) {
     return (
       <div className="space-y-6" style={{ fontFamily: '"Yu Gothic", "游ゴシック", sans-serif' }}>
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-            プロジェクト選択
-            <HelpTooltip text="プロジェクトは作業の単位です。1つの会社の中に複数のプロジェクト（例: ECサイト、基幹システム刷新）を持てます。" />
+            ようこそ
+            <HelpTooltip text="まずは会社を作成しましょう。1つの会社の中に複数のプロジェクト（例: ECサイト、基幹システム刷新）を持てます。あとからメンバーを招待できます。" />
           </h1>
-          <p className="text-gray-500 mt-1">所属する会社がまだありません</p>
+          <p className="text-gray-500 mt-1">最初の会社を作成して始めましょう</p>
         </div>
         <Card className="bg-white border-gray-200">
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mb-4 border border-amber-200">
-              <ShieldAlert className="h-8 w-8 text-amber-500" />
+            <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mb-4 border border-blue-200">
+              <Building2 className="h-8 w-8 text-blue-500" />
             </div>
-            {isSuperAdmin ? (
-              <>
-                <p className="text-gray-700 mb-2 font-medium">会社がまだありません</p>
-                <p className="text-sm text-gray-500 mb-4">
-                  まずは会社を作成してください。会社の作成は全体管理者のみ可能です。
-                </p>
-                <Link href="/dashboard/companies">
-                  <Button className="bg-blue-600 hover:bg-blue-700">
-                    <Building2 className="h-4 w-4 mr-2" />
-                    会社を作成
-                  </Button>
-                </Link>
-              </>
-            ) : (
-              <>
-                <p className="text-gray-700 mb-2 font-medium">利用できる会社がありません</p>
-                <p className="text-sm text-gray-500">
-                  全体管理者に会社の作成を依頼してください。
-                </p>
-              </>
+            <p className="text-gray-700 mb-2 font-medium">会社がまだありません</p>
+            <p className="text-sm text-gray-500 mb-4">
+              会社を作成すると、あなたがオーナーになります。あとからメンバーを招待できます。
+            </p>
+            <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => setCreateOrgOpen(true)}>
+              <Building2 className="h-4 w-4 mr-2" />
+              会社を作成
+            </Button>
+            {isSuperAdmin && (
+              <Link
+                href="/dashboard/companies"
+                className="mt-3 text-sm text-blue-600 hover:underline"
+              >
+                すべての会社を管理する
+              </Link>
             )}
           </CardContent>
         </Card>
+        <CreateCompanyDialog
+          open={createOrgOpen}
+          onOpenChange={setCreateOrgOpen}
+          onCreated={() => {
+            setLoading(true);
+            fetchOrganizations();
+          }}
+        />
       </div>
     );
   }

@@ -53,6 +53,7 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../domain';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
@@ -1124,47 +1125,65 @@ export class BusinessFlowController {
     await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
 
     const positions = dto.positions ?? [];
+    const edgePatches = dto.edges ?? [];
 
-    for (const pos of positions) {
-      const node = await this.nodeRepository.findById(pos.id);
-      // このフローに属さない / 存在しないノードはスキップ
-      if (!node || node.flowId !== flowId) {
-        continue;
-      }
+    // 整形/一括ドラッグ保存は対象が多い（N ノード + M エッジ）。以前の
+    // 「1 件ずつ updateMany を $transaction に積む」方式でも Prisma のバッチは
+    // 1 コネクション上で逐次実行されるため、Neon へ N+M 本のステートメントが直列に流れ
+    // 数十ノードで 1〜2 秒かかっていた。jsonb で行集合を渡す集合 UPDATE 2 文に圧縮する。
+    //  - WHERE id = ... AND flow_id = ... は他フロー/存在しない id を「0 件更新」として
+    //    安全に弾く（従来の updateMany + where と同じ効果）。
+    //  - roleId/order は任意項目のため、キーの有無（u.j ? 'key'）で「未指定なら現値維持」。
+    //    JSON の null はそのまま SQL NULL として書き込まれる（未割当レーン）。
+    //  - 生 SQL は @updatedAt が効かないため updated_at を明示更新する。
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
 
-      node.updatePosition(pos.positionX, pos.positionY);
-      if (pos.roleId !== undefined) {
-        node.assignRole(pos.roleId);
-      }
-      await this.nodeRepository.save(node);
-
-      // `order` はドメインエンティティ/リポジトリが保持していないため直接更新する
-      if (pos.order !== undefined) {
-        await this.prisma.flowNode.update({
-          where: { id: pos.id },
-          data: { order: pos.order },
-        });
-      }
+    if (positions.length > 0) {
+      const posJson = JSON.stringify(
+        positions.map((p) => ({
+          id: p.id,
+          x: p.positionX,
+          y: p.positionY,
+          ...(p.roleId !== undefined ? { roleId: p.roleId } : {}),
+          ...(p.order !== undefined ? { order: p.order } : {}),
+        })),
+      );
+      ops.push(this.prisma.$executeRaw`
+        UPDATE "flow_nodes" AS n SET
+          "position_x" = (u.j ->> 'x')::double precision,
+          "position_y" = (u.j ->> 'y')::double precision,
+          "role_id"    = CASE WHEN u.j ? 'roleId' THEN u.j ->> 'roleId' ELSE n."role_id" END,
+          "order"      = CASE WHEN u.j ? 'order' THEN (u.j ->> 'order')::numeric::int ELSE n."order" END,
+          "updated_at" = now()
+        FROM jsonb_array_elements(${posJson}::jsonb) AS u(j)
+        WHERE n."id" = u.j ->> 'id' AND n."flow_id" = ${flowId}
+      `);
     }
 
     // 整形が算出した最近接サイド接続ハンドル（任意）。同一リクエストで反映する。
-    // このフローに属さない / 存在しないエッジはスキップする。
-    const edgePatches = dto.edges ?? [];
-    for (const patch of edgePatches) {
-      const edge = await this.prisma.flowEdge.findUnique({
-        where: { id: patch.id },
-        select: { id: true, flowId: true },
-      });
-      if (!edge || edge.flowId !== flowId) {
-        continue;
-      }
-      const data: { sourceHandle?: string | null; targetHandle?: string | null } =
-        {};
-      if (patch.sourceHandle !== undefined) data.sourceHandle = patch.sourceHandle;
-      if (patch.targetHandle !== undefined) data.targetHandle = patch.targetHandle;
-      if (Object.keys(data).length > 0) {
-        await this.prisma.flowEdge.update({ where: { id: patch.id }, data });
-      }
+    const edgesWithData = edgePatches.filter(
+      (p) => p.sourceHandle !== undefined || p.targetHandle !== undefined,
+    );
+    if (edgesWithData.length > 0) {
+      const edgeJson = JSON.stringify(
+        edgesWithData.map((p) => ({
+          id: p.id,
+          ...(p.sourceHandle !== undefined ? { sourceHandle: p.sourceHandle } : {}),
+          ...(p.targetHandle !== undefined ? { targetHandle: p.targetHandle } : {}),
+        })),
+      );
+      ops.push(this.prisma.$executeRaw`
+        UPDATE "flow_edges" AS e SET
+          "source_handle" = CASE WHEN u.j ? 'sourceHandle' THEN u.j ->> 'sourceHandle' ELSE e."source_handle" END,
+          "target_handle" = CASE WHEN u.j ? 'targetHandle' THEN u.j ->> 'targetHandle' ELSE e."target_handle" END,
+          "updated_at" = now()
+        FROM jsonb_array_elements(${edgeJson}::jsonb) AS u(j)
+        WHERE e."id" = u.j ->> 'id' AND e."flow_id" = ${flowId}
+      `);
+    }
+
+    if (ops.length > 0) {
+      await this.prisma.$transaction(ops);
     }
 
     // 更新後のフローのノード一覧を返す
