@@ -1188,6 +1188,8 @@ model GapItem {
   tobeNode  FlowNode?     @relation("GapTobeNode", fields: [tobeNodeId], references: [id], onDelete: SetNull)
   issueTree IssueTree?    @relation(fields: [issueTreeId], references: [id], onDelete: SetNull)
   ledger    GapLedger?
+  // このGAPに紐づくタスク（打ち手の実行）
+  tasks     Task[]
 
   @@map("gap_items")
 }
@@ -1615,6 +1617,8 @@ model Task {
   issueNodeId    String?      @map("issue_node_id")
   // リスク対応タスクの紐付け（任意）
   riskId         String?      @map("risk_id")
+  // GAP（課題）への紐付け（任意）
+  gapItemId      String?      @map("gap_item_id")
   // 領域（SubProject）への紐付け。タスクを領域で分けて管理するため。任意。
   subProjectId   String?      @map("sub_project_id")
   startDate      DateTime?    @map("start_date")
@@ -1639,6 +1643,8 @@ model Task {
   assigneeRole Role?            @relation("RoleAssignedTasks", fields: [assigneeRoleId], references: [id], onDelete: SetNull)
   issueNode    IssueNode?       @relation(fields: [issueNodeId], references: [id], onDelete: SetNull)
   risk         Risk?            @relation(fields: [riskId], references: [id], onDelete: SetNull)
+  // GAP（課題）。GAP が消えても task は残す（SetNull）
+  gapItem      GapItem?         @relation(fields: [gapItemId], references: [id], onDelete: SetNull)
   // 領域（SubProject）。領域が消えても task は残す（SetNull）。
   subProject   SubProject?      @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
   // この依存関係でこのタスクが後続側（先行タスクへの参照を持つ）

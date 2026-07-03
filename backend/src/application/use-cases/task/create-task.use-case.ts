@@ -14,6 +14,8 @@ import {
   ISSUE_NODE_REPOSITORY,
   IIssueTreeRepository,
   ISSUE_TREE_REPOSITORY,
+  IGapItemRepository,
+  GAP_ITEM_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
@@ -47,6 +49,8 @@ export interface CreateTaskInput {
   subProjectId?: string | null;
   /** リスク対応タスクの紐付け（任意）。null は未紐付け。 */
   riskId?: string | null;
+  /** GAP（課題）への紐付け（任意）。null は未紐付け。 */
+  gapItemId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -73,6 +77,8 @@ export class CreateTaskUseCase {
     private readonly issueNodeRepository: IIssueNodeRepository,
     @Inject(ISSUE_TREE_REPOSITORY)
     private readonly issueTreeRepository: IIssueTreeRepository,
+    @Inject(GAP_ITEM_REPOSITORY)
+    private readonly gapItemRepository: IGapItemRepository,
     private readonly projectAccess: ProjectAccessService,
     private readonly taskWebhook: TaskWebhookService,
   ) {}
@@ -111,6 +117,11 @@ export class CreateTaskUseCase {
       await this.assertIssueNodeInProject(input.issueNodeId, input.projectId);
     }
 
+    // GAP（課題）が指定されている場合、同一プロジェクトに属することを確認
+    if (input.gapItemId) {
+      await this.assertGapItemInProject(input.gapItemId, input.projectId);
+    }
+
     const id = this.taskRepository.generateId();
     const task = Task.create(
       {
@@ -130,6 +141,7 @@ export class CreateTaskUseCase {
         acceptanceCriteria: input.acceptanceCriteria,
         subProjectId: input.subProjectId,
         riskId: input.riskId,
+        gapItemId: input.gapItemId,
         startDate: input.startDate,
         dueDate: input.dueDate,
         progress: input.progress,
@@ -176,6 +188,17 @@ export class CreateTaskUseCase {
     const tree = await this.issueTreeRepository.findById(node.treeId);
     if (!tree || tree.projectId !== projectId) {
       throw new EntityNotFoundError('IssueNode', issueNodeId);
+    }
+  }
+
+  /** 指定 GAP（課題）が当該プロジェクトに属することを検証 */
+  private async assertGapItemInProject(
+    gapItemId: string,
+    projectId: string,
+  ): Promise<void> {
+    const gapItem = await this.gapItemRepository.findById(gapItemId);
+    if (!gapItem || gapItem.projectId !== projectId) {
+      throw new EntityNotFoundError('GapItem', gapItemId);
     }
   }
 }

@@ -36,6 +36,7 @@ import {
   Link2,
   FileText,
   GitBranch,
+  GitCompare,
   Image as ImageIcon,
   ShieldAlert,
 } from 'lucide-react';
@@ -66,6 +67,7 @@ import {
   scoreBandBadgeClasses,
   type Risk,
 } from '@/lib/risks';
+import { listGapItems, type GapItemLite } from '@/lib/gap-items';
 
 type EditState = {
   title: string;
@@ -77,9 +79,17 @@ type EditState = {
   dueDate: string;
   progress: number;
   issueNodeId: string;
+  gapItemId: string;
 };
 
 const NONE = '__none__'; // Select は空文字を value にできないためのプレースホルダ
+
+/** GAP ピッカー/表示用のラベル（業務領域：GAP概要 を短縮）。 */
+function gapItemLabel(g: GapItemLite): string {
+  const desc = (g.gapDescription ?? '').trim();
+  const short = desc.length > 40 ? `${desc.slice(0, 40)}…` : desc;
+  return short ? `${g.businessArea}：${short}` : g.businessArea;
+}
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -92,6 +102,7 @@ export default function TaskDetailPage() {
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [roles, setRoles] = useState<TaskRole[]>([]);
   const [issueNodes, setIssueNodes] = useState<IssueNodeRef[]>([]);
+  const [gapItems, setGapItems] = useState<GapItemLite[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -153,6 +164,10 @@ export default function TaskDetailPage() {
     }
   }, [projectId]);
 
+  const fetchGapItems = useCallback(async () => {
+    setGapItems(await listGapItems(projectId));
+  }, [projectId]);
+
   const fetchComments = useCallback(async () => {
     try {
       const list = await commentsApi.list(taskId);
@@ -175,9 +190,10 @@ export default function TaskDetailPage() {
     fetchTask();
     fetchRoles();
     fetchIssueNodes();
+    fetchGapItems();
     fetchComments();
     fetchAttachments();
-  }, [fetchTask, fetchRoles, fetchIssueNodes, fetchComments, fetchAttachments]);
+  }, [fetchTask, fetchRoles, fetchIssueNodes, fetchGapItems, fetchComments, fetchAttachments]);
 
   // -------------------------------------------------------------------------
   // 派生データ
@@ -283,6 +299,7 @@ export default function TaskDetailPage() {
       dueDate: task.dueDate ? task.dueDate.slice(0, 10) : '',
       progress: clampProgress(task.progress),
       issueNodeId: task.issueNodeId ?? '',
+      gapItemId: task.gapItemId ?? '',
     });
     setSaveError(null);
     setEditing(true);
@@ -314,6 +331,7 @@ export default function TaskDetailPage() {
         dueDate: edit.dueDate || null,
         progress: clampProgress(edit.progress),
         issueNodeId: edit.issueNodeId || null,
+        gapItemId: edit.gapItemId || null,
       });
       setTask((prev) => (prev ? { ...prev, ...updated } : updated));
       setAllTasks((prev) =>
@@ -672,6 +690,53 @@ export default function TaskDetailPage() {
                 )}
               </DetailField>
 
+              <DetailField
+                label="GAP（課題）"
+                help="この作業がどのGAP（課題）を解消するかを紐付けます。GAP一覧で作成したGAPから選べます。"
+              >
+                {gapItems.length === 0 ? (
+                  <p className="text-xs text-gray-400">
+                    紐付けできるGAPがありません（GAP一覧で課題を作成してください）
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={edit.gapItemId || NONE}
+                      onValueChange={(v) =>
+                        setEdit({
+                          ...edit,
+                          gapItemId: v === NONE ? '' : v,
+                        })
+                      }
+                    >
+                      <SelectTrigger className="bg-white border-gray-300">
+                        <SelectValue placeholder="（紐付けなし）" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white">
+                        <SelectItem value={NONE}>（紐付けなし）</SelectItem>
+                        {gapItems.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {gapItemLabel(g)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {edit.gapItemId && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEdit({ ...edit, gapItemId: '' })}
+                        className="shrink-0 gap-1 text-gray-500"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        クリア
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </DetailField>
+
               {saveError && (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   {saveError}
@@ -821,6 +886,29 @@ export default function TaskDetailPage() {
                   <span className="text-gray-400">なし</span>
                 )}
               </DetailRow>
+
+              {/* 紐付いた GAP（課題） */}
+              {task.gapItemId && (
+                <DetailRow label="GAP（課題）">
+                  {(() => {
+                    const linkedGap = gapItems.find(
+                      (g) => g.id === task.gapItemId,
+                    );
+                    return (
+                      <Link
+                        href={`/dashboard/projects/${projectId}/gap-items`}
+                        className="inline-flex items-center gap-1.5 text-blue-600 hover:underline"
+                        title="GAP一覧で開く"
+                      >
+                        <GitCompare className="h-3.5 w-3.5" />
+                        <span>
+                          {linkedGap ? gapItemLabel(linkedGap) : 'GAP一覧で確認'}
+                        </span>
+                      </Link>
+                    );
+                  })()}
+                </DetailRow>
+              )}
 
               {/* 由来リスク（リスク対応タスク） */}
               {task.riskId && (

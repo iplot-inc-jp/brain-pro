@@ -13,6 +13,8 @@ import {
   ISSUE_NODE_REPOSITORY,
   IIssueTreeRepository,
   ISSUE_TREE_REPOSITORY,
+  IGapItemRepository,
+  GAP_ITEM_REPOSITORY,
   EntityNotFoundError,
   ForbiddenError,
   ValidationError,
@@ -47,6 +49,8 @@ export interface UpdateTaskInput {
   subProjectId?: string | null;
   /** リスク対応タスクの紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
   riskId?: string | null;
+  /** GAP（課題）への紐付け。指定で差し替え / null で解除 / 省略で変更なし。 */
+  gapItemId?: string | null;
   startDate?: Date | null;
   dueDate?: Date | null;
   progress?: number;
@@ -75,6 +79,8 @@ export class UpdateTaskUseCase {
     private readonly issueNodeRepository: IIssueNodeRepository,
     @Inject(ISSUE_TREE_REPOSITORY)
     private readonly issueTreeRepository: IIssueTreeRepository,
+    @Inject(GAP_ITEM_REPOSITORY)
+    private readonly gapItemRepository: IGapItemRepository,
     private readonly projectAccess: ProjectAccessService,
     private readonly taskWebhook: TaskWebhookService,
   ) {}
@@ -123,6 +129,11 @@ export class UpdateTaskUseCase {
       await this.assertIssueNodeInProject(input.issueNodeId, task.projectId);
     }
 
+    // GAP（課題）の差し替え（null は解除）。非nullなら同一プロジェクト所属を検証
+    if (input.gapItemId !== undefined && input.gapItemId !== null) {
+      await this.assertGapItemInProject(input.gapItemId, task.projectId);
+    }
+
     // ロールアップ判定用に更新前の親・日付を保持
     const oldParentId = task.parentId;
     const oldStartDate = task.startDate;
@@ -146,6 +157,7 @@ export class UpdateTaskUseCase {
       acceptanceCriteria: input.acceptanceCriteria,
       subProjectId: input.subProjectId,
       riskId: input.riskId,
+      gapItemId: input.gapItemId,
       startDate: input.startDate,
       dueDate: input.dueDate,
       progress: input.progress,
@@ -211,6 +223,17 @@ export class UpdateTaskUseCase {
     const tree = await this.issueTreeRepository.findById(node.treeId);
     if (!tree || tree.projectId !== projectId) {
       throw new EntityNotFoundError('IssueNode', issueNodeId);
+    }
+  }
+
+  /** 指定 GAP（課題）が当該プロジェクトに属することを検証 */
+  private async assertGapItemInProject(
+    gapItemId: string,
+    projectId: string,
+  ): Promise<void> {
+    const gapItem = await this.gapItemRepository.findById(gapItemId);
+    if (!gapItem || gapItem.projectId !== projectId) {
+      throw new EntityNotFoundError('GapItem', gapItemId);
     }
   }
 
