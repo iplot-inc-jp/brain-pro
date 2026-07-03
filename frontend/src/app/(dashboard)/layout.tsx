@@ -207,7 +207,6 @@ const FLOW_LEAF_TABS = [
   { tab: 'flow', name: 'フロー図' },
   { tab: 'definition', name: '個別定義' },
   { tab: 'cruoa', name: '情報の地図(CRUOA)' },
-  { tab: 'dfd', name: 'DFD' },
 ] as const
 
 // フロー1本のサイドメニュー項目。名前リンク＋右端シェブロンで子タブの開閉。

@@ -108,10 +108,10 @@ if (typeof window !== 'undefined') {
   });
 }
 
-type FlowTab = 'flow' | 'definition' | 'cruoa' | 'dfd';
+type FlowTab = 'flow' | 'definition' | 'cruoa';
 
 // タブの正準キー順。?tab= の値検証と、サイドメニューのフロー子タブ生成の両方で参照する。
-const FLOW_TAB_KEYS = ['flow', 'definition', 'cruoa', 'dfd'] as const;
+const FLOW_TAB_KEYS = ['flow', 'definition', 'cruoa'] as const;
 
 // Mermaidから生成ダイアログの「サンプルを表示」用テンプレート。
 // ロールを subgraph で表現する（parseMermaidToFlow の解析ルール: subgraph タイトル＝レーン）。
@@ -3068,7 +3068,6 @@ export default function ProjectFlowDetailPage() {
           { key: 'flow', label: 'フロー図', icon: GitBranch },
           { key: 'definition', label: '個別定義', icon: ClipboardList },
           { key: 'cruoa', label: '情報の地図(CRUOA)', icon: Grid3x3 },
-          { key: 'dfd', label: 'DFD', icon: Share2 },
         ] as const).map((t) => {
           const Icon = t.icon;
           const isActive = activeTab === t.key;
@@ -3277,11 +3276,6 @@ export default function ProjectFlowDetailPage() {
           </div>
           <CruoaMatrix flowId={flowId} roles={roles} />
         </div>
-      )}
-
-      {/* DFD（データフロー図）タブ */}
-      {activeTab === 'dfd' && (
-        <DfdPanel flowId={flowId} projectId={projectId} flowName={flowData.name} canEdit={canEdit} />
       )}
 
       {/* Mermaidモーダル（プレビュー機能付き） */}
