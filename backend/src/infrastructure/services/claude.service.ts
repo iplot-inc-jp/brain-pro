@@ -174,6 +174,35 @@ export interface ExtractInput {
   filename: string;
 }
 
+/**
+ * プロジェクト充実度（Readiness）分析の入力。
+ * 各セクションは方法論エリアの設定件数（count）と目安（target）と状態を持つ。
+ */
+export interface ReadinessSectionInput {
+  key: string;
+  label: string;
+  group: string;
+  count: number;
+  target: number;
+  status: 'empty' | 'started' | 'rich';
+}
+
+export interface ReadinessSummaryInput {
+  projectName?: string | null;
+  overallPercent: number;
+  sections: ReadinessSectionInput[];
+}
+
+/** LLM（Haiku）が返す充実度分析。 */
+export interface ReadinessAnalysis {
+  /** 全体状況の一言サマリ */
+  headline: string;
+  /** 今 優先して着手すべきこと */
+  priorities: Array<{ title: string; detail: string }>;
+  /** 抜け漏れ・リスクの注意点 */
+  watchouts: string[];
+}
+
 @Injectable()
 export class ClaudeService {
   constructor(private readonly usageRecorder: LlmUsageRecorder) {}
@@ -982,6 +1011,107 @@ ${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
       throw new Error('タスクの解析に失敗しました（tasks配列が見つかりません）');
     }
     return tasks as ExtractedTaskNode[];
+  }
+
+  /**
+   * プロジェクト充実度（各方法論エリアの設定件数）を読み取り、
+   * 「今 何を優先して設定・作成すべきか」「抜け漏れリスク」を助言する。
+   * コスト最優先のため既定は Haiku（ANALYSIS_MODEL で上書き可）。
+   */
+  async analyzeProjectReadiness(
+    summary: ReadinessSummaryInput,
+    apiKey: string,
+    usage?: LlmUsageContext,
+  ): Promise<ReadinessAnalysis> {
+    const client = this.getClient(apiKey);
+    const model = this.analysisModel();
+
+    const statusJp: Record<string, string> = {
+      empty: '未着手',
+      started: '着手',
+      rich: '充実',
+    };
+
+    const systemPrompt = `あなたはDX・業務改革プロジェクトの進行管理（PMO）の専門家です。
+方法論（背景・目的 → 現状把握 → 現状システム把握 → 課題・打ち手 → 設計 → 推進）に沿って、
+各エリアの「設定・作成された件数」から、いま何を優先して着手すべきか、どこに抜け漏れリスクがあるかを、
+実務者にそのまま渡せる具体的な言葉で助言してください。
+
+判断のヒント：
+- 前工程（背景・現状把握）が薄いまま後工程（設計・推進）だけ進むのは危険。前工程の充実を優先。
+- 件数0（未着手）のエリアのうち、方法論上そのフェーズで本来あるべきものを優先度高に。
+- 充実しているエリアは称賛しつつ、次に繋げる観点を添える。
+
+出力は必ず次のJSONのみ（説明文・コードフェンス以外の文章は不要）：
+{
+  "headline": "全体状況を一言で（40字以内）",
+  "priorities": [
+    { "title": "今すぐ着手すべきこと（簡潔に）", "detail": "なぜ重要か＋具体的な次アクション" }
+  ],
+  "watchouts": ["抜け漏れ・リスクの注意点"]
+}
+
+ルール：
+1. priorities は 2〜4 件、重要な順。
+2. watchouts は 0〜3 件。
+3. 日本語で、具体的・実行可能に。必ず有効なJSONのみを出力する。`;
+
+    const lines: string[] = [];
+    lines.push(`プロジェクト名: ${summary.projectName || '（無題）'}`);
+    lines.push(`全体充実度: ${summary.overallPercent}%`);
+    lines.push('');
+    lines.push('各エリアの設定状況（グループ / エリア: 件数 / 目安 / 状態）:');
+    for (const s of summary.sections) {
+      lines.push(
+        `- [${s.group}] ${s.label}: ${s.count}件 / 目安${s.target} / ${statusJp[s.status] ?? s.status}`,
+      );
+    }
+    lines.push('');
+    lines.push(
+      '上記の設定状況を踏まえ、いま優先して着手すべきことと抜け漏れリスクを、指定JSONで助言してください。',
+    );
+
+    const response = await client.messages.create({
+      model,
+      max_tokens: 2048,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: lines.join('\n') }],
+    });
+    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
+
+    const textContent = response.content.find((c) => c.type === 'text');
+    if (!textContent || textContent.type !== 'text') {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    const parsed = this.extractJsonObject(textContent.text);
+    const priorities = Array.isArray(parsed?.priorities)
+      ? parsed.priorities
+          .filter(
+            (p: unknown): p is { title: unknown; detail?: unknown } =>
+              !!p && typeof p === 'object',
+          )
+          .map((p: { title: unknown; detail?: unknown }) => ({
+            title: typeof p.title === 'string' ? p.title : '',
+            detail: typeof p.detail === 'string' ? p.detail : '',
+          }))
+          .filter((p: { title: string }) => p.title.trim().length > 0)
+      : [];
+    const watchouts = Array.isArray(parsed?.watchouts)
+      ? parsed.watchouts.filter(
+          (w: unknown): w is string => typeof w === 'string' && w.trim().length > 0,
+        )
+      : [];
+    return {
+      headline: typeof parsed?.headline === 'string' ? parsed.headline : '',
+      priorities,
+      watchouts,
+    };
+  }
+
+  /** 充実度分析など軽量タスク向けの既定モデル（コスト最優先で Haiku）。 */
+  private analysisModel(): string {
+    return process.env.ANALYSIS_MODEL || 'claude-haiku-4-5-20251001';
   }
 }
 

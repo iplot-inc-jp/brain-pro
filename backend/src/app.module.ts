@@ -405,6 +405,7 @@ import {
 import { ChangeLogInterceptor } from './presentation/interceptors/change-log.interceptor';
 import { HealthController } from './presentation/controllers/health.controller';
 import { RequirementController } from './presentation/controllers/requirement.controller';
+import { ProjectReadinessController } from './presentation/controllers/project-readiness.controller';
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
@@ -557,6 +558,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     TaskCommentController,
     TaskCommentByIdController,
     RequirementController,
+    ProjectReadinessController,
     UserSettingsController,
     ApiKeyController,
     GithubConnectionController,

@@ -19,6 +19,7 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts';
+import { ReadinessBoard } from './_components/readiness-board';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -139,9 +140,9 @@ export default function ProjectDetailPage() {
           <div>
             <div className="flex items-center gap-1.5">
               <h1 className="text-3xl font-bold text-gray-900">{project?.name || 'プロジェクト'}</h1>
-              <HelpTooltip text="プロジェクトの概要ページです。データカタログ（テーブル）・業務フロー・ロールの3要素を横断的に把握できます。ASIS（現状）の業務フローを整理し、TOBE（あるべき姿）へ向けたGAP（差分）と打ち手を検討する起点になります。" />
+              <HelpTooltip text="プロジェクトダッシュボードです。方法論の各エリア（背景→現状把握→課題→設計→推進）の設定充実度を自動集計し、今 何を設定すべきかを可視化します。下部ではデータカタログ・業務フロー・ロールも横断的に確認できます。" />
             </div>
-            <p className="text-gray-500 mt-1">プロジェクトの概要</p>
+            <p className="text-gray-500 mt-1">プロジェクトダッシュボード</p>
           </div>
         </div>
         <span id="howto-trigger-overview" className="contents">
@@ -161,6 +162,9 @@ export default function ProjectDetailPage() {
           />
         </span>
       </div>
+
+      {/* 設定の充実度（プロジェクト診断）＋ LLM分析 */}
+      <ReadinessBoard projectId={projectId} />
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
