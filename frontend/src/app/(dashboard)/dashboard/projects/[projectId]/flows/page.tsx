@@ -37,6 +37,7 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
   GitFork,
   Settings2,
   FolderTree,
@@ -114,6 +115,9 @@ export default function ProjectFlowsPage() {
   }>({ name: '', description: '', kind: 'ASIS', subProjectId: UNASSIGNED });
   const [editingSubProjectId, setEditingSubProjectId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  // 業務フロー名のインライン編集（対象フローID＋編集中の名前）。
+  const [editingFlowId, setEditingFlowId] = useState<string | null>(null);
+  const [editingFlowName, setEditingFlowName] = useState('');
   // 折りたたみ状態（領域ID -> 折りたたみ中か）
   const [collapsedDomains, setCollapsedDomains] = useState<Record<string, boolean>>({});
 
@@ -273,6 +277,66 @@ export default function ProjectFlowsPage() {
       }
     } catch (err) {
       console.error('Failed to assign sub-project:', err);
+    }
+  };
+
+  // 業務フロー名のインライン編集を開始 / キャンセル。
+  const startRenameFlow = (flow: FlowData) => {
+    setEditingFlowId(flow.id);
+    setEditingFlowName(flow.name);
+  };
+  const cancelRenameFlow = () => {
+    setEditingFlowId(null);
+    setEditingFlowName('');
+  };
+
+  // 業務フロー名を保存（PUT /business-flows/:id {name}）。
+  const handleRenameFlow = async (flowId: string) => {
+    const name = editingFlowName.trim();
+    if (!name) {
+      cancelRenameFlow();
+      return;
+    }
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/${flowId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        await fetchFlows();
+      }
+    } catch (err) {
+      console.error('Failed to rename flow:', err);
+    } finally {
+      cancelRenameFlow();
+    }
+  };
+
+  // 業務フローを削除（DELETE /business-flows/:id）。確認つき・元に戻せない。
+  const handleDeleteFlow = async (flowId: string, name: string) => {
+    if (
+      !window.confirm(
+        `業務フロー「${name}」を削除します。\nノード・矢印・図の内容もまとめて削除され、元に戻せません。よろしいですか？`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const headers = getHeaders();
+      const res = await fetch(`${API_URL}/api/business-flows/${flowId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (res.ok) {
+        await fetchFlows();
+      } else {
+        window.alert('業務フローの削除に失敗しました');
+      }
+    } catch (err) {
+      console.error('Failed to delete flow:', err);
+      window.alert('業務フローの削除に失敗しました');
     }
   };
 
@@ -923,6 +987,71 @@ export default function ProjectFlowsPage() {
                               {/* Per-flow domain assignment（編集権限がある場合のみ） */}
                               {canEdit && (
                               <div className="space-y-1.5 border-t border-gray-100 px-6 py-3">
+                                {/* フロー名の変更 / 削除 */}
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-400 whitespace-nowrap w-20">
+                                    フロー名
+                                  </span>
+                                  {editingFlowId === flow.id ? (
+                                    <div className="flex flex-1 items-center gap-1">
+                                      <Input
+                                        value={editingFlowName}
+                                        onChange={(e) =>
+                                          setEditingFlowName(e.target.value)
+                                        }
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter')
+                                            handleRenameFlow(flow.id);
+                                          if (e.key === 'Escape')
+                                            cancelRenameFlow();
+                                        }}
+                                        autoFocus
+                                        className="h-8 flex-1"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRenameFlow(flow.id)}
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-emerald-600 hover:bg-emerald-50"
+                                        title="保存"
+                                        aria-label="保存"
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={cancelRenameFlow}
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100"
+                                        title="キャンセル"
+                                        aria-label="キャンセル"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-1 items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => startRenameFlow(flow)}
+                                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+                                        title="フロー名を変更"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                        名前変更
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleDeleteFlow(flow.id, flow.name)
+                                        }
+                                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50"
+                                        title="この業務フローを削除"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        削除
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-gray-400 whitespace-nowrap w-20">
                                     領域
