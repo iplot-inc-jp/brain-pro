@@ -19,6 +19,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  Link2,
   Loader2,
   Paperclip,
   Pencil,
@@ -26,7 +27,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import { FileDropZone } from '@/components/ui/file-drop-zone';
-import { informationTypeApi, type InformationTypeAttachment } from '@/lib/dfd';
+import {
+  informationTypeApi,
+  isLinkAttachment,
+  isDriveFolderLink,
+  attachmentHref,
+  type InformationTypeAttachment,
+} from '@/lib/dfd';
 import { uploadProjectFile } from '@/lib/upload';
 
 /** 「新しいフォルダ…」選択肢の内部値（実フォルダ名と衝突しない sentinel）。 */
@@ -249,10 +256,18 @@ function FileAttachmentRow({
   onMove: (folder: string | null) => void;
   onDelete: () => void;
 }) {
+  const link = isLinkAttachment(att);
+  const isFolder = link && isDriveFolderLink(att.url);
+  const Icon = isFolder ? FolderOpen : link ? Link2 : FileText;
+  const iconClass = isFolder
+    ? 'text-amber-500'
+    : link
+      ? 'text-sky-500'
+      : 'text-gray-400';
   return (
     <li className="flex items-center gap-2 rounded border border-gray-100 bg-white px-2 py-1 text-xs">
-      <FileText className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-      <EditableName att={att} link={informationTypeApi.fileUrl(att.id)} onSave={onRename} />
+      <Icon className={`h-3.5 w-3.5 shrink-0 ${iconClass}`} />
+      <EditableName att={att} link={attachmentHref(att)} onSave={onRename} />
       <FolderSelect
         value={att.folder}
         candidates={folderCandidates}
@@ -296,8 +311,12 @@ export function IoAttachmentsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  /** アップロード時の振り分け先フォルダ（null = 未分類）。 */
+  /** アップロード時の振り分け先フォルダ（null = 未分類）。リンク追加でも共用。 */
   const [uploadFolder, setUploadFolder] = useState<string | null>(null);
+  /** Driveリンク/URL 追加フォームの入力。 */
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkName, setLinkName] = useState('');
+  const [addingLink, setAddingLink] = useState(false);
   /** 折りたたんだフォルダグループ（キーはフォルダ名。未分類は ''）。既定は全展開。 */
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
@@ -368,6 +387,27 @@ export function IoAttachmentsPanel({
     },
     [informationTypeId, uploadFolder, load],
   );
+
+  const handleAddLink = useCallback(async () => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    setAddingLink(true);
+    setError(null);
+    try {
+      await informationTypeApi.addLink(informationTypeId, {
+        url,
+        displayName: linkName.trim() || undefined,
+        folder: uploadFolder || undefined,
+      });
+      setLinkUrl('');
+      setLinkName('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setAddingLink(false);
+    }
+  }, [linkUrl, linkName, uploadFolder, informationTypeId, load]);
 
   const handleDelete = useCallback(
     async (att: InformationTypeAttachment) => {
@@ -452,7 +492,7 @@ export function IoAttachmentsPanel({
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500">
           <Paperclip className="h-3 w-3" />
-          具体データ（PDF・画像など）
+          具体データ（PDF・画像・Driveリンク）
         </span>
       </div>
 
@@ -470,16 +510,54 @@ export function IoAttachmentsPanel({
           </span>
         </FileDropZone>
         <label className="flex shrink-0 flex-col justify-center gap-0.5">
-          <span className="text-[10px] text-gray-400">アップロード先フォルダ</span>
+          <span className="text-[10px] text-gray-400">追加先フォルダ</span>
           <FolderSelect
             value={uploadFolder}
             candidates={folderCandidates}
             onSelect={setUploadFolder}
-            disabled={uploading}
+            disabled={uploading || addingLink}
             className="text-[11px]"
-            title="アップロード先フォルダ"
+            title="追加先フォルダ（アップロード・リンク共通）"
           />
         </label>
+      </div>
+
+      {/* Driveリンク/URL の追加（ファイル・フォルダどちらも可） */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-[15rem] flex-1 items-center gap-1.5 rounded border border-gray-200 bg-white px-2 py-1.5">
+          <Link2 className="h-3.5 w-3.5 shrink-0 text-sky-500" />
+          <input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleAddLink();
+            }}
+            placeholder="Google Drive等のURL（フォルダも可）を貼り付け"
+            className="w-full bg-transparent text-xs text-gray-800 outline-none placeholder:text-gray-400"
+          />
+        </div>
+        <input
+          value={linkName}
+          onChange={(e) => setLinkName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void handleAddLink();
+          }}
+          placeholder="表示名（任意）"
+          className="w-32 rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-800 outline-none placeholder:text-gray-400"
+        />
+        <button
+          type="button"
+          onClick={() => void handleAddLink()}
+          disabled={addingLink || !linkUrl.trim()}
+          className="inline-flex shrink-0 items-center gap-1 rounded bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+          {addingLink ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
+          リンク追加
+        </button>
       </div>
 
       {error && <p className="text-[11px] text-red-600">{error}</p>}
@@ -490,7 +568,7 @@ export function IoAttachmentsPanel({
         </div>
       ) : attachments.length === 0 ? (
         <p className="py-2 text-xs text-gray-400">
-          まだ具体データがありません。請求書のPDFや帳票のスクリーンショットなどを添付できます
+          まだ具体データがありません。請求書のPDFや帳票のスクリーンショットを複数添付したり、Google Drive のファイル/フォルダのリンクを紐付けられます
         </p>
       ) : (
         <div className="space-y-1.5">

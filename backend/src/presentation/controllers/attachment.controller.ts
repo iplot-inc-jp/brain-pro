@@ -8,6 +8,7 @@ import {
   Param,
   Res,
   NotFoundException,
+  BadRequestException,
   UseInterceptors,
   UploadedFile,
   UseGuards,
@@ -130,6 +131,24 @@ class UpdateAttachmentDto {
   displayName?: string | null;
 
   /** フォルダ名（null/空文字 = 未分類に戻す） */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  folder?: string | null;
+}
+
+/** Drive等の外部リンクを添付として紐付けるDTO。 */
+class CreateLinkAttachmentDto {
+  @IsString()
+  url: string;
+
+  /** 表示名（任意。未指定ならURLを表示） */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  displayName?: string | null;
+
+  /** フォルダ名（任意） */
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsString()
@@ -446,6 +465,58 @@ export class AttachmentController {
         order,
         // ファイル本体は DB に保存（serverless の read-only FS 対応。ローカルも統一）
         data: file.buffer,
+      },
+      select: ATTACHMENT_SELECT,
+    });
+
+    return row;
+  }
+
+  @Post('information-types/:informationTypeId/attachments/link')
+  @ApiOperation({ summary: '情報種別にDrive等の外部リンク（ファイル/フォルダ）を紐付け' })
+  async addLinkToInformationType(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('informationTypeId') informationTypeId: string,
+    @Body() dto: CreateLinkAttachmentDto,
+  ) {
+    const url = (dto.url ?? '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      throw new BadRequestException(
+        'http(s) から始まるURLを指定してください',
+      );
+    }
+
+    const informationType = await this.prisma.informationType.findUnique({
+      where: { id: informationTypeId },
+    });
+    if (!informationType) {
+      throw new EntityNotFoundError('InformationType', informationTypeId);
+    }
+
+    await assertProjectMember(this.prisma, informationType.projectId, user.id);
+
+    const id = uuid();
+    const displayName = normalizeNullableText(dto.displayName) ?? null;
+    const folder = normalizeNullableText(dto.folder) ?? null;
+
+    const order = await this.prisma.attachment.count({
+      where: { informationTypeId },
+    });
+
+    const row = await this.prisma.attachment.create({
+      data: {
+        id,
+        projectId: informationType.projectId,
+        informationTypeId,
+        // 外部リンクは実体を持たないため FILE 種別で保存し、mimeType をマーカーにする。
+        kind: 'FILE',
+        filename: displayName || url,
+        displayName,
+        folder,
+        mimeType: 'text/uri-list',
+        // url にはリダイレクト用の配信パスではなく、外部リンクそのものを入れる。
+        url,
+        size: 0,
       },
       select: ATTACHMENT_SELECT,
     });

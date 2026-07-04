@@ -284,6 +284,18 @@ export const informationTypeApi = {
     if (!res.ok) throw new Error('具体帳票のアップロードに失敗しました');
     return res.json();
   },
+  /** POST /api/information-types/:id/attachments/link — Drive等の外部リンク（ファイル/フォルダ）を紐付け */
+  async addLink(
+    informationTypeId: string,
+    body: { url: string; displayName?: string | null; folder?: string | null },
+  ): Promise<InformationTypeAttachment> {
+    const res = await fetch(`${API_URL}/api/information-types/${informationTypeId}/attachments/link`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    if (!res.ok) {
+      const b = await res.json().catch(() => null);
+      throw new Error(b?.message || 'リンクの追加に失敗しました');
+    }
+    return res.json();
+  },
   /** PUT /api/attachments/:id — 表示名・フォルダ等のメタ情報を更新（空文字はサーバ側で null に正規化） */
   async updateAttachment(
     attachmentId: string,
@@ -302,3 +314,21 @@ export const informationTypeApi = {
     return `${API_URL}/api/attachments/${attachmentId}/file`;
   },
 };
+
+/** 外部リンク添付（Drive等）かどうか。mimeType マーカー、または url が http(s) 直リンク。 */
+export function isLinkAttachment(a: {
+  mimeType: string;
+  url: string;
+}): boolean {
+  return a.mimeType === 'text/uri-list' || /^https?:\/\//i.test(a.url);
+}
+
+/** Google Drive のフォルダリンクかどうか（アイコン出し分け用）。 */
+export function isDriveFolderLink(url: string): boolean {
+  return /drive\.google\.com\/drive\/folders\//i.test(url);
+}
+
+/** 添付を開くhref。外部リンクは url そのもの、アップロードは配信URL。 */
+export function attachmentHref(a: InformationTypeAttachment): string {
+  return isLinkAttachment(a) ? a.url : informationTypeApi.fileUrl(a.id);
+}
