@@ -54,6 +54,8 @@ import {
   type IssueNodeRef,
 } from '@/lib/tasks';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
+import { listStakeholders, type Stakeholder } from '@/lib/stakeholders';
+import { StakeholderPicker } from '@/components/ui/stakeholder-picker';
 import {
   mapTasksToFrappe,
   dateToYmd,
@@ -138,6 +140,8 @@ export default function GanttPage() {
   const [genBusy, setGenBusy] = useState(false);
   // 領域（SubProject）一覧と、ガントを領域で絞り込むフィルタ（'' = すべて）。
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
+  // 担当者ピッカー用: プロジェクトのステークホルダー一覧。
+  const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [areaFilter, setAreaFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState<ZoomMode>('day');
@@ -240,6 +244,13 @@ export default function GanttPage() {
       .list(projectId)
       .then(setSubProjects)
       .catch(() => setSubProjects([]));
+  }, [projectId]);
+
+  // 担当者ピッカー用にステークホルダー一覧を取得。
+  useEffect(() => {
+    listStakeholders(projectId)
+      .then(setStakeholders)
+      .catch(() => setStakeholders([]));
   }, [projectId]);
 
   // 領域ID → 名前。タスク行の領域表示やフィルタラベルに使う。
@@ -1374,15 +1385,13 @@ export default function GanttPage() {
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-gray-500">
-                  担当者名
+                  担当者
                 </label>
-                <Input
+                <StakeholderPicker
+                  stakeholders={stakeholders}
                   value={sidebarForm.assigneeName}
-                  onChange={(e) =>
-                    setSidebarForm((f) => ({
-                      ...f,
-                      assigneeName: e.target.value,
-                    }))
+                  onChange={(name) =>
+                    setSidebarForm((f) => ({ ...f, assigneeName: name }))
                   }
                 />
               </div>
