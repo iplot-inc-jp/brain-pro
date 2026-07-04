@@ -1197,22 +1197,6 @@ export default function DashboardLayout({
         ],
       },
       {
-        label: '課題・打ち手',
-        items: [
-          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
-          {
-            name: 'GAP（課題）',
-            href: `${base}/gap-items`,
-            icon: GitCompare,
-            children: [
-              { name: 'GAP一覧', tab: 'list' },
-              { name: '分析', tab: 'analysis' },
-              { name: '課題一覧 / 対応表', tab: 'ledger' },
-            ],
-          },
-        ],
-      },
-      {
         label: '現状把握',
         items: [
           { name: 'ASIS管理', href: `${base}/asis`, icon: ClipboardList },
@@ -1230,6 +1214,22 @@ export default function DashboardLayout({
           { name: 'オブジェクト関係性マップ', href: `${base}/object-map`, icon: Boxes },
           { name: 'ER図', href: `${base}/er-diagram`, icon: Table2 },
           { name: 'データカタログ', href: `${base}/catalog`, icon: Database },
+        ],
+      },
+      {
+        label: '課題・打ち手',
+        items: [
+          { name: '課題ツリー', href: `${base}/issue-trees`, icon: Network },
+          {
+            name: 'GAP（課題）',
+            href: `${base}/gap-items`,
+            icon: GitCompare,
+            children: [
+              { name: 'GAP一覧', tab: 'list' },
+              { name: '分析', tab: 'analysis' },
+              { name: '課題一覧 / 対応表', tab: 'ledger' },
+            ],
+          },
         ],
       },
       {
