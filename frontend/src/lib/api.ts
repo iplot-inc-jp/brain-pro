@@ -67,6 +67,11 @@ export const authApi = {
       auth: false,
     }),
   me: () => api<any>('/auth/me'),
+  updateMe: (patch: { name?: string | null; avatarUrl?: string | null }) =>
+    api<{ id: string; email: string; name: string | null; avatarUrl: string | null }>(
+      '/auth/me',
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    ),
 }
 
 // Organizations

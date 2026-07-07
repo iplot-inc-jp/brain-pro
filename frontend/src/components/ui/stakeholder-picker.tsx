@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Search, User, X } from 'lucide-react';
 import type { Stakeholder } from '@/lib/stakeholders';
 import { normalizeSide, sideMeta } from '@/lib/stakeholders';
+import { UserAvatar } from '@/components/ui/user-avatar';
 
 /**
  * 担当者ピッカー（ステークホルダーから検索して選ぶモーダル）。
@@ -187,6 +188,7 @@ export function StakeholderPicker({
                     <span className="flex w-4 shrink-0 justify-center">
                       {isSel && <Check className="h-3.5 w-3.5 text-blue-600" />}
                     </span>
+                    <UserAvatar name={s.name} size={22} />
                     <span className="min-w-0 shrink-0 truncate font-medium text-gray-800">
                       {s.name}
                     </span>

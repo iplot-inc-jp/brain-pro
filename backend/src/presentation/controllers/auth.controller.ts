@@ -1,9 +1,11 @@
-import { Controller, Post, Body, Get, HttpCode, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Post, Patch, Body, Get, HttpCode, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { IsOptional, IsString, ValidateIf } from 'class-validator';
 import {
   RegisterUserUseCase,
   LoginUserUseCase,
   GetCurrentUserUseCase,
+  UpdateCurrentUserUseCase,
   LoginWithGoogleUseCase,
 } from '../../application';
 import {
@@ -16,6 +18,20 @@ import {
 import { Public } from '../decorators/public.decorator';
 import { CurrentUser, CurrentUserPayload } from '../decorators/current-user.decorator';
 
+/** プロフィール（表示名・アイコン）更新DTO。 */
+class UpdateMeRequestDto {
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  name?: string | null;
+
+  /** アイコンURL（外部URL or data URL）。null/空で頭文字デフォルトに戻す。 */
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsString()
+  avatarUrl?: string | null;
+}
+
 @ApiTags('認証')
 @Controller('auth')
 export class AuthController {
@@ -23,6 +39,7 @@ export class AuthController {
     private readonly registerUserUseCase: RegisterUserUseCase,
     private readonly loginUserUseCase: LoginUserUseCase,
     private readonly getCurrentUserUseCase: GetCurrentUserUseCase,
+    private readonly updateCurrentUserUseCase: UpdateCurrentUserUseCase,
     private readonly loginWithGoogleUseCase: LoginWithGoogleUseCase,
   ) {}
 
@@ -65,6 +82,26 @@ export class AuthController {
       userId: user.id,
     });
     return result;
+  }
+
+  @Patch('me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'プロフィール（表示名・アイコン）を更新' })
+  @ApiResponse({ status: 200, description: '成功' })
+  @ApiResponse({ status: 401, description: '認証エラー' })
+  async updateCurrentUser(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: UpdateMeRequestDto,
+  ) {
+    return this.updateCurrentUserUseCase.execute({
+      userId: user.id,
+      name:
+        dto.name === undefined ? undefined : (dto.name?.trim() || null),
+      avatarUrl:
+        dto.avatarUrl === undefined
+          ? undefined
+          : (dto.avatarUrl?.trim() || null),
+    });
   }
 
   @Post('google')

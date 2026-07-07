@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PageHeader } from '@/components/ui/page-header';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
@@ -1025,7 +1026,12 @@ export default function TasksPage() {
 
                         {/* 担当 */}
                         <td className="px-3 py-2 align-top text-gray-700">
-                          {assignee || (
+                          {assignee ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <UserAvatar name={assignee} size={18} />
+                              <span className="truncate">{assignee}</span>
+                            </span>
+                          ) : (
                             <span className="text-gray-300">未割当</span>
                           )}
                         </td>
@@ -1854,8 +1860,17 @@ function KanbanCard({
           {/* メタ：担当・期限 */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
             <span className="inline-flex items-center gap-1">
-              <User className="h-3 w-3 text-gray-400" />
-              {assignee || <span className="text-gray-300">未割当</span>}
+              {assignee ? (
+                <>
+                  <UserAvatar name={assignee} size={16} />
+                  <span>{assignee}</span>
+                </>
+              ) : (
+                <>
+                  <User className="h-3 w-3 text-gray-400" />
+                  <span className="text-gray-300">未割当</span>
+                </>
+              )}
             </span>
             <span className="inline-flex items-center gap-1 tabular-nums">
               <CalendarDays className="h-3 w-3 text-gray-400" />

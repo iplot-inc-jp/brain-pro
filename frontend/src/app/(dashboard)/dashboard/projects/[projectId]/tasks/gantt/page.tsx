@@ -56,6 +56,8 @@ import {
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
 import { listStakeholders, type Stakeholder } from '@/lib/stakeholders';
 import { StakeholderPicker } from '@/components/ui/stakeholder-picker';
+import { UserAvatar } from '@/components/ui/user-avatar';
+import { authApi } from '@/lib/api';
 import {
   mapTasksToFrappe,
   dateToYmd,
@@ -142,6 +144,8 @@ export default function GanttPage() {
   const [subProjects, setSubProjects] = useState<SubProjectMaster[]>([]);
   // 担当者ピッカー用: プロジェクトのステークホルダー一覧。
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
+  // 現在ログイン中ユーザー（自分が担当のときプロフィール画像を出すため）。
+  const [me, setMe] = useState<{ name: string | null; avatarUrl: string | null } | null>(null);
   const [areaFilter, setAreaFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState<ZoomMode>('day');
@@ -252,6 +256,21 @@ export default function GanttPage() {
       .then(setStakeholders)
       .catch(() => setStakeholders([]));
   }, [projectId]);
+
+  // 現在ユーザーを取得（担当者名が自分なら自分のアイコン画像を表示する）。
+  useEffect(() => {
+    authApi
+      .me()
+      .then((u) => setMe({ name: u?.name ?? null, avatarUrl: u?.avatarUrl ?? null }))
+      .catch(() => setMe(null));
+  }, []);
+
+  // 担当者名に対応するアイコン画像URL（自分の担当分のみ解決。他は頭文字にフォールバック）。
+  const avatarFor = useCallback(
+    (name: string | null | undefined): string | null =>
+      me && me.name && name && name === me.name ? me.avatarUrl : null,
+    [me],
+  );
 
   // 領域ID → 名前。タスク行の領域表示やフィルタラベルに使う。
   const subProjectName = useCallback(
@@ -1042,6 +1061,15 @@ export default function GanttPage() {
                             >
                               {subProjectName(node.subProjectId)}
                             </span>
+                          )}
+                          {node.assigneeName && (
+                            <UserAvatar
+                              name={node.assigneeName}
+                              avatarUrl={avatarFor(node.assigneeName)}
+                              size={18}
+                              className="ml-1"
+                              title={`担当: ${node.assigneeName}`}
+                            />
                           )}
                           {hasChildren && (
                             <span

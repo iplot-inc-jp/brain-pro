@@ -6,7 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { User, Key, Loader2, Bot, Check, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { User, Key, Loader2, Bot, Check, AlertCircle, Eye, EyeOff, Upload, Trash2 } from 'lucide-react'
+import { UserAvatar } from '@/components/ui/user-avatar'
+import { authApi } from '@/lib/api'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -15,6 +17,8 @@ export default function AccountSettingsPage() {
   const [user, setUser] = useState<{ name: string; email: string } | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -36,11 +40,19 @@ export default function AccountSettingsPage() {
   }, []);
 
   useEffect(() => {
-    // 仮のユーザー情報セット
-    setUser({ name: '田中 太郎', email: 'tanaka@example.com' });
-    setName('田中 太郎');
-    setEmail('tanaka@example.com');
-    
+    // 現在のユーザー情報を取得
+    authApi
+      .me()
+      .then((me) => {
+        setUser({ name: me?.name ?? '', email: me?.email ?? '' });
+        setName(me?.name ?? '');
+        setEmail(me?.email ?? '');
+        setAvatarUrl(me?.avatarUrl ?? null);
+      })
+      .catch(() => {
+        /* 未ログイン等は空のまま */
+      });
+
     // ユーザー設定を取得
     fetchUserSettings();
   }, []);
@@ -134,14 +146,77 @@ export default function AccountSettingsPage() {
     }
   };
 
+  // アイコン画像を選択 → クライアントで128pxに縮小しdata URL化して即保存。
+  const handleAvatarFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setMessage({ type: 'error', text: '画像ファイルを選択してください' });
+      return;
+    }
+    setAvatarBusy(true);
+    setMessage(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('read error'));
+        reader.readAsDataURL(file);
+      });
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new window.Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('image error'));
+        i.src = dataUrl;
+      });
+      const MAX = 128;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      let resized = dataUrl;
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, w, h);
+        resized = canvas.toDataURL('image/jpeg', 0.85);
+      }
+      const updated = await authApi.updateMe({ avatarUrl: resized });
+      setAvatarUrl(updated.avatarUrl ?? null);
+      setMessage({ type: 'success', text: 'アイコンを更新しました' });
+    } catch {
+      setMessage({ type: 'error', text: 'アイコンの設定に失敗しました' });
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  // アイコンを頭文字デフォルトに戻す。
+  const handleClearAvatar = async () => {
+    setAvatarBusy(true);
+    setMessage(null);
+    try {
+      await authApi.updateMe({ avatarUrl: null });
+      setAvatarUrl(null);
+      setMessage({ type: 'success', text: 'アイコンを頭文字に戻しました' });
+    } catch {
+      setMessage({ type: 'error', text: '操作に失敗しました' });
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
   const handleProfileSave = async () => {
     setLoading(true);
     setMessage(null);
     try {
-      // TODO: プロフィール更新API
-      await new Promise(resolve => setTimeout(resolve, 500));
+      const updated = await authApi.updateMe({
+        name: name.trim() || null,
+        avatarUrl,
+      });
+      setUser({ name: updated.name ?? '', email });
+      setName(updated.name ?? '');
       setMessage({ type: 'success', text: 'プロフィールを更新しました' });
-    } catch (err) {
+    } catch {
       setMessage({ type: 'error', text: '更新に失敗しました' });
     } finally {
       setLoading(false);
@@ -221,6 +296,48 @@ export default function AccountSettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* プロフィールアイコン（未設定=頭文字デフォルト） */}
+              <div className="flex items-center gap-4">
+                <UserAvatar name={name} avatarUrl={avatarUrl} size={64} />
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm text-gray-500">
+                    プロフィールアイコン（未設定のときは名前の頭文字を表示）
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                      {avatarBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      画像をアップロード
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={avatarBusy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void handleAvatarFile(f);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
+                    {avatarUrl && (
+                      <button
+                        type="button"
+                        onClick={() => void handleClearAvatar()}
+                        disabled={avatarBusy}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        頭文字に戻す
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-gray-700">名前</Label>
