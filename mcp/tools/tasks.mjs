@@ -26,7 +26,7 @@ export function registerTools(server, call) {
 
   server.tool(
     'task_create',
-    'タスクを作成する。parentId で WBS の親子化、issueNodeId / riskId でイシュー・リスクへの紐付けができる。',
+    'タスクを作成する。parentId で WBS の親子化、issueNodeId / riskId / gapItemId でイシュー・リスク・GAPへの紐付けができる。',
     {
       projectId: z.string().describe('プロジェクトID'),
       title: z.string().describe('タスク名'),
@@ -38,6 +38,7 @@ export function registerTools(server, call) {
       assigneeRoleId: z.string().optional().describe('担当ロールID'),
       issueNodeId: z.string().optional().describe('紐付けるイシューノードID（ISSUE/CAUSE/COUNTERMEASURE）'),
       riskId: z.string().optional().describe('紐付けるリスクID（リスク対応タスク）'),
+      gapItemId: z.string().optional().describe('紐付けるGAP（課題）ID'),
       startDate: z.string().optional().describe('開始日（ISO 8601 文字列）'),
       dueDate: z.string().optional().describe('期限日（ISO 8601 文字列）'),
       progress: z.number().optional().describe('進捗（0-100）'),
@@ -53,7 +54,7 @@ export function registerTools(server, call) {
   server.tool(
     'task_update',
     'タスクを更新する（親付け替え・ステータス・進捗・期日・担当・並び順など）。' +
-      'issueNodeId / riskId は null で紐付け解除、省略で変更なし。',
+      'issueNodeId / riskId / gapItemId は null で紐付け解除、省略で変更なし。',
     {
       id: z.string().describe('タスクID'),
       title: z.string().optional().describe('タスク名'),
@@ -65,6 +66,7 @@ export function registerTools(server, call) {
       assigneeRoleId: z.string().nullable().optional().describe('担当ロールID（null で解除）'),
       issueNodeId: z.string().nullable().optional().describe('イシューノードID（null で解除 / 省略で変更なし）'),
       riskId: z.string().nullable().optional().describe('リスクID（null で解除 / 省略で変更なし）'),
+      gapItemId: z.string().nullable().optional().describe('GAP（課題）ID（null で解除 / 省略で変更なし）'),
       startDate: z.string().nullable().optional().describe('開始日（ISO 8601）'),
       dueDate: z.string().nullable().optional().describe('期限日（ISO 8601）'),
       progress: z.number().optional().describe('進捗（0-100）'),

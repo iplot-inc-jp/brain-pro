@@ -79,4 +79,26 @@ export function registerTools(server, call) {
     },
     wrap(({ id, ...body }) => call('PUT', `/phases/${id}`, { body })),
   );
+
+  server.tool(
+    'project_readiness_get',
+    'プロジェクトの「設定の充実度」を定量集計で取得する。方法論エリア（背景・現状把握・課題・設計・推進など約20項目）' +
+      'ごとの登録件数と 未着手/着手/充実 の状態、全体%を返す。プロジェクトの健康診断・次にやることの提案に使える。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+    },
+    wrap(({ projectId }) => call('GET', `/projects/${projectId}/readiness`)),
+  );
+
+  server.tool(
+    'project_readiness_analyze',
+    '充実度をLLM（Haiku）に分析させ、いま優先して着手すべきこと・抜け漏れリスクの講評を得る' +
+      '（会社/個人のAnthropic APIキーが必要。課金はLLM使用量として記録される）。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+    },
+    wrap(({ projectId }) =>
+      call('POST', `/projects/${projectId}/readiness/analyze`, { body: {} }),
+    ),
+  );
 }

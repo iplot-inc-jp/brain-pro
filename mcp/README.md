@@ -3,7 +3,7 @@
 brain-pro バックエンド（NestJS, `/api` 全302ルート）を **APIキー認証**で叩く MCP サーバ。
 Claude（Code / Desktop）から IPLoT 方法論パイプライン（Ph.0〜7・ASIS/TOBE業務フロー・イシューツリー・GAP・DFD・データカタログ・タスク・リスク・KPI・導入状況）を直接操作できる。
 
-- curated ツール **102個**（モジュール別、下表）
+- curated ツール **134個**（モジュール別、下表）
 - curated にない操作は `list_capabilities` で探して `api_request` で叩く（全302ルートを網羅）
 
 ## セットアップ
@@ -109,6 +109,21 @@ AIDATAFLOW_API_KEY=sk_... node index.mjs
 | `phase_list` | GET /projects/:projectId/phases |
 | `phase_initialize` | POST /projects/:projectId/phases/initialize（Ph.0〜7 冪等初期化） |
 | `phase_update` | PUT /phases/:id（summary / status / order / detail） |
+| `project_readiness_get` | GET /projects/:projectId/readiness（設定の充実度＝方法論エリア別の件数/状態/全体%） |
+| `project_readiness_analyze` | POST /projects/:projectId/readiness/analyze（LLM(Haiku)が優先着手・抜け漏れを講評） |
+
+### 共有リンク（tools/share_links.mjs）
+
+図の閲覧URL（`https://brain-pro.iplot.jp/share/{flow|dfd|object-map|issue-tree}/<token>`）を発行・管理する。
+kind: FLOW（targetId=フローID）/ DFD（targetId=DFD図ID）/ OBJECT_MAP（targetId=プロジェクトID）/ ISSUE_TREE（targetId=ツリーID）。
+scope: PUBLIC（リンクを知っていれば誰でも・ログイン不要）/ ORG（同組織のログインユーザーのみ）。
+URLをチャットに貼るとOGPで図のプレビューが展開される（PUBLICのみ）。
+
+| ツール | エンドポイント |
+|---|---|
+| `share_link_get` | GET /projects/:projectId/share-links?kind=&targetId= |
+| `share_link_issue` | POST /projects/:projectId/share-links（既存なら scope 更新・token 維持） |
+| `share_link_revoke` | DELETE /projects/:projectId/share-links?kind=&targetId= |
 
 ### 業務フロー（tools/flows.mjs）
 
