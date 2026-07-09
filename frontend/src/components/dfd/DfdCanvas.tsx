@@ -41,6 +41,7 @@ import {
   getSmoothStepPath,
   getBezierPath,
   getStraightPath,
+  getNodesBounds,
   useReactFlow,
   useNodesState,
   ConnectionMode,
@@ -841,7 +842,7 @@ function fmtDate(iso: string | null): string {
 
 function DfdCanvasInner(props: DfdCanvasProps) {
   const { diagram } = props;
-  const { fitView, screenToFlowPosition } = useReactFlow();
+  const { fitView, screenToFlowPosition, getNodes } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -1253,14 +1254,38 @@ function DfdCanvasInner(props: DfdCanvasProps) {
     [props],
   );
 
-  // PNG 出力（帳票全体を画像化）
+  // PNG 出力（図全体を高解像度で画像化）。
+  // 固定 pixelRatio=2 のビュー撮影だと、ズームアウトした大きい図ほど粗くなるため、
+  // 全ノードのバウンズ基準で viewport の変換を上書きして図全体を書き出し、
+  // pixelRatio は図のサイズに応じて自動調整する（長辺 ≈ 4096px、総画素は上限でガード）。
   const handleExportPng = useCallback(() => {
     const root = wrapperRef.current;
     if (!root) return;
-    toPng(root, {
+    const target = root.querySelector('.react-flow__viewport') as HTMLElement | null;
+    if (!target) return;
+
+    const bounds = getNodesBounds(getNodes());
+    const PAD = 40;
+    const contentW = Math.max(Math.round(bounds.width + PAD * 2), 1);
+    const contentH = Math.max(Math.round(bounds.height + PAD * 2), 1);
+    const TARGET_LONG_EDGE = 4096;
+    const MAX_PIXELS = 32_000_000;
+    let scale = Math.min(4, Math.max(1.5, TARGET_LONG_EDGE / Math.max(contentW, contentH)));
+    if (contentW * contentH * scale * scale > MAX_PIXELS) {
+      scale = Math.sqrt(MAX_PIXELS / (contentW * contentH));
+    }
+
+    toPng(target, {
       backgroundColor: '#ffffff',
       cacheBust: true,
-      pixelRatio: 2,
+      pixelRatio: scale,
+      width: contentW,
+      height: contentH,
+      style: {
+        width: `${contentW}px`,
+        height: `${contentH}px`,
+        transform: `translate(${-bounds.x + PAD}px, ${-bounds.y + PAD}px) scale(1)`,
+      },
       filter: (el) => {
         if (!(el instanceof HTMLElement)) return true;
         return !(
@@ -1278,7 +1303,7 @@ function DfdCanvasInner(props: DfdCanvasProps) {
       .catch(() => {
         /* 画像化失敗は致命ではない */
       });
-  }, [diagram.title]);
+  }, [diagram.title, getNodes]);
 
   const handleAddExternal = useCallback(() => {
     void props.onAddNode?.({ kind: 'EXTERNAL_ENTITY', label: '外部実体', positionX: 40, positionY: 40 });

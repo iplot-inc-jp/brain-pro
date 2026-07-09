@@ -4,6 +4,10 @@ import { Providers } from '@/components/providers'
 import { Toaster } from '@/components/ui/toaster'
 
 export const metadata: Metadata = {
+  // og:image 等の相対URLを絶対URLへ解決する基点（共有リンクのunfurl用）
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL || 'https://brain-pro.iplot.jp',
+  ),
   title: 'Brain Pro',
   description: 'プロジェクトの“脳”を、人とAIで共有するプロジェクト管理システム',
 }

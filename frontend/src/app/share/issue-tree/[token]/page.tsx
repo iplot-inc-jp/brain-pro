@@ -26,6 +26,14 @@ import {
   type IssueNodeKind,
   type IssueTreePattern,
 } from '@/lib/issue-tree-patterns';
+import {
+  layoutTree,
+  TREE_NODE_W as NODE_W,
+  TREE_NODE_H as NODE_H,
+  TREE_COL_W as COL_W,
+  TREE_ROW_H as ROW_H,
+  TREE_ROOT_ID as ROOT_ID,
+} from '@/lib/issue-tree-view-layout';
 import { SharedViewShell } from '@/components/share/SharedViewShell';
 import { fetchSharedView, SharedViewError } from '@/lib/share-view';
 
@@ -51,13 +59,6 @@ interface SharedIssueTreeResponse {
   projectName: string | null;
 }
 
-// レイアウト定数（カードサイズ・間隔）
-const NODE_W = 240;
-const NODE_H = 76;
-const COL_W = 300;
-const ROW_H = 96;
-const ROOT_ID = '__root__';
-
 /** 検証（○×△）バッジ。NA は出さない。 */
 const VERIFICATION_BADGES: Record<string, { label: string; cls: string }> = {
   CONFIRMED: { label: '○ 確定', cls: 'bg-emerald-100 text-emerald-700' },
@@ -72,65 +73,6 @@ const RECOMMENDATION_BADGES: Record<string, { label: string; cls: string }> = {
   HOLD: { label: '保留', cls: 'bg-gray-100 text-gray-600' },
   REJECT: { label: '不採用', cls: 'bg-gray-200 text-gray-500' },
 };
-
-interface Placed {
-  node: SharedNode | null; // null = 仮想ルート
-  x: number;
-  y: number;
-}
-
-/**
- * 左→右のツリーレイアウト（純関数）。
- * 葉を上から順に等間隔で置き、内部ノードは子のy中央に置く定番の方式。
- */
-function layoutTree(nodes: SharedNode[]): {
-  placed: Placed[];
-  edges: Array<{ from: Placed; to: Placed }>;
-  width: number;
-  height: number;
-} {
-  const childrenOf = new Map<string, SharedNode[]>();
-  for (const n of nodes) {
-    const key = n.parentId ?? ROOT_ID;
-    const arr = childrenOf.get(key) ?? [];
-    arr.push(n);
-    childrenOf.set(key, arr);
-  }
-  for (const arr of Array.from(childrenOf.values())) {
-    arr.sort((a, b) => a.order - b.order);
-  }
-
-  const placedById = new Map<string, Placed>();
-  let nextLeafSlot = 0;
-
-  // 戻り値は自ノードの y。子を先に置いて中央へ。
-  const walk = (id: string, depth: number, node: SharedNode | null): number => {
-    const children = childrenOf.get(id) ?? [];
-    let y: number;
-    if (children.length === 0) {
-      y = nextLeafSlot * ROW_H;
-      nextLeafSlot += 1;
-    } else {
-      const ys = children.map((c) => walk(c.id, depth + 1, c));
-      y = (Math.min(...ys) + Math.max(...ys)) / 2;
-    }
-    placedById.set(id, { node, x: depth * COL_W, y });
-    return y;
-  };
-  walk(ROOT_ID, 0, null);
-
-  const placed = Array.from(placedById.values());
-  const edges: Array<{ from: Placed; to: Placed }> = [];
-  for (const n of nodes) {
-    const from = placedById.get(n.parentId ?? ROOT_ID);
-    const to = placedById.get(n.id);
-    if (from && to) edges.push({ from, to });
-  }
-
-  const maxX = Math.max(...placed.map((p) => p.x), 0);
-  const maxY = Math.max(...placed.map((p) => p.y), 0);
-  return { placed, edges, width: maxX + NODE_W, height: maxY + NODE_H };
-}
 
 export default function SharedIssueTreePage() {
   const params = useParams();

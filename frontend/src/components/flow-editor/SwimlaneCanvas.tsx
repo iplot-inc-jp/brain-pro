@@ -44,6 +44,7 @@ import {
   getSmoothStepPath,
   getBezierPath,
   getStraightPath,
+  getNodesBounds,
   useReactFlow,
   useNodesState,
   ConnectionMode,
@@ -2422,7 +2423,7 @@ function readStoredInteractMode(flowId: string): 'select' | 'move' {
 
 function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
   const { flowData, roles } = props;
-  const { fitView, getViewport, screenToFlowPosition } = useReactFlow();
+  const { fitView, getViewport, screenToFlowPosition, getNodes } = useReactFlow();
   const [menu, setMenu] = useState<ContextMenuState>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
@@ -3237,17 +3238,40 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  // --- PNG出力（react-flow viewport を画像化） ---
+  // --- PNG出力（図全体を高解像度で画像化） ---
+  // 以前は表示中 viewport を pixelRatio=2 固定で撮っていたため、ズームアウトした
+  // 大きい図ほど1ノードあたりの画素が減って粗くなった。全ノードのバウンズを基準に
+  // 変換を上書きして「図全体」を書き出し、pixelRatio は図のサイズに応じて自動調整する
+  // （小さい図は最大4倍、巨大図でも長辺 ≈ 4096px を確保。総画素は上限でガード）。
   const handleExportPng = useCallback(() => {
     setMenu(null);
     const root = wrapperRef.current;
     if (!root) return;
-    const target =
-      (root.querySelector('.react-flow__viewport') as HTMLElement | null) ?? root;
+    const target = root.querySelector('.react-flow__viewport') as HTMLElement | null;
+    if (!target) return;
+
+    const bounds = getNodesBounds(getNodes());
+    const PAD = 40;
+    const contentW = Math.max(Math.round(bounds.width + PAD * 2), 1);
+    const contentH = Math.max(Math.round(bounds.height + PAD * 2), 1);
+    const TARGET_LONG_EDGE = 4096;
+    const MAX_PIXELS = 32_000_000; // Canvas上限・メモリ保護
+    let scale = Math.min(4, Math.max(1.5, TARGET_LONG_EDGE / Math.max(contentW, contentH)));
+    if (contentW * contentH * scale * scale > MAX_PIXELS) {
+      scale = Math.sqrt(MAX_PIXELS / (contentW * contentH));
+    }
+
     toPng(target, {
       backgroundColor: '#ffffff',
       cacheBust: true,
-      pixelRatio: 2,
+      pixelRatio: scale,
+      width: contentW,
+      height: contentH,
+      style: {
+        width: `${contentW}px`,
+        height: `${contentH}px`,
+        transform: `translate(${-bounds.x + PAD}px, ${-bounds.y + PAD}px) scale(1)`,
+      },
       filter: (el) => {
         // ミニマップ / コントロール / パネル / ヒントは画像から除外
         if (!(el instanceof HTMLElement)) return true;
@@ -3267,7 +3291,7 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
       .catch(() => {
         /* 画像化に失敗しても致命ではないため無視 */
       });
-  }, [flowData.name]);
+  }, [flowData.name, getNodes]);
 
   // --- 注釈（付箋・コメント）を新規追加 ---
   // 初期位置は現在表示中のビュー中央付近（screenToFlowPosition でラッパー中心を flow 座標へ）。
