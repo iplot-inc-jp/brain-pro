@@ -309,8 +309,9 @@ export interface SwimlaneCanvasProps {
   onCreateChildFlow?: (nodeId: string) => void;
   onOpenChildFlow?: (nodeId: string, childFlowId: string) => void;
   /**
-   * ノードのダブルクリックで詳細（子）フローを開く。
+   * 詳細（子）フローへのドリルダウン（右クリックメニュー「詳細フローを開く」から呼ぶ）。
    * 子フローが無ければ作成してから遷移する処理は、呼び出し側（ページ）に委譲する。
+   * ※Wクリックは誤操作が多かったためドリルダウンには使わない（プロパティ編集を開く）。
    */
   onNodeDoubleClick?: (nodeId: string) => void;
   /**
@@ -701,7 +702,7 @@ function ContentNode({ id, data, selected }: { id: string; data: ContentNodeData
           {data.hasChildFlow && (
             <span
               className="text-[10px] text-indigo-600 flex items-center gap-0.5"
-              title="Wクリックで詳細フローを開く"
+              title="右クリック → 詳細フローを開く"
             >
               <Layers className="w-2.5 h-2.5" />
               詳細フロー
@@ -3902,14 +3903,11 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
         onNodeDoubleClick={(_, node) => {
           if (props.embedded) return;
           if (node.type !== 'content') return;
-          // ドリルダウン: 子フローがあれば開き、無ければ作成してから遷移（呼び出し側に委譲）
-          if (props.onNodeDoubleClick) {
-            props.onNodeDoubleClick(node.id);
-            return;
-          }
-          // 後方互換: onNodeDoubleClick 未指定なら従来どおり既存子フローのみ開く
-          const src = flowData.nodes.find((n) => n.id === node.id);
-          if (src?.childFlowId) props.onOpenChildFlow?.(node.id, src.childFlowId);
+          // うっかりWクリックで子フローが作成されたり画面が遷移したりする事故が
+          // 多発したため、Wクリックはプロパティ編集を開くだけにする。
+          // ドリルダウン（詳細フローを開く/作成）は右クリックメニューから行う。
+          setPanel(null);
+          setEditingNodeId(node.id);
         }}
         onNodeContextMenu={(e, node) => {
           if (props.embedded) return; // 閲覧用埋め込みでは右クリックメニューを出さない
@@ -4227,7 +4225,24 @@ function SwimlaneCanvasInner(props: SwimlaneCanvasProps) {
               >
                 <Layers className="h-4 w-4 text-gray-500" />プロパティを編集
               </button>
-              {!menu.hasChildFlow && (
+              {menu.hasChildFlow ? (
+                <button
+                  className="w-full px-3 py-2 text-sm text-left hover:bg-gray-100 flex items-center gap-2"
+                  onClick={() => {
+                    // ページの drilldown（開く/無ければ作成）があればそれを、
+                    // 無ければ既存子フローを直接開く（後方互換）。
+                    if (props.onNodeDoubleClick) {
+                      props.onNodeDoubleClick(menu.nodeId);
+                    } else {
+                      const src = flowData.nodes.find((n) => n.id === menu.nodeId);
+                      if (src?.childFlowId) props.onOpenChildFlow?.(menu.nodeId, src.childFlowId);
+                    }
+                    closeMenu();
+                  }}
+                >
+                  <Layers className="h-4 w-4 text-indigo-500" />詳細フローを開く
+                </button>
+              ) : (
                 <button
                   className="w-full px-3 py-2 text-sm text-left hover:bg-gray-100 flex items-center gap-2"
                   onClick={() => { props.onCreateChildFlow?.(menu.nodeId); closeMenu(); }}
