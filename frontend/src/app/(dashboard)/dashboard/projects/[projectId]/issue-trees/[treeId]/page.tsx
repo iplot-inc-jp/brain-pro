@@ -84,6 +84,7 @@ import {
   type Recommendation,
 } from '@/lib/issue-markdown';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { ShareLinkDialog } from '@/components/share/ShareLinkDialog';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import {
@@ -2050,6 +2051,14 @@ function IssueTreeMindMap() {
             />
           </div>
           <ManualButton feature="issue-trees" />
+          <ShareLinkDialog
+            projectId={projectId}
+            kind="ISSUE_TREE"
+            targetId={treeId}
+            viewerPath="/share/issue-tree"
+            canEdit={canEdit}
+            buttonSize="sm"
+          />
           <ExportImportButton
             label="イシューツリー"
             fileBaseName={`issue-tree-${name || treeId}`}

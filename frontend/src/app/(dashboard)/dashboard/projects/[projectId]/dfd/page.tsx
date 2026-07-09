@@ -6,6 +6,7 @@ import { Boxes, Loader2, Network, Table2, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
+import { ShareLinkDialog } from '@/components/share/ShareLinkDialog';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { useToast } from '@/components/ui/use-toast';
@@ -380,6 +381,16 @@ export default function ProjectDfdPage() {
               ]}
             />
             <ManualButton feature="dfd" />
+            {diagram && (
+              <ShareLinkDialog
+                projectId={projectId}
+                kind="DFD"
+                targetId={diagram.id}
+                viewerPath="/share/dfd"
+                canEdit={canEdit}
+                buttonSize="sm"
+              />
+            )}
             <ExportImportButton
               label="DFD（第1レベル）"
               fileBaseName="dfd-level1"

@@ -463,6 +463,9 @@ import { ExcelTaskImportService } from './infrastructure/services/excel-task-imp
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
+import { ShareLinkService } from './infrastructure/services/share-link.service';
+import { ShareLinkController } from './presentation/controllers/share-link.controller';
+import { SharedViewController } from './presentation/controllers/shared-view.controller';
 import { GithubService } from './infrastructure/services/github.service';
 import { CodeExtractionService } from './infrastructure/services/code-extraction.service';
 import { LlmUsageRecorder } from './infrastructure/services/llm-usage-recorder.service';
@@ -560,6 +563,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     TaskCommentByIdController,
     RequirementController,
     ProjectReadinessController,
+    ShareLinkController,
+    SharedViewController,
     UserSettingsController,
     ApiKeyController,
     GithubConnectionController,
@@ -1091,6 +1096,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     ApiKeyService,
     CryptoService,
     CompanyKeyService,
+    ShareLinkService,
     GithubService,
     CodeExtractionService,
     LlmUsageRecorder,

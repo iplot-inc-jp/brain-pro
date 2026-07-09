@@ -312,9 +312,35 @@ model Project {
   diagramElements         DiagramElement[]
   nodeAttachments         NodeAttachment[]
   knowledgeNodeLinks      KnowledgeNodeLink[]
+  shareLinks              ShareLink[]
 
   @@unique([organizationId, slug])
   @@map("projects")
+}
+
+// ===========================================
+// 共有リンク（図のログイン不要/組織限定の閲覧URL）
+// ===========================================
+
+// 図の共有リンク。kind × targetId につき1本。
+// - kind: FLOW（業務フロー図）/ DFD / OBJECT_MAP（オブジェクト関係性マップ）/ ISSUE_TREE
+// - targetId: FLOW=BusinessFlow.id / DFD=DfdDiagram.id / OBJECT_MAP=projectId / ISSUE_TREE=IssueTree.id
+// - scope: PUBLIC=リンクを知っていれば誰でも（ログイン不要）/ ORG=同組織のログインユーザーのみ
+// 新規テーブルなので unique 制約も build-time `prisma db push` で警告なしに通る。
+model ShareLink {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  kind      String
+  targetId  String   @map("target_id")
+  token     String   @unique
+  scope     String   @default("PUBLIC")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([kind, targetId])
+  @@map("share_links")
 }
 
 // ===========================================

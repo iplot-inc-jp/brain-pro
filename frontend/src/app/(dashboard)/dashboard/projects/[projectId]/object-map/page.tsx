@@ -20,6 +20,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
+import { ShareLinkDialog } from '@/components/share/ShareLinkDialog';
 import { useToast } from '@/components/ui/use-toast';
 import { tablesApi, type Table } from '@/lib/api';
 import { subProjectApi, type SubProjectMaster } from '@/lib/masters';
@@ -777,6 +778,14 @@ export default function ObjectMapPage() {
               ]}
             />
             <ManualButton feature="object-map" />
+            <ShareLinkDialog
+              projectId={projectId}
+              kind="OBJECT_MAP"
+              targetId={projectId}
+              viewerPath="/share/object-map"
+              canEdit={canEdit}
+              buttonSize="sm"
+            />
             <FeatureSectionIo
               projectId={projectId}
               sectionKey="dataObjects"

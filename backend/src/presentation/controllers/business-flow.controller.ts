@@ -9,6 +9,7 @@ import {
   Param,
   Query,
   Inject,
+  Headers,
   HttpException,
   HttpCode,
   HttpStatus,
@@ -58,6 +59,8 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
 import { v4 as uuid } from 'uuid';
+import { Public } from '../decorators/public.decorator';
+import { ShareLinkService } from '../../infrastructure/services/share-link.service';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
 import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
@@ -756,6 +759,7 @@ export class BusinessFlowController {
     private readonly prisma: PrismaService,
     private readonly claudeService: ClaudeService,
     private readonly companyKeyService: CompanyKeyService,
+    private readonly shareLinkService: ShareLinkService,
     private readonly createNodeLinkUseCase: CreateNodeLinkUseCase,
     private readonly getNodeLinksUseCase: GetNodeLinksUseCase,
     private readonly deleteNodeLinkUseCase: DeleteNodeLinkUseCase,
@@ -991,6 +995,67 @@ export class BusinessFlowController {
       children: children.map((c) => this.toResponse(c)),
       breadcrumbs,
       assignees,
+    };
+  }
+
+  // ===========================================
+  // 共有リンク閲覧（発行/無効化は ShareLinkController が担う）
+  // 画像出力の代替: ブラウザ描画（ベクタ）なので拡大しても劣化しない。
+  // ===========================================
+
+  /**
+   * 共有トークンでフローを閲覧。@Public だが、scope=ORG のリンクは
+   * ShareLinkService が Authorization ヘッダを検証して組織メンバーを要求する。
+   * 図の描画に必要な flow 詳細（getById と同形）・ロール・注釈をまとめて返す。
+   */
+  @Public()
+  @Get('shared/:token')
+  @ApiOperation({ summary: '共有リンクから業務フローを閲覧' })
+  async getSharedFlow(
+    @Param('token') token: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const link = await this.shareLinkService.resolveViewableLink(
+      'FLOW',
+      token,
+      authorization,
+    );
+    const row = await this.prisma.businessFlow.findUnique({
+      where: { id: link.targetId },
+      select: { id: true, projectId: true },
+    });
+    if (!row) {
+      throw new EntityNotFoundError('SharedFlow', token);
+    }
+
+    const [flow, roles, annotations, project] = await Promise.all([
+      this.getById(row.id),
+      this.prisma.role.findMany({
+        where: { projectId: row.projectId },
+        orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.flowAnnotation.findMany({
+        where: { flowId: row.id },
+        orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.project.findUnique({
+        where: { id: row.projectId },
+        select: { name: true },
+      }),
+    ]);
+
+    return {
+      flow,
+      roles: roles.map((r) => ({
+        id: r.id,
+        name: r.name,
+        color: r.color,
+        type: r.type,
+        order: r.order,
+        laneHeight: r.laneHeight,
+      })),
+      annotations: annotations.map((a) => this.annotationToResponse(a)),
+      projectName: project?.name ?? null,
     };
   }
 

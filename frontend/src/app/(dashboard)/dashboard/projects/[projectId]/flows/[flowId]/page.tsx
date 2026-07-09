@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTabParam } from '@/hooks/use-tab-param';
 import { FlowAttachmentsGallery } from '@/components/diagram/FlowAttachmentsGallery';
+import { ShareLinkDialog } from '@/components/share/ShareLinkDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -42,6 +43,7 @@ import {
   ArrowDownUp,
   Search,
   X,
+  Copy,
 } from 'lucide-react';
 import { SwimlaneCanvas, type NodeLinksResult, type NodeImageRef } from '@/components/flow-editor/SwimlaneCanvas';
 import { RoleOrderDialog } from '@/components/flow-editor/RoleOrderDialog';
@@ -2981,6 +2983,14 @@ export default function ProjectFlowDetailPage() {
               entityJsonIo.importFlow(flowData.id, parsed as EntityBundle)
             }
             onDone={() => fetchFlowData(flowData.id)}
+          />
+          {/* 共有リンク（閲覧URL）。画像出力と違い拡大しても劣化しない */}
+          <ShareLinkDialog
+            projectId={projectId}
+            kind="FLOW"
+            targetId={flowData.id}
+            viewerPath="/share/flow"
+            canEdit={canEdit}
           />
           {/* フロー図タブのときだけ表示するツールバー */}
           {activeTab === 'flow' && (
