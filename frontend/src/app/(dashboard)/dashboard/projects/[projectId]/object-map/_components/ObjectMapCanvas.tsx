@@ -272,8 +272,8 @@ export interface ObjectMapCanvasProps {
   ) => void | Promise<void>;
   onDeleteScope: (id: string) => void | Promise<void>;
   // ===== Mermaidから生成 =====
-  /** Mermaid 記法から objects/relations を一括生成（生成後に親がグラフ再取得） */
-  onImportMermaid: (mermaid: string) => Promise<void>;
+  /** Mermaid 記法または自然言語説明から objects/relations を一括生成（生成後に親がグラフ再取得） */
+  onImportMermaid: (input: { mermaid?: string; description?: string }) => Promise<void>;
   /** 閲覧専用。true のとき編集ツールバーを隠し、ドラッグ・接続・編集系操作を無効化する。 */
   readOnly?: boolean;
   // ===== 画像要素（ImageElement） =====
@@ -444,6 +444,8 @@ export function ObjectMapCanvas({
   const [mermaidImportText, setMermaidImportText] = useState('');
   const [mermaidImporting, setMermaidImporting] = useState(false);
   const [mermaidImportError, setMermaidImportError] = useState<string | null>(null);
+  // 'mermaid': Mermaid記法を解析 / 'text': 自然言語からAI生成
+  const [mermaidImportMode, setMermaidImportMode] = useState<'mermaid' | 'text'>('mermaid');
 
   // 注釈を「スコープ囲み」と「付箋/メモ」に振り分け（描画レイヤ・操作系が異なる）
   const scopeAnnotations = useMemo(
@@ -1064,15 +1066,19 @@ export function ObjectMapCanvas({
     setMermaidImporting(true);
     setMermaidImportError(null);
     try {
-      await onImportMermaid(mermaidImportText);
+      await onImportMermaid(
+        mermaidImportMode === 'text'
+          ? { description: mermaidImportText }
+          : { mermaid: mermaidImportText },
+      );
       setShowMermaidImport(false);
       setMermaidImportText('');
     } catch (err) {
-      setMermaidImportError(err instanceof Error ? err.message : 'Mermaidからの生成に失敗しました');
+      setMermaidImportError(err instanceof Error ? err.message : 'AI生成に失敗しました');
     } finally {
       setMermaidImporting(false);
     }
-  }, [mermaidImportText, onImportMermaid]);
+  }, [mermaidImportText, mermaidImportMode, onImportMermaid]);
 
   // ===== 画像ドロップ =====
   const handleSvgDragOver = useCallback((e: React.DragEvent<SVGSVGElement>) => {
@@ -1883,7 +1889,7 @@ export function ObjectMapCanvas({
               title="Mermaid記法からオブジェクトと関係を一括生成します"
             >
               <Wand2 className="h-4 w-4 text-violet-500" />
-              mermaidから生成
+              AIで生成
             </Button>
           </>
         )}
@@ -2205,17 +2211,43 @@ export function ObjectMapCanvas({
       >
         <DialogContent className="max-w-2xl bg-white">
           <DialogHeader>
-            <DialogTitle className="text-gray-900">mermaidから生成</DialogTitle>
+            <DialogTitle className="text-gray-900">AIで生成</DialogTitle>
             <DialogDescription className="text-gray-500">
-              Mermaid記法（erDiagram / classDiagram / flowchart）を貼り付けると、オブジェクトと関係線を解析してこのマップへ一括追加します。
+              {mermaidImportMode === 'mermaid'
+                ? 'Mermaid記法（erDiagram / classDiagram / flowchart）を貼り付けると、オブジェクトと関係線を解析してこのマップへ一括追加します。'
+                : 'データや帳票のつながりを文章で説明すると、AIがオブジェクトと関係線を設計してこのマップへ一括追加します。'}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex w-fit items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1">
+            <Button
+              variant={mermaidImportMode === 'mermaid' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setMermaidImportMode('mermaid')}
+              disabled={mermaidImporting}
+              className="h-7 px-3 text-xs"
+            >
+              Mermaid
+            </Button>
+            <Button
+              variant={mermaidImportMode === 'text' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setMermaidImportMode('text')}
+              disabled={mermaidImporting}
+              className="h-7 px-3 text-xs"
+            >
+              自然言語
+            </Button>
+          </div>
           <Textarea
             value={mermaidImportText}
             onChange={(e) => setMermaidImportText(e.target.value)}
-            placeholder={'erDiagram\n  CUSTOMER ||--o{ ORDER : places'}
+            placeholder={
+              mermaidImportMode === 'mermaid'
+                ? 'erDiagram\n  CUSTOMER ||--o{ ORDER : places'
+                : '例: 顧客が注文を出すと受注が作られ、受注は複数の受注明細を持つ。明細は商品を参照し、出荷時に出荷伝票が受注に紐づいて発行される。'
+            }
             rows={12}
-            className="min-h-[240px] font-mono text-xs text-gray-800"
+            className={`min-h-[240px] text-gray-800 ${mermaidImportMode === 'mermaid' ? 'font-mono text-xs' : 'text-sm'}`}
             disabled={mermaidImporting}
           />
           {mermaidImportError && (
@@ -2225,15 +2257,19 @@ export function ObjectMapCanvas({
             </div>
           )}
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
-              disabled={mermaidImporting}
-              className="mr-auto text-gray-600"
-              title="サンプルで上書きします"
-            >
-              サンプルを表示
-            </Button>
+            {mermaidImportMode === 'mermaid' ? (
+              <Button
+                variant="ghost"
+                onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+                disabled={mermaidImporting}
+                className="mr-auto text-gray-600"
+                title="サンプルで上書きします"
+              >
+                サンプルを表示
+              </Button>
+            ) : (
+              <span className="mr-auto" />
+            )}
             <Button
               variant="outline"
               onClick={() => setShowMermaidImport(false)}

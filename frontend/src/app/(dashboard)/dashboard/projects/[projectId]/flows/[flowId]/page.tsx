@@ -1108,6 +1108,8 @@ export default function ProjectFlowDetailPage() {
   const [mermaidImportText, setMermaidImportText] = useState('');
   const [mermaidImporting, setMermaidImporting] = useState(false);
   const [mermaidImportError, setMermaidImportError] = useState<string | null>(null);
+  // 'mermaid': Mermaid記法を解析 / 'text': 自然言語からAI生成（ipro-bot連携時はIPLoT頭脳が効く）
+  const [mermaidImportMode, setMermaidImportMode] = useState<'mermaid' | 'text'>('mermaid');
 
   const howToRef = useRef<HTMLDivElement | null>(null);
 
@@ -2598,7 +2600,11 @@ export default function ProjectFlowDetailPage() {
       const res = await fetch(`${API_URL}/api/business-flows/${flowData.id}/import-mermaid`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ mermaid: mermaidImportText }),
+        body: JSON.stringify(
+          mermaidImportMode === 'text'
+            ? { description: mermaidImportText }
+            : { mermaid: mermaidImportText },
+        ),
       });
       if (!res.ok) {
         let msg = 'Mermaidの取り込みに失敗しました';
@@ -2618,7 +2624,7 @@ export default function ProjectFlowDetailPage() {
     } finally {
       setMermaidImporting(false);
     }
-  }, [flowData, mermaidImportText, getHeaders, fetchFlowData]);
+  }, [flowData, mermaidImportText, mermaidImportMode, getHeaders, fetchFlowData]);
 
   // ===========================================
   // Undo/Redo（スナップショット型）
@@ -3162,7 +3168,7 @@ export default function ProjectFlowDetailPage() {
             className="text-gray-600"
           >
             <Wand2 className="w-4 h-4 mr-2" />
-            mermaidから生成
+            AIで生成
           </Button>
           <Button variant="outline" onClick={fetchMermaid} className="text-gray-600">
             <FileCode className="w-4 h-4 mr-2" />
@@ -3528,20 +3534,45 @@ export default function ProjectFlowDetailPage() {
         <DialogContent className="bg-white max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-1.5 text-gray-900">
-              mermaidから生成
-              <HelpTooltip text="Mermaid はテキストで図を書く記法です。flowchart に加え、sequenceDiagram（シーケンス図／プロトコル図）も解析できます。シーケンス図は participant がそのままレーン（ロール）、各メッセージが送信側レーンのノードになるため、スイムレーンに最も自然に変換できます。" />
+              AIで生成
+              <HelpTooltip text="Mermaid記法（flowchart / sequenceDiagram）の解析に加え、自然言語の業務説明からもAIがフローを生成できます。自然言語モードでは既存ロール・システム・情報種別を文脈として渡し、ipro-bot連携が有効な会社ではIPLoT頭脳（ASIS/TOBE業務フローの方法論）が適用されます。" />
             </DialogTitle>
             <DialogDescription className="text-gray-500">
-              Mermaid記法のテキスト（flowchart / sequenceDiagram）を貼り付けると、ロール・ノード・接続をこのフローに追加します。
-              シーケンス図（プロトコル図）はレーンへの変換が特にきれいです。
+              {mermaidImportMode === 'mermaid'
+                ? 'Mermaid記法のテキスト（flowchart / sequenceDiagram）を貼り付けると、ロール・ノード・接続をこのフローに追加します。'
+                : '業務のやり方を文章で説明すると、AIがロール・ノード・接続を設計してこのフローに追加します。'}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
+            <Button
+              variant={mermaidImportMode === 'mermaid' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setMermaidImportMode('mermaid')}
+              disabled={mermaidImporting}
+              className="h-7 px-3 text-xs"
+            >
+              Mermaid
+            </Button>
+            <Button
+              variant={mermaidImportMode === 'text' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setMermaidImportMode('text')}
+              disabled={mermaidImporting}
+              className="h-7 px-3 text-xs"
+            >
+              自然言語
+            </Button>
+          </div>
           <Textarea
             value={mermaidImportText}
             onChange={(e) => setMermaidImportText(e.target.value)}
-            placeholder={'flowchart TD\n  A[受注] --> B[出荷]'}
+            placeholder={
+              mermaidImportMode === 'mermaid'
+                ? 'flowchart TD\n  A[受注] --> B[出荷]'
+                : '例: 顧客からFAXで注文が届いたら、営業事務が受注システムに入力する。在庫が足りない場合は購買部に発注を依頼し、揃い次第、倉庫担当がピッキングして出荷する。'
+            }
             rows={12}
-            className="font-mono text-xs text-gray-800 min-h-[240px]"
+            className={`text-gray-800 min-h-[240px] ${mermaidImportMode === 'mermaid' ? 'font-mono text-xs' : 'text-sm'}`}
             disabled={mermaidImporting}
           />
           {mermaidImportError && (
@@ -3552,27 +3583,31 @@ export default function ProjectFlowDetailPage() {
           )}
           <DialogFooter>
             <div className="mr-auto flex items-center gap-1">
-              <span className="text-xs text-gray-400">サンプル:</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setMermaidImportText(MERMAID_SEQUENCE_SAMPLE)}
-                disabled={mermaidImporting}
-                className="text-gray-600"
-                title="シーケンス図（プロトコル図）のサンプルで上書きします。スイムレーンに最も自然に対応します。"
-              >
-                シーケンス図
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
-                disabled={mermaidImporting}
-                className="text-gray-600"
-                title="flowchart のサンプルで上書きします。"
-              >
-                flowchart
-              </Button>
+              {mermaidImportMode === 'mermaid' && (
+                <>
+                  <span className="text-xs text-gray-400">サンプル:</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMermaidImportText(MERMAID_SEQUENCE_SAMPLE)}
+                    disabled={mermaidImporting}
+                    className="text-gray-600"
+                    title="シーケンス図（プロトコル図）のサンプルで上書きします。スイムレーンに最も自然に対応します。"
+                  >
+                    シーケンス図
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setMermaidImportText(MERMAID_SAMPLE)}
+                    disabled={mermaidImporting}
+                    className="text-gray-600"
+                    title="flowchart のサンプルで上書きします。"
+                  >
+                    flowchart
+                  </Button>
+                </>
+              )}
             </div>
             <Button
               variant="outline"

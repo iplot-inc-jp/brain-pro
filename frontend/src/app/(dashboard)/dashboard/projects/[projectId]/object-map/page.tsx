@@ -584,12 +584,12 @@ export default function ObjectMapPage() {
   //   SUCCEEDED: result.graph をマップへ反映し再取得して resolve（ダイアログが閉じる）。
   //   FAILED:    error で reject（キャンバス側ダイアログがエラー表示する）。
   const handleImportMermaid = useCallback(
-    (mermaid: string): Promise<void> => {
+    (input: { mermaid?: string; description?: string }): Promise<void> => {
       return new Promise<void>((resolve, reject) => {
         // 直前の未解決ジョブがあれば棄却（多重起票の取りこぼし防止）。
-        mermaidSettlers.current?.reject(new Error('別のMermaid生成が開始されました'));
+        mermaidSettlers.current?.reject(new Error('別のAI生成が開始されました'));
         mermaidSettlers.current = { resolve, reject };
-        enqueueAiJob(projectId, 'AI_MERMAID_OBJECTMAP', { mermaid })
+        enqueueAiJob(projectId, 'AI_MERMAID_OBJECTMAP', input)
           .then(({ jobId }) => {
             jobsPanelRef.current?.refresh();
             setMermaidJobId(jobId);
