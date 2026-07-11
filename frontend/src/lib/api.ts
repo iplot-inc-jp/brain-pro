@@ -128,6 +128,31 @@ export const invitesApi = {
     api<{ success: boolean }>(`/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' }),
 }
 
+// ipro-bot連携（組織単位のAIゲートウェイ設定）
+export interface IproBotConnectionView {
+  configured: boolean
+  baseUrl?: string
+  enabled?: boolean
+  strict?: boolean
+  hasApiToken?: boolean
+}
+
+export const iproBotApi = {
+  get: (orgId: string) => api<IproBotConnectionView>(`/organizations/${orgId}/ipro-bot`),
+  update: (
+    orgId: string,
+    body: { baseUrl?: string; apiToken?: string; enabled?: boolean; strict?: boolean },
+  ) =>
+    api<IproBotConnectionView>(`/organizations/${orgId}/ipro-bot`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  test: (orgId: string) =>
+    api<{ ok: boolean; detail?: string; error?: string }>(`/organizations/${orgId}/ipro-bot/test`, {
+      method: 'POST',
+    }),
+}
+
 // Projects
 export const projectsApi = {
   list: (organizationId: string) =>

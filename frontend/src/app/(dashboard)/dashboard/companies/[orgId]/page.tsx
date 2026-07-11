@@ -37,6 +37,7 @@ import {
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { InviteLinksPanel } from '@/components/company/InviteLinksPanel';
+import { IproBotPanel } from '@/components/company/IproBotPanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021';
 
@@ -531,6 +532,8 @@ export default function CompanySettingsPage() {
               </p>
             </CardContent>
           </Card>
+
+          <IproBotPanel orgId={orgId} />
         </TabsContent>
 
         {/* ステータス */}
