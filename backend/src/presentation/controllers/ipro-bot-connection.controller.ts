@@ -84,6 +84,11 @@ export class IproBotConnectionController {
     if (!existing && (!dto.baseUrl || !dto.apiToken)) {
       throw new ValidationError('初回設定には baseUrl と apiToken が必要です');
     }
+    // 保存済みトークンの流出防止: baseUrl だけ差し替えると、伏字で見えないトークンが
+    // 新URL（攻撃者サーバー含む）へ Bearer 送信されてしまうため、URL変更時は再入力を必須にする。
+    if (existing && dto.baseUrl !== undefined && dto.baseUrl !== existing.baseUrl && !dto.apiToken) {
+      throw new ValidationError('ゲートウェイURLを変更する場合は apiToken の再入力が必要です');
+    }
 
     const tokenUpdate = dto.apiToken ? { apiTokenEnc: this.crypto.encrypt(dto.apiToken) } : {};
     const saved = await this.prisma.iproBotConnection.upsert({

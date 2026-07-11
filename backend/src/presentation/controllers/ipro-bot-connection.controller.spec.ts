@@ -65,6 +65,21 @@ describe('IproBotConnectionController', () => {
     await expect(c.upsert(user, 'org1', { enabled: true } as any)).rejects.toThrow();
   });
 
+  it('PUT: baseUrl 変更時は apiToken 再入力が必須（保存済みトークンの流出防止）', async () => {
+    const prisma = makePrisma({
+      role: 'ADMIN',
+      conn: { baseUrl: 'https://old', apiTokenEnc: 'ENC', enabled: true, strict: false },
+    });
+    const c = new IproBotConnectionController(prisma, crypto);
+    await expect(c.upsert(user, 'org1', { baseUrl: 'https://evil' } as any)).rejects.toThrow(
+      'apiToken の再入力が必要',
+    );
+    // 同じURLなら再入力不要（enabled 等のトグルは通る）
+    await expect(
+      c.upsert(user, 'org1', { baseUrl: 'https://old', enabled: false } as any),
+    ).resolves.toBeDefined();
+  });
+
   it('PUT: apiToken は暗号化して保存する', async () => {
     const prisma = makePrisma({ role: 'ADMIN' });
     const c = new IproBotConnectionController(prisma, crypto);

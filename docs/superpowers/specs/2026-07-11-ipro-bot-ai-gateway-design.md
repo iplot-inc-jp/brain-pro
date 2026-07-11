@@ -55,26 +55,26 @@ Brain Pro は応答テキストを従来どおり自前でJSONパースし、Llm
 
 ### POST /api/ai/run
 
-リクエスト:
+リクエスト（実装形）:
 ```jsonc
 {
-  "taskType": "KNOWLEDGE_EXTRACTION",   // Brain Pro の LlmUsageArea 値
-  "model": "claude-sonnet-4-6",         // 任意。省略/不正時は resolveDefaultModel()
-  "system": "...",                       // Brain Pro が組んだ system prompt
+  "taskType": "KNOWLEDGE_EXTRACTION",   // 呼び出し元のタスク種別（Brain Pro は LlmUsageArea 値）
+  "model": "claude-sonnet-4-6",         // 任意。優先順: これ > 頭脳別モデル(プロンプト管理) > resolveDefaultModel()
+  "system": "...",                       // 呼び出し元が組んだ system prompt
   "messages": [{ "role": "user", "content": "..." }],  // Anthropic MessageParam[] 互換
   "maxTokens": 8192,                     // 任意。既定 8192
-  "projectRef": {                        // 任意。P1ではログ用途のみ、P2で文脈注入キー
-    "adfOrganizationId": "...",
-    "adfProjectId": "..."
-  }
+  "skill": "asis-flow",                 // 任意。IPLoT頭脳(intent)の明示指定
+  "classify": false,                     // 任意。true で意図分類agentに頭脳選択を任せる
+  "projectRef": { "orgId": "...", "projectId": "..." }  // 任意。中立名（特定ツールに依存しない）
 }
 ```
 
 応答（200）:
 ```jsonc
 {
-  "text": "...",                         // 最初の text ブロック連結
+  "text": "...",                         // text ブロック連結
   "model": "claude-sonnet-4-6",          // 実際に使ったモデル
+  "skill": "asis-flow",                 // 実際に注入された頭脳（無ければ null）
   "usage": { "inputTokens": 0, "outputTokens": 0, "cacheCreationInputTokens": 0, "cacheReadInputTokens": 0 }
 }
 ```
@@ -85,9 +85,12 @@ Brain Pro は応答テキストを従来どおり自前でJSONパースし、Llm
 
 Bearer 認証のみ検証し `{ "ok": true, "companyId": "..." }` を返す。Brain Pro 管理UIの「接続テスト」が叩く。
 
-### 頭脳注入の合成規則
+### 頭脳注入の合成規則（実装形）
 
-system は Anthropic のブロック配列に変換する: `[ method.md（taskTypeマップにヒットした場合。cache_control: ephemeral 1h）, Brain Pro が送った system ]`。マップにない taskType（例: MERMAID_FLOW のような構文パースは頭脳不要）は素通し。マップは ipro-bot 側のコード内定数（`taskType → vendor/ipro-method/<skill>/method.md`）とし、初期対応は ISSUE_SUGGEST / KPI / REQUIREMENT / KNOWLEDGE_EXTRACTION / OTHER(充実度診断) のうち該当スキルが存在するもののみ。空文字ブロックは入れない（Anthropic が 400 で弾くため。`runStructured` と同じ注意）。
+system は Anthropic のブロック配列に変換する: `[ 頭脳method（cache_control: ephemeral 1h）, 呼び出し元が送った system ]`。
+頭脳の解決は **skill明示 > classify（意図分類agent）> taskTypeマップ** の優先順（マップ: REQUIREMENT→requirements / ISSUE_SUGGEST→issue-tree / KPI→analysis / KNOWLEDGE_EXTRACTION→current-state）。
+どの経路でも **専用 method.md を持たない intent（advice / next-move 等）は注入しない**（`hasOwnMethod` ガード。catalog.md＝Slack司令塔の人格・ルーティング指示書が呼び出し元の「JSONのみ出力」指示を汚染するのを防ぐ）。
+method は プロンプト管理DB（`method:<intent>`、`/console/prompts` で編集可）の実効値を使い、persona は注入しない。空文字ブロックは入れない（Anthropic が 400 で弾くため）。usage は `gateway:<taskType>` の purpose で ipro-bot 側にも記録される。
 
 ## 5. データモデル
 
@@ -131,7 +134,9 @@ model IproBotConnection {
 - `LlmTransport` インターフェイス: `run(req: { model: string; system: string; messages: MessageParam[]; maxTokens: number; taskType: LlmUsageArea; projectRef?: {...} }): Promise<{ text: string; model: string; usage: NormalizedUsage }>`
 - `AnthropicTransport`: 現行の `getClient(apiKey).messages.create` を移設。応答から text 抽出まで担当。
 - `IproBotTransport`: 上記APIへの薄い fetch ラッパ（タイムアウト 240s、リトライなし＝リトライは呼び出し元ジョブ基盤の責務）。
-- `LlmTransportResolver`: 呼び出しコンテキストの organizationId（`LlmUsageContext` の projectId から導出。組織が特定できない呼び出しは直接Anthropic）→ `IproBotConnection`（無ければ env）→ enabled なら `IproBotTransport`、それ以外は `AnthropicTransport`。
+- `LlmTransportResolver`: 呼び出しコンテキストの organizationId（`LlmUsageContext` の projectId から Prisma で導出。組織が特定できない呼び出しは直接Anthropic）→ `IproBotConnection`（無ければ env）→ enabled なら `IproBotTransport`、それ以外は `AnthropicTransport`。
+- **マルチモーダル除外（P1）**: `extractKnowledge` は document（PDF base64）/ image ブロックを送るため、リクエストに非テキストブロックが含まれる場合は連携ONでも `AnthropicTransport` に直接ルーティングする（Vercel のリクエストボディ上限 4.5MB にかかるため。ゲートウェイのマルチモーダル対応は P3）。
+- **Anthropicキーの前提（P1）**: 呼び出し元の鍵解決（`CompanyKeyService`: 組織キー→ユーザーキー→env `ANTHROPIC_API_KEY`）は無改修。フォールバック実行にも直接キーを使うため、env `ANTHROPIC_API_KEY` は引き続き必須。「ゲートウェイのみ・キーレス運用」は P2 以降。
 - `ClaudeService` の9メソッド: プロンプト構築とJSONパースはそのまま、`client.messages.create` 部分だけ `transport.run(...)` に置換。usage記録は transport の戻り値で従来どおり `usageRecorder.record(...)`。
 - **フォールバック**: `IproBotTransport` が失敗（ネットワーク断 / 5xx / 429予算超過）したとき、`strict=false` なら `AnthropicTransport` で再実行して warn ログ（`ANTHROPIC_API_KEY` 未設定ならそのままエラー）。`strict=true` なら即エラー。401（トークン無効）は設定ミスなのでフォールバックせずエラーにして気づかせる。
 - **管理UI**: 会社設定ページに「ipro-bot連携」パネル（baseUrl / トークン入力（書き込み専用・再表示しない）/ enabled / strict / 接続テストボタン）。API は組織管理者権限（OWNER/ADMIN）のみ。
@@ -156,5 +161,5 @@ model IproBotConnection {
 ## 10. 依存・前提
 
 - ipro-bot のデプロイURL に Brain Pro バックエンド（Vercel）から到達できること。
-- 暗号化は Brain Pro 既存の暗号化ユーティリティ（AES-256-GCM＋環境変数ソルト）を流用。新しい鍵管理は導入しない。
+- 暗号化は Brain Pro 既存の `CryptoService`（AES-256-GCM、鍵は env `TOKEN_ENC_KEY`）を流用。新しい鍵管理は導入しない。
 - スキーマ適用: Brain Pro は本番ビルド時 `prisma db push`（既存運用どおり）、ipro-bot は `npm run db:push`。

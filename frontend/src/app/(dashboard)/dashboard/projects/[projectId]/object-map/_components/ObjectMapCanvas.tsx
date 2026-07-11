@@ -1886,7 +1886,7 @@ export function ObjectMapCanvas({
                 setMermaidImportError(null);
                 setShowMermaidImport(true);
               }}
-              title="Mermaid記法からオブジェクトと関係を一括生成します"
+              title="Mermaid記法または自然言語の説明から、AIがオブジェクトと関係を一括生成します"
             >
               <Wand2 className="h-4 w-4 text-violet-500" />
               AIで生成
