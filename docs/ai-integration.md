@@ -302,8 +302,32 @@ claude mcp add brain-pro \
 7. **フローのノードは positionX/positionY 必須**（横220px間隔、縦はロールのレーン帯）。`roleId` を付けないとレーンに乗らない。`role_list` で先にレーンを用意する。
 8. **マスタ依存に注意**: 入出力/DFDは `information_type`、CRUD は `column` と `role`、KPI/リスク/ステークホルダーは `sub_project`（領域）を先に作る。
 9. **冪等な初期化を使う**: `phase_initialize` / `*_sync` / `import-from-dfd` は重複作成しないので、迷ったら再実行してよい。`import-mermaid` も冪等（get-or-create）だが、これは **AI 解析を伴い Anthropic APIキーが必要**（鍵未設定だと 400『Anthropic APIキーが未設定です』）なので、鍵なしで叩ける純粋な初期化とは別扱い。
-10. **重いAI生成は非同期ジョブ**（`ai_job_enqueue` → `ai_job_get` ポーリング）。payload に秘匿情報を入れない。`AI_MERMAID_OBJECTMAP` / `AI_MERMAID_FLOW` は「Mermaid を生成する」のではなく `payload.mermaid`（自分が用意した Mermaid）を解析するジョブで、payload に mermaid が無いと FAILED になる。
+10. **重いAI生成は非同期ジョブ**（`ai_job_enqueue` → `ai_job_get` ポーリング）。payload に秘匿情報を入れない。`AI_MERMAID_OBJECTMAP` / `AI_MERMAID_FLOW` は `payload.mermaid`（Mermaid解析）**または** `payload.description`（自然言語からのAI生成。`AI_MERMAID_FLOW` は `payload.flowKind: 'ASIS'|'TOBE'` 任意）を受け付ける。どちらも無いと FAILED になる。
 11. 書き込み後は **対応する `*_list` / `*_get` で確認**し、必要なら `change_log_list` で監査する（管理者のみ）。
+
+---
+
+## 9. ipro-bot AIゲートウェイ連携
+
+組織単位で AI 呼び出しを ipro-bot の `POST /api/ai/run` 経由に切り替えられる。
+設計: `docs/superpowers/specs/2026-07-11-ipro-bot-ai-gateway-design.md`
+
+- **設定**: 会社設定ページ（`/dashboard/companies/[orgId]` の AIタブ）の「ipro-bot連携」パネル
+  （ゲートウェイURL / `aig_` トークン（伏字運用）/ 有効 / 厳格モード / 接続テスト）。
+  DB設定が無い場合は env `IPRO_BOT_URL` + `IPRO_BOT_API_TOKEN` にフォールバック。
+- **トークン発行（ipro-bot 側）**: `node --env-file=.env.local scripts/issue-ai-gateway-token.mjs <companyId> [label]`
+- **経由時の挙動**: taskType（LlmUsageArea）または明示 `skill` に応じて IPLoT頭脳（method.md、
+  ipro-bot のプロンプト管理DBで編集可能）が system 先頭に注入され、ipro-bot 側の会社別AI予算ガード・
+  usage記録（purpose=`gateway:<taskType>`）が適用される。usage は従来どおり Brain Pro の LlmUsageLog にも記録される。
+- **フォールバック**: ゲートウェイ障害時（5xx/断/429）は直接 Anthropic に自動フォールバック
+  （厳格モード時と 401 は即エラー）。env `ANTHROPIC_API_KEY` は引き続き必須。
+- **制限（P1）**: マルチモーダル（PDF/画像を含むナレッジ抽出）は常に直接 Anthropic（ボディ上限対策）。
+- **自然言語→図生成**: 業務フロー / オブジェクトマップの「AIで生成」ダイアログの自然言語モードは、
+  既存ロール・システム・情報種別（オブジェクトマップは既存オブジェクト名）を文脈注入し、
+  ゲートウェイ経由時は `asis-flow` / `tobe-flow` / `system-landscape` の頭脳が効く。
+- **逆方向の連携（ipro-bot側の機能）**: 定期「外部に保存」（ipro-bot の知識を Brain Pro 等へ構造化保存）と
+  `read_workspace`（Brain Pro の構造化データを毎回取得）は ipro-bot リポジトリの
+  `docs/external-save.md` / `docs/architecture-ai.md` を参照。
 
 ---
 
