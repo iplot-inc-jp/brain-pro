@@ -480,6 +480,7 @@ import { TaskWebhookService } from './infrastructure/services/task-webhook.servi
 import { TrackerImportService } from './infrastructure/services/trackers/tracker-import.service';
 import { WebhookController } from './presentation/controllers/webhook.controller';
 import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
+import { IproBotConnectionController } from './presentation/controllers/ipro-bot-connection.controller';
 import { TrackerWebhookController } from './presentation/controllers/tracker-webhook.controller';
 import { LlmUsageController } from './presentation/controllers/llm-usage.controller';
 import { BlobUploadController } from './presentation/controllers/blob-upload.controller';
@@ -651,6 +652,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     WebhookController,
     // 外部トラッカー（Backlog/Jira）移行・同期
     TrackerConnectionController,
+    IproBotConnectionController,
     // 外部トラッカー Webhook 秘密の管理（admin）
     TrackerWebhookController,
     LlmUsageController,
