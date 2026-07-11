@@ -194,8 +194,26 @@ model Organization {
   members  OrganizationMember[]
   invites  OrganizationInvite[]
   projects Project[]
+  iproBotConnection IproBotConnection?
 
   @@map("organizations")
+}
+
+// 組織ごとの ipro-bot AIゲートウェイ接続設定。AI呼び出しを ipro-bot 経由に切り替える。
+model IproBotConnection {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  baseUrl        String   @map("base_url") // 例 https://ipro-bot.example.com
+  apiTokenEnc    String   @map("api_token_enc") @db.Text // AES-256-GCM 暗号化 aig_ トークン
+  enabled        Boolean  @default(true)
+  strict         Boolean  @default(false) // true: ゲートウェイ障害時に直接Anthropicへフォールバックしない
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId])
+  @@map("ipro_bot_connections")
 }
 
 model OrganizationMember {
