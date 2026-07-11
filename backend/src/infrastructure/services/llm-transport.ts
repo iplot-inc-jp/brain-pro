@@ -1,14 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AnthropicUsageLike } from './llm-usage-recorder.service';
 
-/** LLM 1回実行の共通リクエスト。ClaudeService の9メソッドが組み立てる。 */
+/** LLM 1回実行の共通リクエスト。ClaudeService の各メソッドが組み立てる。 */
 export interface LlmRunRequest {
   model: string;
   maxTokens: number;
   system?: string;
   messages: Anthropic.MessageParam[];
   taskType: string; // LlmUsageArea 値
-  projectRef?: { adfOrganizationId?: string; adfProjectId?: string };
+  /** ipro-bot の IPLoT頭脳(skill)を明示指定（ゲートウェイ経由時のみ効く）。 */
+  skill?: string;
+  /** true: ipro-bot 側の意図分類agentに頭脳選択を任せる。 */
+  classify?: boolean;
+  projectRef?: { orgId?: string; projectId?: string };
 }
 
 export interface LlmRunResult {
@@ -83,6 +87,8 @@ export class IproBotTransport implements LlmTransport {
           system: req.system,
           messages: req.messages,
           maxTokens: req.maxTokens,
+          skill: req.skill,
+          classify: req.classify,
           projectRef: req.projectRef,
         }),
         signal: controller.signal,

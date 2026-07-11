@@ -231,6 +231,8 @@ export class ClaudeService {
     system?: string;
     messages: Anthropic.MessageParam[];
     usage?: LlmUsageContext;
+    /** ipro-bot の IPLoT頭脳(skill)を明示指定（ゲートウェイ経由時のみ効く）。 */
+    skill?: string;
   }): Promise<LlmRunResult> {
     const direct = new AnthropicTransport(input.apiKey);
     const req: LlmRunRequest = {
@@ -239,7 +241,8 @@ export class ClaudeService {
       system: input.system,
       messages: input.messages,
       taskType: input.usage?.area ?? 'OTHER',
-      projectRef: input.usage?.projectId ? { adfProjectId: input.usage.projectId } : undefined,
+      skill: input.skill,
+      projectRef: input.usage?.projectId ? { projectId: input.usage.projectId } : undefined,
     };
 
     // マルチモーダル（PDF/画像）はゲートウェイのボディ上限にかかるため P1 では直接実行
@@ -551,6 +554,146 @@ ${mermaid}`,
     } catch (err) {
       console.error('JSON parse error:', run.text);
       throw new Error('Mermaid図の解析に失敗しました');
+    }
+  }
+
+  /**
+   * 自然言語の業務説明から、スイムレーン業務フローの「ロール・ノード・エッジ」を生成する。
+   * 出力契約は parseMermaidToFlow と同一（取り込み側の永続処理を共有するため）。
+   * ipro-bot 連携時は flowKind に応じた IPLoT頭脳（asis-flow / tobe-flow）が注入される。
+   */
+  async generateFlowFromText(
+    description: string,
+    projectContext: string,
+    flowKind: 'ASIS' | 'TOBE',
+    apiKey: string,
+    usage?: LlmUsageContext,
+  ): Promise<MermaidFlowParseResult> {
+    const model = this.defaultModel();
+
+    const systemPrompt = `あなたは業務フロー設計の専門家です。
+与えられた業務の説明文（自然言語）から、スイムレーン業務フロー用の「ロール（役割／レーン）」「ノード」「エッジ」を設計してください。
+
+出力は必ず以下のJSON形式で返してください：
+{
+  "roles": [
+    { "name": "ロール名（レーン名）", "type": "HUMAN | SYSTEM | OTHER" }
+  ],
+  "nodes": [
+    { "key": "ノードID（n1, n2, ...）", "label": "ノードのラベル", "type": "START | END | PROCESS | DECISION | SYSTEM_INTEGRATION | MANUAL_OPERATION | DATA_STORE", "roleName": "所属するロール名" }
+  ],
+  "edges": [
+    { "sourceKey": "始点ノードID", "targetKey": "終点ノードID", "label": "遷移ラベル（任意）" }
+  ]
+}
+
+ルール：
+1. roleName は roles の name と必ず一致させる。プロジェクトの既存ロール一覧に同じ意味のロールがあればその名前をそのまま使う（表記ゆれで新ロールを作らない）。
+2. 開始は START、終了は END ノードを必ず置く。判断分岐は DECISION、システム連携は SYSTEM_INTEGRATION、手作業は MANUAL_OPERATION。
+3. ノードは業務の実行順に n1, n2, ... と振り、edges で順に繋ぐ（分岐は DECISION から複数エッジを出し、edge.label に条件を書く）。
+4. 説明文に無い工程を過度に創作しない。ただし業務として自然な開始・終了の補完は良い。
+5. 必ず有効なJSONのみを出力する（説明文・コードフェンス以外の文章は不要）。`;
+
+    const run = await this.runLlm({
+      apiKey,
+      model,
+      maxTokens: 8192,
+      system: systemPrompt,
+      messages: [
+        {
+          role: 'user',
+          content: `${projectContext ? `【プロジェクトの前提情報】\n${projectContext}\n\n` : ''}【業務フローの種別】${flowKind === 'TOBE' ? 'TOBE（あるべき姿）' : 'ASIS（現状）'}
+
+以下の業務説明から業務フローを設計してください：
+
+${description}`,
+        },
+      ],
+      usage,
+      skill: flowKind === 'TOBE' ? 'tobe-flow' : 'asis-flow',
+    });
+    if (usage) await this.usageRecorder.record(usage, run.model, run.usage);
+
+    if (!run.text) {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    try {
+      const result = this.extractJsonObject(run.text);
+      return {
+        roles: Array.isArray(result.roles) ? result.roles : [],
+        nodes: Array.isArray(result.nodes) ? result.nodes : [],
+        edges: Array.isArray(result.edges) ? result.edges : [],
+      } as MermaidFlowParseResult;
+    } catch (err) {
+      console.error('JSON parse error:', run.text);
+      throw new Error('業務フロー生成の解析に失敗しました');
+    }
+  }
+
+  /**
+   * 自然言語の説明から、オブジェクト関係性マップの「オブジェクト・関係」を生成する。
+   * 出力契約は parseMermaidToObjectMap と同一（永続処理を共有するため）。
+   * ipro-bot 連携時は system-landscape（企業システムの全体像）の頭脳が注入される。
+   */
+  async generateObjectMapFromText(
+    description: string,
+    projectContext: string,
+    apiKey: string,
+    usage?: LlmUsageContext,
+  ): Promise<MermaidObjectMapParseResult> {
+    const model = this.defaultModel();
+
+    const systemPrompt = `あなたはデータモデル設計の専門家です。
+与えられた説明文（自然言語）から、オブジェクト関係性マップ用の「オブジェクト（object）」と「関係（relation）」を設計してください。
+
+ルール：
+1. 業務に登場するデータ・帳票・エンティティを object として抽出する。既存オブジェクト一覧に同じ意味のものがあればその名前をそのまま使う（表記ゆれで新オブジェクトを作らない）。
+2. オブジェクト間の意味的な繋がりを relation として抽出し、多重度が読み取れる場合は cardinality（ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY）に反映する。
+3. relation の source / target は object の name（表示名）で表す。
+4. 説明文に無いオブジェクトを過度に創作しない。
+
+出力は必ず以下のJSON形式のみで返してください（説明文・コードフェンス以外の文章は不要）：
+{
+  "objects": [
+    { "name": "オブジェクト名", "description": "説明（任意）" }
+  ],
+  "relations": [
+    { "source": "始点オブジェクト名", "target": "終点オブジェクト名", "cardinality": "ONE_TO_ONE | ONE_TO_MANY | MANY_TO_MANY", "label": "関係ラベル（任意）" }
+  ]
+}`;
+
+    const run = await this.runLlm({
+      apiKey,
+      model,
+      maxTokens: 8192,
+      system: systemPrompt,
+      messages: [
+        {
+          role: 'user',
+          content: `${projectContext ? `【プロジェクトの前提情報】\n${projectContext}\n\n` : ''}以下の説明からオブジェクト関係性マップを設計してください：
+
+${description}`,
+        },
+      ],
+      usage,
+      skill: 'system-landscape',
+    });
+    if (usage) await this.usageRecorder.record(usage, run.model, run.usage);
+
+    if (!run.text) {
+      throw new Error('Claude APIからの応答が不正です');
+    }
+
+    try {
+      const result = this.extractJsonObject(run.text);
+      return {
+        objects: Array.isArray(result.objects) ? result.objects : [],
+        relations: Array.isArray(result.relations) ? result.relations : [],
+      } as MermaidObjectMapParseResult;
+    } catch (err) {
+      console.error('JSON parse error:', run.text);
+      throw new Error('オブジェクトマップ生成の解析に失敗しました');
     }
   }
 

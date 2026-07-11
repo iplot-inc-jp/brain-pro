@@ -20,7 +20,10 @@ import { ObjectGraphOutput, toObjectGraphOutput } from './data-object.output';
 export interface ImportMermaidInput {
   userId: string;
   projectId: string;
-  mermaid: string;
+  /** Mermaid テキストから取り込む場合に指定（description と排他。どちらか必須） */
+  mermaid?: string;
+  /** 自然言語の説明から生成する場合に指定 */
+  description?: string;
 }
 
 /** グリッド配置パラメータ（import-from-dfd と同様の単純グリッド） */
@@ -53,8 +56,9 @@ export class ImportMermaidUseCase {
     await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
 
     const mermaid = input.mermaid?.trim();
-    if (!mermaid) {
-      throw new ValidationError('Mermaid テキストが空です');
+    const description = input.description?.trim();
+    if (!mermaid && !description) {
+      throw new ValidationError('Mermaid テキストまたは説明文が必要です');
     }
 
     const apiKey = await this.companyKey.resolveForProject(input.projectId, input.userId);
@@ -63,11 +67,21 @@ export class ImportMermaidUseCase {
       throw new ValidationError('Anthropic APIキーが未設定です');
     }
 
-    const parsed = await this.claude.parseMermaidToObjectMap(mermaid, apiKey, {
+    const usageCtx = {
       projectId: input.projectId,
-      area: 'MERMAID_OBJECT',
+      area: 'MERMAID_OBJECT' as const,
       userId: input.userId,
-    });
+    };
+    let parsed;
+    if (mermaid) {
+      parsed = await this.claude.parseMermaidToObjectMap(mermaid, apiKey, usageCtx);
+    } else {
+      // 自然言語生成: 既存オブジェクト名を文脈に渡して表記ゆれ（同義の新規乱造）を防ぐ
+      const existing = await this.repo.findObjectGraph(input.projectId);
+      const names = existing.entries.map((e) => e.object.name).slice(0, 100);
+      const context = names.length ? `既存オブジェクト: ${names.join(' / ')}` : '';
+      parsed = await this.claude.generateObjectMapFromText(description!, context, apiKey, usageCtx);
+    }
 
     // 1. オブジェクトを get-or-create（グリッド配置・order 連番）
     let order = await this.repo.nextOrder(input.projectId);

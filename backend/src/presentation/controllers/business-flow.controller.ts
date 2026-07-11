@@ -58,6 +58,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ClaudeService } from '../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
+import { buildProjectContextText } from '../../infrastructure/services/project-context.util';
 import { v4 as uuid } from 'uuid';
 import { Public } from '../decorators/public.decorator';
 import { ShareLinkService } from '../../infrastructure/services/share-link.service';
@@ -418,8 +419,18 @@ class CreateChildFlowDto {
 }
 
 class ImportMermaidDto {
+  @IsOptional()
   @IsString()
-  mermaid: string;
+  mermaid?: string;
+
+  // 自然言語の業務説明から生成する場合に指定（mermaid と排他。どちらか必須）
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsIn(['ASIS', 'TOBE'])
+  flowKind?: 'ASIS' | 'TOBE';
 }
 
 class CreateNodeLinkDto {
@@ -2193,12 +2204,30 @@ export class BusinessFlowController {
       );
     }
 
-    // Claude API で Mermaid を解析
-    const parsed = await this.claudeService.parseMermaidToFlow(
-      dto.mermaid,
-      apiKey,
-      { projectId: flow.projectId, area: 'MERMAID_FLOW', userId: user.id },
-    );
+    const mermaidText = dto.mermaid?.trim();
+    const description = dto.description?.trim();
+    if (!mermaidText && !description) {
+      throw new HttpException(
+        'mermaid または description が必要です',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Claude API で解析（Mermaid）または自然言語＋プロジェクト文脈から生成
+    const usageCtx = {
+      projectId: flow.projectId,
+      area: 'MERMAID_FLOW' as const,
+      userId: user.id,
+    };
+    const parsed = mermaidText
+      ? await this.claudeService.parseMermaidToFlow(mermaidText, apiKey, usageCtx)
+      : await this.claudeService.generateFlowFromText(
+          description!,
+          await buildProjectContextText(this.prisma, flow.projectId),
+          dto.flowKind ?? (flow.kind === 'TOBE' ? 'TOBE' : 'ASIS'),
+          apiKey,
+          usageCtx,
+        );
 
     const projectId = flow.projectId;
     const VALID_NODE_TYPES = [

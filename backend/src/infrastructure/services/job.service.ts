@@ -7,6 +7,7 @@ import { QStashService } from './qstash.service';
 import { CompanyKeyService } from './company-key.service';
 import { ClaudeService } from './claude.service';
 import { CryptoService } from './crypto.service';
+import { buildProjectContextText } from './project-context.util';
 import { ImportMermaidUseCase } from '../../application/use-cases/data-object/import-mermaid.use-case';
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
 import { TrackerImportService } from './trackers/tracker-import.service';
@@ -402,11 +403,26 @@ export class JobService {
     switch (job.type) {
       // ===== 永続ジョブ（use-case 経由） =====
       case 'AI_MERMAID_OBJECTMAP': {
-        // 必須実装: Mermaid → オブジェクトマップ parse + 永続。
+        // Mermaid または自然言語説明 → オブジェクトマップ parse/生成 + 永続。
         const projectId = this.requireString(job.projectId, 'projectId');
         const userId = this.requireString(job.createdById, 'createdById');
-        const mermaid = this.requireString(payload.mermaid, 'payload.mermaid');
-        const graph = await this.importMermaid.execute({ userId, projectId, mermaid });
+        const mermaid =
+          typeof payload.mermaid === 'string' && payload.mermaid.trim()
+            ? payload.mermaid
+            : undefined;
+        const description =
+          typeof payload.description === 'string' && payload.description.trim()
+            ? payload.description
+            : undefined;
+        if (!mermaid && !description) {
+          throw new Error('payload.mermaid または payload.description が必要です');
+        }
+        const graph = await this.importMermaid.execute({
+          userId,
+          projectId,
+          mermaid,
+          description,
+        });
         return { kind: 'OBJECT_GRAPH', graph };
       }
 
@@ -434,13 +450,29 @@ export class JobService {
       // ===== compute ジョブ（parse 結果を result に返す。永続はクライアント側） =====
       case 'AI_MERMAID_FLOW': {
         const projectId = this.requireString(job.projectId, 'projectId');
-        const mermaid = this.requireString(payload.mermaid, 'payload.mermaid');
         const apiKey = await this.resolveKey(projectId, job.createdById);
-        const flow = await this.claude.parseMermaidToFlow(mermaid, apiKey, {
+        const usageCtx = {
           projectId,
-          area: 'MERMAID_FLOW',
+          area: 'MERMAID_FLOW' as const,
           userId: job.createdById,
-        });
+        };
+        const description =
+          typeof payload.description === 'string' && payload.description.trim()
+            ? payload.description.trim()
+            : undefined;
+        const flow = description
+          ? await this.claude.generateFlowFromText(
+              description,
+              await buildProjectContextText(this.prisma, projectId),
+              payload.flowKind === 'TOBE' ? 'TOBE' : 'ASIS',
+              apiKey,
+              usageCtx,
+            )
+          : await this.claude.parseMermaidToFlow(
+              this.requireString(payload.mermaid, 'payload.mermaid'),
+              apiKey,
+              usageCtx,
+            );
         return { kind: 'MERMAID_FLOW', flow };
       }
 

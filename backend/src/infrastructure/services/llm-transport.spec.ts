@@ -100,7 +100,7 @@ describe('IproBotTransport', () => {
       system: 'SYS',
       messages: [{ role: 'user', content: 'q' }],
       taskType: 'KPI',
-      projectRef: { adfProjectId: 'p1' },
+      projectRef: { projectId: 'p1' },
     });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://bot.example.com/api/ai/run'); // 末尾スラッシュは除去される
