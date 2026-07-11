@@ -459,6 +459,7 @@ import {
   NodeAttachmentByIdController,
 } from './presentation/controllers/node-attachment.controller';
 import { ClaudeService } from './infrastructure/services/claude.service';
+import { IproBotGatewayService } from './infrastructure/services/ipro-bot-gateway.service';
 import { ExcelTaskImportService } from './infrastructure/services/excel-task-import.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
@@ -1093,6 +1094,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     ProjectBundleService,
     EntityJsonService,
     ClaudeService,
+    IproBotGatewayService,
     ApiKeyService,
     CryptoService,
     CompanyKeyService,
