@@ -7,9 +7,9 @@
  * - ipro-agent が録画の文字起こしから自動投入するのと同じ API を、この画面の手動追加でも使う。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Loader2, Plus, Trash2, X, Save, CalendarClock, FileText } from 'lucide-react';
+import { Loader2, Plus, Trash2, X, Save, FileText, Search } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { EditGate } from '@/components/edit-gate';
@@ -73,7 +73,15 @@ export default function MeetingOccurrencesPage() {
   const [occurrences, setOccurrences] = useState<MeetingOccurrence[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 検索フィルタ：キーワード（横断）・会議帯・開催日レンジ。
+  const [q, setQ] = useState('');
+  const [filterMeetingId, setFilterMeetingId] = useState(''); // '' = すべて
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const hasFilter = q.trim() !== '' || filterMeetingId !== '' || from !== '' || to !== '';
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -81,32 +89,51 @@ export default function MeetingOccurrencesPage() {
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setError(null);
-    try {
-      const [oc, mt] = await Promise.all([
-        listMeetingOccurrences(projectId),
-        // 会議帯は選択肢。取得失敗しても実会議一覧は壊さない。
-        listMeetings(projectId).catch(() => [] as Meeting[]),
-      ]);
-      setOccurrences(oc);
-      setMeetings(mt);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '読み込みに失敗しました');
-    }
-  }, [projectId]);
-
+  // 会議帯（選択肢）は一度だけ取得。失敗しても一覧は壊さない。
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setLoading(true);
-      await reload();
-      if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [reload]);
+    listMeetings(projectId)
+      .then((mt) => { if (!cancelled) setMeetings(mt); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // 実会議一覧の取得（現在のフィルタで検索）。連打で順序が入れ替わっても最後の結果だけ採用。
+  const seq = useRef(0);
+  const reloadOccurrences = useCallback(async () => {
+    const my = ++seq.current;
+    setSearching(true);
+    setError(null);
+    try {
+      const oc = await listMeetingOccurrences(projectId, {
+        q,
+        meetingId: filterMeetingId || undefined,
+        from: from || undefined,
+        to: to || undefined,
+      });
+      if (my === seq.current) setOccurrences(oc);
+    } catch (e) {
+      if (my === seq.current) setError(e instanceof Error ? e.message : '読み込みに失敗しました');
+    } finally {
+      if (my === seq.current) {
+        setSearching(false);
+        setLoading(false);
+      }
+    }
+  }, [projectId, q, filterMeetingId, from, to]);
+
+  // フィルタ変更で再検索（キーワード連打をデバウンスで束ねる）。
+  useEffect(() => {
+    const t = setTimeout(() => { void reloadOccurrences(); }, 250);
+    return () => clearTimeout(t);
+  }, [reloadOccurrences]);
+
+  const clearFilters = () => {
+    setQ('');
+    setFilterMeetingId('');
+    setFrom('');
+    setTo('');
+  };
 
   const meetingById = useMemo(() => new Map(meetings.map((m) => [m.id, m])), [meetings]);
 
@@ -138,7 +165,7 @@ export default function MeetingOccurrencesPage() {
     try {
       if (editId) await updateMeetingOccurrence(editId, input);
       else await createMeetingOccurrence(projectId, input);
-      await reload();
+      await reloadOccurrences();
       closeModal();
     } catch (e) {
       setModalError(e instanceof Error ? e.message : '保存に失敗しました');
@@ -152,7 +179,7 @@ export default function MeetingOccurrencesPage() {
     setError(null);
     try {
       await deleteMeetingOccurrence(o.id);
-      await reload();
+      await reloadOccurrences();
     } catch (e) {
       setError(e instanceof Error ? e.message : '削除に失敗しました');
     }
@@ -188,11 +215,64 @@ export default function MeetingOccurrencesPage() {
       />
 
       <EditGate dim={false}>
-        <div className="flex items-center justify-end">
+        {/* 検索バー：キーワードは題名・議事録・決定・ネクストアクション・出席者・アジェンダを横断。 */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            {searching ? (
+              <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-300" />
+            ) : null}
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="議事録・決定・ネクストアクション・出席者を横断検索"
+              className="w-full rounded-md border border-gray-300 py-1.5 pl-8 pr-8 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label="実会議をキーワードで検索"
+            />
+          </div>
+          <select
+            value={filterMeetingId}
+            onChange={(e) => setFilterMeetingId(e.target.value)}
+            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            aria-label="会議帯で絞り込み"
+          >
+            <option value="">会議帯：すべて</option>
+            {meetings.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            aria-label="開催日（開始）"
+            title="開催日：これ以降"
+          />
+          <span className="pb-1.5 text-xs text-gray-400">〜</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm text-gray-700 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            aria-label="開催日（終了）"
+            title="開催日：これ以前"
+          />
+          {hasFilter && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-sm text-gray-500 hover:bg-gray-50"
+            >
+              <X className="h-3.5 w-3.5" />
+              クリア
+            </button>
+          )}
           <button
             type="button"
             onClick={openCreate}
-            className="flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="ml-auto flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
             実会議を追加
@@ -268,7 +348,9 @@ export default function MeetingOccurrencesPage() {
                     {occurrences.length === 0 && (
                       <tr>
                         <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
-                          まだ実会議がありません。「実会議を追加」から始めましょう。
+                          {hasFilter
+                            ? '検索条件に一致する実会議がありません。条件を変えてください。'
+                            : 'まだ実会議がありません。「実会議を追加」から始めましょう。'}
                         </td>
                       </tr>
                     )}
@@ -278,7 +360,9 @@ export default function MeetingOccurrencesPage() {
             )}
             {!loading && (
               <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2">
-                <p className="text-xs text-gray-400">{occurrences.length} 件</p>
+                <p className="text-xs text-gray-400">
+                  {occurrences.length} 件{hasFilter ? '（検索結果）' : ''}
+                </p>
                 <button
                   type="button"
                   onClick={openCreate}

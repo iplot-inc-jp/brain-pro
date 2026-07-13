@@ -42,13 +42,28 @@ export interface MeetingOccurrenceInput {
   nextActions?: string | null;
 }
 
+export interface MeetingOccurrenceQuery {
+  meetingId?: string;
+  /** キーワード（題名・議事録・決定・ネクストアクション・出席者・アジェンダを横断） */
+  q?: string;
+  /** 開催日の下限（YYYY-MM-DD 等） */
+  from?: string;
+  /** 開催日の上限（YYYY-MM-DD 等） */
+  to?: string;
+}
+
 export async function listMeetingOccurrences(
   projectId: string,
-  meetingId?: string,
+  query?: MeetingOccurrenceQuery,
 ): Promise<MeetingOccurrence[]> {
-  const q = meetingId ? `?meetingId=${encodeURIComponent(meetingId)}` : '';
+  const params = new URLSearchParams();
+  if (query?.meetingId) params.set('meetingId', query.meetingId);
+  if (query?.q?.trim()) params.set('q', query.q.trim());
+  if (query?.from) params.set('from', query.from);
+  if (query?.to) params.set('to', query.to);
+  const qs = params.toString();
   const res = await fetch(
-    `${API_URL}/api/projects/${projectId}/meeting-occurrences${q}`,
+    `${API_URL}/api/projects/${projectId}/meeting-occurrences${qs ? `?${qs}` : ''}`,
     { headers: getHeaders() },
   );
   if (!res.ok) throw new Error('実会議の読み込みに失敗しました');

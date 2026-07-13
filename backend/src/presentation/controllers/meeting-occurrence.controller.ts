@@ -92,6 +92,14 @@ type OccRow = {
   updatedAt: Date;
 };
 
+// 検索の from/to をゆるく解釈（日付 or ISO8601）。不正・空は null（＝レンジ条件を付けない）。
+function parseDate(raw?: string): Date | undefined {
+  const s = (raw ?? '').trim();
+  if (!s) return undefined;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 function toResponse(o: OccRow) {
   return {
     id: o.id,
@@ -124,11 +132,39 @@ export class MeetingOccurrenceController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Get()
-  @ApiOperation({ summary: '実会議（議事録）一覧。会議帯IDでフィルタ可' })
+  @ApiOperation({
+    summary: '実会議（議事録）一覧・検索。会議帯ID / キーワード q / 開催日 from,to で絞り込み',
+  })
   @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
-  async list(@Param('projectId') projectId: string, @Query('meetingId') meetingId?: string) {
+  async list(
+    @Param('projectId') projectId: string,
+    @Query('meetingId') meetingId?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
     const where: Prisma.MeetingOccurrenceWhereInput = { projectId };
     if (meetingId) where.meetingId = meetingId;
+
+    // キーワードは題名・議事録・決定・ネクストアクション・出席者・アジェンダを横断（大小無視）。
+    const term = (q ?? '').trim();
+    if (term) {
+      const like = { contains: term, mode: 'insensitive' as const };
+      where.OR = [
+        { title: like },
+        { minutes: like },
+        { decisions: like },
+        { nextActions: like },
+        { attendees: like },
+        { agenda: like },
+      ];
+    }
+
+    // 開催日レンジ（heldAt）。from/to は日付 or ISO8601。不正値は無視して壊さない。
+    const gte = parseDate(from);
+    const lte = parseDate(to);
+    if (gte || lte) where.heldAt = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
+
     const rows = await this.prisma.meetingOccurrence.findMany({
       where,
       orderBy: [{ heldAt: 'desc' }, { createdAt: 'desc' }],
