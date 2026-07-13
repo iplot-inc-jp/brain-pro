@@ -451,6 +451,10 @@ import {
   MeetingDocumentByIdController,
 } from './presentation/controllers/meeting-document.controller';
 import {
+  MeetingOccurrenceController,
+  MeetingOccurrenceByIdController,
+} from './presentation/controllers/meeting-occurrence.controller';
+import {
   DiagramElementController,
   DiagramElementByIdController,
 } from './presentation/controllers/diagram-element.controller';
@@ -588,6 +592,9 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // ミーティングドキュメント（会議ごとに複数・INTERNAL=Liveblocks/GOOGLE_DOC=リンク）
     MeetingDocumentController,
     MeetingDocumentByIdController,
+    // 実会議（議事録）＝会議帯の1回分。議事録・決定・ネクストアクション。単発/例外会議は会議帯なしで作成可
+    MeetingOccurrenceController,
+    MeetingOccurrenceByIdController,
     // 図要素（FLOW/DFD/OBJECT_MAP 共通 movable canvas 要素）
     DiagramElementController,
     DiagramElementByIdController,

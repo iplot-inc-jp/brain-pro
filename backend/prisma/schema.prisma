@@ -292,6 +292,7 @@ model Project {
   stakeholders      Stakeholder[]
   meetings          Meeting[]
   meetingDocuments  MeetingDocument[]
+  meetingOccurrences MeetingOccurrence[]
   risks             Risk[]
   riskCategories    RiskCategory[]
   suppliers         Supplier[]
@@ -2069,8 +2070,39 @@ model Meeting {
   risks           Risk[]
   subProjects     MeetingSubProject[]
   documents       MeetingDocument[]
+  occurrences     MeetingOccurrence[]
 
   @@map("meetings")
+}
+
+// 実際に開催された会議1回分（＝会議帯 Meeting の「回」）。会議帯が定義（名前/頻度/アジェンダ雛形）なのに対し、
+// こちらは開催実体: 日時・出席者・議事録本文・決定事項・ネクストアクション・出典を持つ。
+// meetingId で会議帯に紐づくのが基本。単発/例外会議（どの会議帯にも属さない）は meetingId=null で成立させる。
+// ネクストアクションは nextActions（生テキスト）に加え、Task へ変換して projectId 配下に自動追加する運用
+// （ipro-agent の変換ワーカーが担う）。source は出典（例: "ipro-db:recording:42"）。
+model MeetingOccurrence {
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  meetingId   String?   @map("meeting_id") // 会議帯(Meeting)。null=例外/単発会議
+  title       String
+  heldAt      DateTime? @map("held_at") // 開催日時
+  attendees   String?   @db.Text // 出席者（名前列挙。Stakeholder/人物への正規化は将来）
+  agenda      String?   @db.Text
+  minutes     String?   @db.Text // 議事録本文
+  decisions   String?   @db.Text // 決定事項
+  nextActions String?   @map("next_actions") @db.Text // ネクストアクション（生。Task へ変換して追加）
+  source      String? // 出典（例: ipro-db:recording:42）
+  sourceRef   String?   @map("source_ref")
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([meetingId])
+  @@map("meeting_occurrences")
 }
 
 // ===========================================
