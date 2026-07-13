@@ -22,7 +22,11 @@ export default function AccountSettingsPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [apiKey] = useState('df_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+  // 公開API/MCP用のAPIキー（sk_…）。IPROくん等の外部連携で使う。発行時だけ平文が返る。
+  const [apiKeys, setApiKeys] = useState<Array<{ id: string; name: string; keyPrefix: string; projectId: string | null; createdAt: string }>>([]);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [issuedKey, setIssuedKey] = useState<string | null>(null); // 発行直後だけ表示する平文キー
+  const [keysBusy, setKeysBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
   // AI APIキー
@@ -55,6 +59,8 @@ export default function AccountSettingsPage() {
 
     // ユーザー設定を取得
     fetchUserSettings();
+    // 発行済みAPIキー一覧を取得
+    fetchApiKeys();
   }, []);
 
   const fetchUserSettings = async () => {
@@ -244,8 +250,61 @@ export default function AccountSettingsPage() {
     }
   };
 
-  const copyApiKey = () => {
-    navigator.clipboard.writeText(apiKey);
+  // 公開APIキー（sk_…）: 発行 / 一覧 / 失効。バックエンドは POST/GET/DELETE /api/api-keys。
+  const fetchApiKeys = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/api-keys`, { headers: getHeaders() });
+      if (res.ok) setApiKeys(await res.json());
+    } catch (err) {
+      console.error('Failed to fetch api keys:', err);
+    }
+  }, [getHeaders]);
+
+  const handleIssueKey = async () => {
+    const name = newKeyName.trim() || 'IPROくん連携';
+    setKeysBusy(true);
+    setMessage(null);
+    setIssuedKey(null);
+    try {
+      const res = await fetch(`${API_URL}/api/api-keys`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIssuedKey(data.key); // 平文キーはこのレスポンスでのみ返る
+        setNewKeyName('');
+        await fetchApiKeys();
+        setMessage({ type: 'success', text: 'APIキーを発行しました。下のキーを今すぐコピーしてください（再表示できません）。' });
+      } else {
+        setMessage({ type: 'error', text: 'APIキーの発行に失敗しました（ログイン状態を確認してください）' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'エラーが発生しました' });
+    } finally {
+      setKeysBusy(false);
+    }
+  };
+
+  const handleRevokeKey = async (id: string) => {
+    if (!window.confirm('このAPIキーを失効しますか？このキーを使っている連携は無効になります。')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/api-keys/${id}`, { method: 'DELETE', headers: getHeaders() });
+      if (res.ok) {
+        await fetchApiKeys();
+        setMessage({ type: 'success', text: 'APIキーを失効しました' });
+      } else {
+        setMessage({ type: 'error', text: '失効に失敗しました' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: '失効に失敗しました' });
+    }
+  };
+
+  const copyIssuedKey = () => {
+    if (!issuedKey) return;
+    navigator.clipboard.writeText(issuedKey);
     setMessage({ type: 'success', text: 'APIキーをコピーしました' });
   };
 
@@ -543,27 +602,65 @@ export default function AccountSettingsPage() {
             <CardContent className="space-y-6">
               <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-sm text-gray-600 mb-4">
-                  APIキーを使用して、外部ツールやAIエージェントからBrain Proのデータにアクセスできます。
+                  公開API・AIエージェント（IPROくん等）向けのAPIキー（<code className="font-mono">sk_…</code>）を発行します。
+                  キーは<strong>発行時に一度だけ全体が表示され</strong>、以後は先頭のみ表示されます。必ず控えを保存してください。
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
-                    value={apiKey}
-                    readOnly
-                    className="bg-white border-gray-300 text-gray-700 font-mono"
+                    placeholder="キーの名前（例: IPROくん連携）"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    className="bg-white border-gray-300 text-gray-700"
                   />
-                  <Button variant="outline" onClick={copyApiKey} className="border-gray-300 text-gray-700 shrink-0">
-                    コピー
+                  <Button onClick={handleIssueKey} disabled={keysBusy} className="shrink-0">
+                    {keysBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'キーを発行'}
                   </Button>
                 </div>
+                {issuedKey && (
+                  <div className="mt-4 p-3 rounded-lg border border-amber-300 bg-amber-50">
+                    <p className="text-xs text-amber-800 mb-2">
+                      ⚠️ このキーは今だけ表示されます。今すぐコピーして安全な場所に保存してください（再表示できません）。
+                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input readOnly value={issuedKey} className="bg-white border-gray-300 text-gray-800 font-mono" />
+                      <Button variant="outline" onClick={copyIssuedKey} className="border-gray-300 text-gray-700 shrink-0">
+                        コピー
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-                <p className="text-sm text-gray-500">
-                  このキーを再生成すると、既存の連携が無効になります
-                </p>
-                <Button variant="outline" className="border-gray-300 text-gray-700 shrink-0">
-                  キーを再生成
-                </Button>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">発行済みのキー</p>
+                {apiKeys.length === 0 ? (
+                  <p className="text-sm text-gray-500">まだ発行されたキーはありません。</p>
+                ) : (
+                  apiKeys.map((k) => (
+                    <div key={k.id} className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white">
+                      <div>
+                        <p className="text-sm text-gray-800">{k.name}</p>
+                        <p className="text-xs text-gray-500 font-mono">
+                          {k.keyPrefix}…・{new Date(k.createdAt).toLocaleDateString('ja-JP')}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleRevokeKey(k.id)}
+                        className="border-red-200 text-red-600 hover:bg-red-50 shrink-0"
+                        title="このキーを失効"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
               </div>
+
+              <p className="text-xs text-gray-500">
+                発行したキーを IPROくんの <span className="font-mono">agent.ipro.iplot.jp/agent/links</span> の「APIキー」欄に貼り、
+                このBrain ProのURLと一緒に保存すると連携が有効になります。
+              </p>
             </CardContent>
           </Card>
 
