@@ -78,6 +78,33 @@ describe('ProjectAccessGuard (feature-section import authz)', () => {
       'proj-1',
     );
   });
+
+  // 複数プロジェクト紐付けキー: ガードは projectIds を resolveForPrincipal に必ず渡すこと。
+  // （落とすと先頭以外のプロジェクトが 403 になる回帰。by-id ルートとの判定不一致も防ぐ。）
+  it('複数紐付けキーは projectIds を principal に載せて resolveForPrincipal に渡す', async () => {
+    const resolveForPrincipal = jest.fn().mockResolvedValue('EDIT');
+    const svc = {
+      resolveForPrincipal,
+      satisfies: realService.satisfies.bind(realService),
+    } as unknown as ProjectAccessService;
+    const ctx = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          method: 'POST',
+          // 先頭は proj-1 だが、アクセス先は 2つ目の proj-2。
+          user: { id: 'issuer', apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1', projectIds: ['proj-1', 'proj-2'] },
+          params: { projectId: 'proj-2' },
+        }),
+      }),
+      getClass: () => ({ name: 'FeatureIoController' }),
+    } as never;
+    const guard = new ProjectAccessGuard(svc);
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(resolveForPrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({ projectIds: ['proj-1', 'proj-2'] }),
+      'proj-2',
+    );
+  });
 });
 
 describe('ProjectAccessService.resolveForPrincipal（主体別スコープの一元判定）', () => {

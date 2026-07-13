@@ -39,7 +39,13 @@ export class ProjectAccessGuard implements CanActivate {
 
     // 認証情報が無いルート（@Public 等）には干渉しない。JwtAuthGuard に委ねる。
     const user = request.user as
-      | { id?: string; apiKeyRole?: ApiKeyRole; organizationId?: string | null; projectId?: string | null }
+      | {
+          id?: string;
+          apiKeyRole?: ApiKeyRole;
+          organizationId?: string | null;
+          projectId?: string | null;
+          projectIds?: string[] | null;
+        }
       | undefined;
     if (!user || !user.id) {
       return true;
@@ -60,6 +66,8 @@ export class ProjectAccessGuard implements CanActivate {
         apiKeyRole: user.apiKeyRole ?? null,
         organizationId: user.organizationId ?? null,
         projectId: user.projectId ?? null,
+        // 複数プロジェクト紐付けキーの全対象を渡す（これを落とすと先頭プロジェクト以外が 403 になる）。
+        projectIds: user.projectIds ?? null,
       },
       projectId,
     );
