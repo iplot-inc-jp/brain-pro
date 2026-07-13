@@ -23,13 +23,13 @@ export default function AccountSettingsPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   // 公開API/MCP用のサービスアカウントAPIキー（sk_…）。IPROくん等の外部連携で使う。発行時だけ平文が返る。
-  const [apiKeys, setApiKeys] = useState<Array<{ id: string; name: string; role?: string; organizationId?: string | null; keyPrefix: string; projectId: string | null; createdAt: string }>>([]);
+  const [apiKeys, setApiKeys] = useState<Array<{ id: string; name: string; role?: string; organizationId?: string | null; keyPrefix: string; projectId: string | null; projectIds?: string[]; createdAt: string }>>([]);
   const [newKeyName, setNewKeyName] = useState('');
   const [keyRole, setKeyRole] = useState<'COMPANY_ADMIN' | 'GENERAL_USER'>('COMPANY_ADMIN');
   const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [orgProjects, setOrgProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]); // 一般ユーザーキーの紐付け先（複数可）
   const [issuedKey, setIssuedKey] = useState<string | null>(null); // 発行直後だけ表示する平文キー
   const [keysBusy, setKeysBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -289,7 +289,8 @@ export default function AccountSettingsPage() {
       if (res.ok) {
         const data: Array<{ id: string; name: string }> = await res.json();
         setOrgProjects(data);
-        setSelectedProjectId((cur) => cur || data[0]?.id || '');
+        // 複数選択なので既定は未選択のまま。存在しなくなった選択は落とす。
+        setSelectedProjectIds((cur) => cur.filter((id) => data.some((p) => p.id === id)));
       } else {
         setOrgProjects([]);
       }
@@ -309,8 +310,8 @@ export default function AccountSettingsPage() {
       setMessage({ type: 'error', text: '会社を選択してください' });
       return;
     }
-    if (keyRole === 'GENERAL_USER' && !selectedProjectId) {
-      setMessage({ type: 'error', text: '一般ユーザーのキーには紐付けるプロジェクトが必要です' });
+    if (keyRole === 'GENERAL_USER' && selectedProjectIds.length === 0) {
+      setMessage({ type: 'error', text: '一般ユーザーのキーには紐付けるプロジェクト（1つ以上）が必要です' });
       return;
     }
     setKeysBusy(true);
@@ -324,7 +325,7 @@ export default function AccountSettingsPage() {
           name,
           role: keyRole,
           organizationId: selectedOrgId,
-          ...(keyRole === 'GENERAL_USER' ? { projectId: selectedProjectId } : {}),
+          ...(keyRole === 'GENERAL_USER' ? { projectIds: selectedProjectIds } : {}),
         }),
       });
       if (res.ok) {
@@ -668,7 +669,7 @@ export default function AccountSettingsPage() {
                     <Label className="text-xs text-gray-600">会社</Label>
                     <select
                       value={selectedOrgId}
-                      onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId(''); }}
+                      onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectIds([]); }}
                       className="w-full h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-700"
                     >
                       {orgs.length === 0 && <option value="">（会社がありません）</option>}
@@ -690,17 +691,45 @@ export default function AccountSettingsPage() {
                   </div>
                   {keyRole === 'GENERAL_USER' && (
                     <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-xs text-gray-600">紐付けるプロジェクト</Label>
-                      <select
-                        value={selectedProjectId}
-                        onChange={(e) => setSelectedProjectId(e.target.value)}
-                        className="w-full h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-700"
-                      >
-                        {orgProjects.length === 0 && <option value="">（この会社にプロジェクトがありません）</option>}
-                        {orgProjects.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
+                      <Label className="text-xs text-gray-600">
+                        紐付けるプロジェクト（複数選択可）
+                        {selectedProjectIds.length > 0 && (
+                          <span className="ml-2 text-gray-400">{selectedProjectIds.length}件選択中</span>
+                        )}
+                      </Label>
+                      {orgProjects.length === 0 ? (
+                        <p className="text-sm text-gray-400 py-2">（この会社にプロジェクトがありません）</p>
+                      ) : (
+                        <div className="max-h-48 overflow-y-auto rounded-md border border-gray-300 bg-white divide-y divide-gray-100">
+                          <label className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={orgProjects.length > 0 && selectedProjectIds.length === orgProjects.length}
+                              ref={(el) => {
+                                if (el) el.indeterminate = selectedProjectIds.length > 0 && selectedProjectIds.length < orgProjects.length;
+                              }}
+                              onChange={(e) =>
+                                setSelectedProjectIds(e.target.checked ? orgProjects.map((p) => p.id) : [])
+                              }
+                            />
+                            すべて選択 / 解除
+                          </label>
+                          {orgProjects.map((p) => (
+                            <label key={p.id} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={selectedProjectIds.includes(p.id)}
+                                onChange={(e) =>
+                                  setSelectedProjectIds((cur) =>
+                                    e.target.checked ? [...cur, p.id] : cur.filter((id) => id !== p.id),
+                                  )
+                                }
+                              />
+                              {p.name}
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -749,7 +778,8 @@ export default function AccountSettingsPage() {
                         <p className="text-xs text-gray-500 font-mono">
                           {k.keyPrefix}…
                           {k.organizationId && `・${orgs.find((o) => o.id === k.organizationId)?.name ?? '会社'}`}
-                          {k.projectId && '・案件紐付け'}
+                          {(k.projectIds?.length ?? (k.projectId ? 1 : 0)) > 0 &&
+                            `・${k.projectIds?.length ?? 1}案件紐付け`}
                           ・{new Date(k.createdAt).toLocaleDateString('ja-JP')}
                         </p>
                       </div>

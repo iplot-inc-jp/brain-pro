@@ -10,7 +10,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsArray, MaxLength } from 'class-validator';
 import { ApiKeyRole } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ApiKeyService } from '../../infrastructure/services/api-key.service';
@@ -29,10 +29,16 @@ class CreateApiKeyDto {
   @IsString()
   organizationId: string;
 
-  // GENERAL_USER のとき必須（紐付けプロジェクト）
+  // GENERAL_USER のとき必須（紐付けプロジェクト・単一）。後方互換のため残す。
   @IsOptional()
   @IsString()
   projectId?: string;
+
+  // GENERAL_USER のとき紐付けプロジェクト（複数可）。projectIds があればこちらを優先。
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  projectIds?: string[];
 }
 
 /**
@@ -77,20 +83,36 @@ export class ApiKeyController {
     if (!org) throw new BadRequestException('会社が見つかりません');
     await this.assertOrgAdmin(user.id, dto.organizationId);
 
-    // 一般ユーザーは projectId 必須＋その会社のプロジェクトであること
-    let projectId: string | null = null;
+    // 一般ユーザーは紐付けプロジェクト（1つ以上）必須＋すべてその会社のプロジェクトであること。
+    let projectId: string | null = null; // 後方互換の単一フィールド（先頭を入れる）
+    let linkedProjectIds: string[] = [];
     if (dto.role === ApiKeyRole.GENERAL_USER) {
-      if (!dto.projectId) {
-        throw new BadRequestException('一般ユーザーのキーには projectId（紐付けプロジェクト）が必要です');
+      // projectIds があればそれを、無ければ単一 projectId を使う（後方互換）。重複・空白は除去。
+      const requested =
+        dto.projectIds && dto.projectIds.length > 0
+          ? dto.projectIds
+          : dto.projectId
+            ? [dto.projectId]
+            : [];
+      const ids = [...new Set(requested.map((s) => s.trim()).filter(Boolean))];
+      if (ids.length === 0) {
+        throw new BadRequestException('一般ユーザーのキーには紐付けプロジェクト（1つ以上）が必要です');
       }
-      const project = await this.prisma.project.findUnique({
-        where: { id: dto.projectId },
-        select: { organizationId: true },
+      // すべて実在し、かつこの会社のプロジェクトであることを検証（越境紐付けを防ぐ）。
+      const projects = await this.prisma.project.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, organizationId: true },
       });
-      if (!project || project.organizationId !== dto.organizationId) {
-        throw new BadRequestException('projectId がこの会社のプロジェクトではありません');
+      if (
+        projects.length !== ids.length ||
+        projects.some((p) => p.organizationId !== dto.organizationId)
+      ) {
+        throw new BadRequestException(
+          '紐付けプロジェクトに、この会社以外のものか存在しないものが含まれています',
+        );
       }
-      projectId = dto.projectId;
+      linkedProjectIds = ids;
+      projectId = ids[0];
     }
 
     const { key, keyHash, keyPrefix } = this.apiKeyService.generate();
@@ -103,6 +125,9 @@ export class ApiKeyController {
         name: dto.name,
         keyHash,
         keyPrefix,
+        ...(linkedProjectIds.length > 0
+          ? { projects: { create: linkedProjectIds.map((pid) => ({ projectId: pid })) } }
+          : {}),
       },
     });
     return {
@@ -111,6 +136,7 @@ export class ApiKeyController {
       role: record.role,
       organizationId: record.organizationId,
       projectId: record.projectId,
+      projectIds: linkedProjectIds,
       keyPrefix: record.keyPrefix,
       key, // 平文（このレスポンスでのみ）
       createdAt: record.createdAt,
@@ -120,7 +146,7 @@ export class ApiKeyController {
   @Get()
   @ApiOperation({ summary: 'APIキー一覧（平文は含まない）' })
   async list(@CurrentUser() user: CurrentUserPayload) {
-    return this.prisma.apiKey.findMany({
+    const keys = await this.prisma.apiKey.findMany({
       where: { userId: user.id, revokedAt: null },
       select: {
         id: true,
@@ -131,9 +157,20 @@ export class ApiKeyController {
         keyPrefix: true,
         lastUsedAt: true,
         createdAt: true,
+        projects: { select: { projectId: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
+    // projectIds は結合テーブル優先、無ければ旧来の単一 projectId にフォールバック（後方互換）。
+    return keys.map(({ projects, ...k }) => ({
+      ...k,
+      projectIds:
+        projects.length > 0
+          ? projects.map((p) => p.projectId)
+          : k.projectId
+            ? [k.projectId]
+            : [],
+    }));
   }
 
   @Delete(':id')

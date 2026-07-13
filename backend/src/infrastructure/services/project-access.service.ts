@@ -8,6 +8,8 @@ export interface ApiKeyScope {
   apiKeyRole: ApiKeyRole;
   organizationId: string | null;
   projectId: string | null;
+  // GENERAL_USER キーが紐付く全プロジェクト（複数可）。空/未指定なら projectId（単一）にフォールバック。
+  projectIds?: string[] | null;
 }
 
 /**
@@ -19,6 +21,7 @@ export interface AccessPrincipal {
   apiKeyRole?: ApiKeyRole | null;
   organizationId?: string | null;
   projectId?: string | null;
+  projectIds?: string[] | null;
 }
 
 /**
@@ -109,7 +112,7 @@ export class ProjectAccessService {
    * 発行ユーザーの会員権限には依存せず、キー自身の会社・ロール・紐付けだけで判定する。
    *   - 他社のプロジェクト … 常に null（越境不可）
    *   - COMPANY_ADMIN     … 自社の全プロジェクトで EDIT
-   *   - GENERAL_USER      … 紐付いた projectId のみ EDIT、それ以外は null
+   *   - GENERAL_USER      … 紐付いたプロジェクト（複数可）のみ EDIT、それ以外は null
    */
   async resolveApiKeyProjectAccess(
     scope: ApiKeyScope,
@@ -124,8 +127,14 @@ export class ProjectAccessService {
       return null; // 会社が違う（またはキーに会社が無い）
     }
     if (scope.apiKeyRole === ApiKeyRole.COMPANY_ADMIN) return 'EDIT';
-    // GENERAL_USER: 紐付いたプロジェクトだけ
-    if (scope.projectId && scope.projectId === targetProjectId) return 'EDIT';
+    // GENERAL_USER: 紐付いたプロジェクトだけ（複数可）。結合が空なら旧来の単一 projectId にフォールバック。
+    const linked =
+      scope.projectIds && scope.projectIds.length > 0
+        ? scope.projectIds
+        : scope.projectId
+          ? [scope.projectId]
+          : [];
+    if (linked.includes(targetProjectId)) return 'EDIT';
     return null;
   }
 
@@ -151,6 +160,7 @@ export class ProjectAccessService {
           apiKeyRole: principal.apiKeyRole,
           organizationId: principal.organizationId,
           projectId: principal.projectId ?? null,
+          projectIds: principal.projectIds ?? null,
         },
         targetProjectId,
       );

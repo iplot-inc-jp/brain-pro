@@ -45,10 +45,19 @@ export class JwtAuthGuard implements CanActivate {
     if (apiKey) {
       const record = await this.prisma.apiKey.findUnique({
         where: { keyHash: this.apiKeyService.hash(apiKey) },
+        include: { projects: { select: { projectId: true } } },
       });
       if (!record || record.revokedAt) {
         throw new UnauthorizedException('Invalid or revoked API key');
       }
+      // GENERAL_USER キーの紐付けプロジェクト（複数可）。結合テーブルが空なら旧来の単一 projectId に
+      // フォールバック（＝移行前に発行された単一プロジェクトキーもそのまま動く・後方互換）。
+      const projectIds =
+        record.projects.length > 0
+          ? record.projects.map((p) => p.projectId)
+          : record.projectId
+            ? [record.projectId]
+            : [];
       // サービスアカウントのスコープを request.user に載せる（会社・ロール・紐付けプロジェクト）。
       // 認可判定は ProjectAccessGuard がこのスコープで行う（発行ユーザーの会員権限には依存しない）。
       request.user = {
@@ -58,6 +67,7 @@ export class JwtAuthGuard implements CanActivate {
         apiKeyRole: record.role,
         organizationId: record.organizationId,
         projectId: record.projectId,
+        projectIds,
       };
       // 最終利用日時を更新（失敗しても認証は継続）
       this.prisma.apiKey

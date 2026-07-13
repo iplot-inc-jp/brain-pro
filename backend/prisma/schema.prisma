@@ -277,6 +277,7 @@ model Project {
   issueTrees    IssueTree[]
   gapItems      GapItem[]
   apiKeys       ApiKey[]
+  apiKeyProjects ApiKeyProject[]
   githubConnections GithubConnection[]
   pageScreenshots   PageScreenshot[]
   apiEndpoints      ApiEndpoint[]
@@ -1277,8 +1278,23 @@ model ApiKey {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // GENERAL_USER キーが紐付く複数プロジェクト（多対多）。旧キーは projectId（単一）のまま＝後方互換。
+  projects     ApiKeyProject[]
 
   @@map("api_keys")
+}
+
+// サービスアカウントAPIキー ⇄ プロジェクトの多対多（GENERAL_USER キーを複数プロジェクトに紐付ける）。
+// 旧来の単一 ApiKey.projectId は後方互換のため残す（この結合が空なら projectId にフォールバック）。
+model ApiKeyProject {
+  apiKeyId  String @map("api_key_id")
+  projectId String @map("project_id")
+
+  apiKey  ApiKey  @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([apiKeyId, projectId])
+  @@map("api_key_projects")
 }
 
 // APIキーのロール（サービスアカウント）。企業管理者=自社フル / 一般ユーザー=紐付けプロジェクトのみ。

@@ -13,6 +13,8 @@ export interface CurrentUserPayload {
   apiKeyRole?: ApiKeyRole | null;
   organizationId?: string | null;
   projectId?: string | null;
+  // GENERAL_USER キーが紐付く全プロジェクト（複数可）。空/未設定なら projectId（単一）にフォールバック。
+  projectIds?: string[] | null;
 }
 
 export const CurrentUser = createParamDecorator(

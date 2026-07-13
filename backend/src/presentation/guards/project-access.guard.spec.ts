@@ -173,4 +173,31 @@ describe('ProjectAccessService.resolveApiKeyProjectAccess (サービスアカウ
     );
     expect(level).toBeNull();
   });
+
+  it('GENERAL_USER は projectIds（複数紐付け）のいずれでも EDIT', async () => {
+    const svc = makeSvc('org-1');
+    const a = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1', projectIds: ['proj-1', 'proj-2'] },
+      'proj-2',
+    );
+    expect(a).toBe('EDIT');
+  });
+
+  it('GENERAL_USER は projectIds 外のプロジェクトは同じ会社でも null', async () => {
+    const svc = makeSvc('org-1');
+    const level = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1', projectIds: ['proj-1', 'proj-2'] },
+      'proj-3',
+    );
+    expect(level).toBeNull();
+  });
+
+  it('GENERAL_USER は projectIds が空なら旧来の単一 projectId にフォールバック（後方互換）', async () => {
+    const svc = makeSvc('org-1');
+    const level = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1', projectIds: [] },
+      'proj-1',
+    );
+    expect(level).toBe('EDIT');
+  });
 });
