@@ -52,17 +52,17 @@ export class ProjectAccessGuard implements CanActivate {
     }
 
     const required = this.requiredLevel(request.method);
-    // サービスアカウントAPIキーの場合は、発行者の会員権限ではなくキー自身のスコープで判定する。
-    const level = user.apiKeyRole
-      ? await this.projectAccess.resolveApiKeyProjectAccess(
-          {
-            apiKeyRole: user.apiKeyRole,
-            organizationId: user.organizationId ?? null,
-            projectId: user.projectId ?? null,
-          },
-          projectId,
-        )
-      : await this.projectAccess.resolveProjectAccess(projectId, user.id);
+    // ユーザーは会員RBAC / サービスアカウントAPIキーはキー自身のスコープで判定（＋旧キーは発行者権限に
+    // フォールバック）。判定ロジックは resolveForPrincipal に一元化（by-id ルートと同じ入口）。
+    const level = await this.projectAccess.resolveForPrincipal(
+      {
+        id: user.id,
+        apiKeyRole: user.apiKeyRole ?? null,
+        organizationId: user.organizationId ?? null,
+        projectId: user.projectId ?? null,
+      },
+      projectId,
+    );
     if (this.projectAccess.satisfies(level, required)) {
       return true;
     }

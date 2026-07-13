@@ -11,6 +11,17 @@ export interface ApiKeyScope {
 }
 
 /**
+ * リクエストの主体（JWTユーザー or サービスアカウントAPIキー）。
+ * apiKeyRole があればサービスアカウント。organizationId は紐付いた会社（旧キーは未設定）。
+ */
+export interface AccessPrincipal {
+  id: string;
+  apiKeyRole?: ApiKeyRole | null;
+  organizationId?: string | null;
+  projectId?: string | null;
+}
+
+/**
  * プロジェクト単位の実効アクセスレベル。
  *   EDIT … view / edit 両方を満たす
  *   VIEW … view のみ満たす
@@ -119,6 +130,36 @@ export class ProjectAccessService {
   }
 
   /**
+   * リクエスト主体（ユーザー or APIキー）の実効アクセスレベルを解決する。
+   * これが「JWTユーザーは会員RBAC / サービスアカウントはキーのスコープ」を判定する唯一の入口で、
+   * ガード（プロジェクト配下ルート）と by-id コントローラの両方がここを通す（＝スコープ判定が二重実装で食い違わない）。
+   *
+   * ★後方互換: apiKeyRole はあるが organizationId 未設定のキー（サービスアカウント化の移行前から
+   *   存在する旧キー）は、発行者の会員権限にフォールバックする（＝移行前と同じ挙動）。
+   *   これを入れないと、移行で全既存キーが role=GENERAL_USER / org=NULL になり、保護ルートで一律 403 になる。
+   *   不変条件: 新規キーの発行（api-key.controller の create）は organizationId を必須にしているので、
+   *   organizationId 未設定＝移行前の旧キーだけ。新しいスコープ付きキーがこのフォールバックに落ちて
+   *   発行者権限に fail-open することはない（＝スコープ境界は緩まない）。
+   */
+  async resolveForPrincipal(
+    principal: AccessPrincipal,
+    targetProjectId: string,
+  ): Promise<ProjectAccessLevelValue | null> {
+    if (principal.apiKeyRole && principal.organizationId) {
+      return this.resolveApiKeyProjectAccess(
+        {
+          apiKeyRole: principal.apiKeyRole,
+          organizationId: principal.organizationId,
+          projectId: principal.projectId ?? null,
+        },
+        targetProjectId,
+      );
+    }
+    // 通常ユーザー、または organization 未設定の旧APIキー（発行者権限にフォールバック）。
+    return this.resolveProjectAccess(targetProjectId, principal.id);
+  }
+
+  /**
    * 必要レベルを満たさなければ ForbiddenError を throw。
    *   required='view' … EDIT または VIEW で充足
    *   required='edit' … EDIT のみ充足
@@ -129,6 +170,24 @@ export class ProjectAccessService {
     required: RequiredAccess,
   ): Promise<void> {
     const level = await this.resolveProjectAccess(projectId, userId);
+    if (this.satisfies(level, required)) return;
+    throw new ForbiddenError(
+      required === 'edit'
+        ? 'You do not have edit access to this project'
+        : 'You do not have access to this project',
+    );
+  }
+
+  /**
+   * resolveForPrincipal 版の assert（主体がユーザーでもAPIキーでも正しくスコープ判定する）。
+   * by-id ルート（URL に projectId が無く、行から projectId を解決するルート）はこれを使うこと。
+   */
+  async assertPrincipalAccess(
+    principal: AccessPrincipal,
+    targetProjectId: string,
+    required: RequiredAccess,
+  ): Promise<void> {
+    const level = await this.resolveForPrincipal(principal, targetProjectId);
     if (this.satisfies(level, required)) return;
     throw new ForbiddenError(
       required === 'edit'

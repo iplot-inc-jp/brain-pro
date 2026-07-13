@@ -9,11 +9,11 @@ import { ProjectAccessService } from '../../infrastructure/services/project-acce
  * このガードの method 別ゲートがそのまま import/export に適用される。
  */
 describe('ProjectAccessGuard (feature-section import authz)', () => {
-  // satisfies は実装をそのまま使い、resolveProjectAccess だけ VIEW を返す。
+  // satisfies は実装をそのまま使い、resolveForPrincipal（主体別の実効レベル解決の一元入口）だけモックする。
   const realService = new ProjectAccessService({} as never);
   const makeService = (level: 'EDIT' | 'VIEW' | null) =>
     ({
-      resolveProjectAccess: jest.fn().mockResolvedValue(level),
+      resolveForPrincipal: jest.fn().mockResolvedValue(level),
       satisfies: realService.satisfies.bind(realService),
     }) as unknown as ProjectAccessService;
 
@@ -53,13 +53,12 @@ describe('ProjectAccessGuard (feature-section import authz)', () => {
     );
   });
 
-  // サービスアカウントAPIキーのリクエストは、発行者の会員権限ではなくキーのスコープで判定する。
-  it('APIキー(apiKeyRole)のリクエストは resolveApiKeyProjectAccess で判定（user 権限は見ない）', async () => {
-    const resolveApiKeyProjectAccess = jest.fn().mockResolvedValue('EDIT');
-    const resolveProjectAccess = jest.fn().mockResolvedValue(null);
+  // サービスアカウントAPIキーのリクエストは、発行者の会員権限ではなくキーのスコープで判定する
+  // （resolveForPrincipal が内部で resolveApiKeyProjectAccess/フォールバックを振り分ける）。
+  it('APIキー(apiKeyRole)のリクエストは resolveForPrincipal に principal を渡して判定する', async () => {
+    const resolveForPrincipal = jest.fn().mockResolvedValue('EDIT');
     const svc = {
-      resolveApiKeyProjectAccess,
-      resolveProjectAccess,
+      resolveForPrincipal,
       satisfies: realService.satisfies.bind(realService),
     } as unknown as ProjectAccessService;
     const ctx = {
@@ -74,8 +73,49 @@ describe('ProjectAccessGuard (feature-section import authz)', () => {
     } as never;
     const guard = new ProjectAccessGuard(svc);
     await expect(guard.canActivate(ctx)).resolves.toBe(true);
-    expect(resolveApiKeyProjectAccess).toHaveBeenCalled();
-    expect(resolveProjectAccess).not.toHaveBeenCalled();
+    expect(resolveForPrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'issuer', apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org-1' }),
+      'proj-1',
+    );
+  });
+});
+
+describe('ProjectAccessService.resolveForPrincipal（主体別スコープの一元判定）', () => {
+  it('通常ユーザー（apiKeyRole 無し）は resolveProjectAccess にフォールバック', async () => {
+    const svc = new ProjectAccessService({} as never);
+    const spyUser = jest.spyOn(svc, 'resolveProjectAccess').mockResolvedValue('VIEW');
+    const spyKey = jest.spyOn(svc, 'resolveApiKeyProjectAccess');
+    const level = await svc.resolveForPrincipal({ id: 'u1' }, 'proj-1');
+    expect(level).toBe('VIEW');
+    expect(spyUser).toHaveBeenCalledWith('proj-1', 'u1');
+    expect(spyKey).not.toHaveBeenCalled();
+  });
+
+  it('会社紐付けのあるサービスアカウントキーは resolveApiKeyProjectAccess で判定', async () => {
+    const svc = new ProjectAccessService({} as never);
+    const spyKey = jest.spyOn(svc, 'resolveApiKeyProjectAccess').mockResolvedValue('EDIT');
+    const spyUser = jest.spyOn(svc, 'resolveProjectAccess');
+    const level = await svc.resolveForPrincipal(
+      { id: 'issuer', apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1' },
+      'proj-1',
+    );
+    expect(level).toBe('EDIT');
+    expect(spyKey).toHaveBeenCalled();
+    expect(spyUser).not.toHaveBeenCalled();
+  });
+
+  // ★後方互換の要: organizationId 未設定の旧キーは発行者権限にフォールバック（デプロイで 403 にしない）。
+  it('organizationId 未設定の旧APIキーは resolveProjectAccess（発行者権限）にフォールバック', async () => {
+    const svc = new ProjectAccessService({} as never);
+    const spyUser = jest.spyOn(svc, 'resolveProjectAccess').mockResolvedValue('EDIT');
+    const spyKey = jest.spyOn(svc, 'resolveApiKeyProjectAccess');
+    const level = await svc.resolveForPrincipal(
+      { id: 'issuer', apiKeyRole: 'GENERAL_USER', organizationId: null, projectId: null },
+      'proj-1',
+    );
+    expect(level).toBe('EDIT');
+    expect(spyUser).toHaveBeenCalledWith('proj-1', 'issuer');
+    expect(spyKey).not.toHaveBeenCalled();
   });
 });
 

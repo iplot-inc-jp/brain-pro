@@ -218,7 +218,7 @@ export class MeetingOccurrenceByIdController {
   @Get(':id')
   @ApiOperation({ summary: '実会議（議事録）1件' })
   async get(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.assertAccess(id, user.id, 'view');
+    await this.assertAccess(id, user, 'view');
     const row = await this.load(id);
     return toResponse(row as OccRow);
   }
@@ -226,7 +226,7 @@ export class MeetingOccurrenceByIdController {
   @Patch(':id')
   @ApiOperation({ summary: '実会議（議事録）を更新' })
   async patch(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string, @Body() dto: PatchMeetingOccurrenceDto) {
-    const { projectId } = await this.assertAccess(id, user.id, 'edit');
+    const { projectId } = await this.assertAccess(id, user, 'edit');
     if (dto.meetingId) await this.assertMeetingInProject(dto.meetingId, projectId);
     const row = await this.prisma.meetingOccurrence.update({
       where: { id },
@@ -249,7 +249,7 @@ export class MeetingOccurrenceByIdController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: '実会議（議事録）を削除' })
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.assertAccess(id, user.id, 'edit');
+    await this.assertAccess(id, user, 'edit');
     await this.prisma.meetingOccurrence.delete({ where: { id } });
   }
 
@@ -260,10 +260,17 @@ export class MeetingOccurrenceByIdController {
   }
 
   // 実会議→projectId をロードしてプロジェクトアクセスを明示検証（by-id ルートの認可）。
-  private async assertAccess(id: string, userId: string, required: 'view' | 'edit'): Promise<{ projectId: string }> {
+  // ★ principal 全体（＝APIキーのスコープを含む）で判定する assertPrincipalAccess を使うこと。
+  //   user.id だけ渡すと、APIキー時に発行者(会社管理者)の会員権限で通り、キーのプロジェクトスコープが
+  //   効かない（別プロジェクトの議事録を read/edit/DELETE できてしまう）。
+  private async assertAccess(
+    id: string,
+    principal: CurrentUserPayload,
+    required: 'view' | 'edit',
+  ): Promise<{ projectId: string }> {
     const row = await this.prisma.meetingOccurrence.findUnique({ where: { id }, select: { projectId: true } });
     if (!row) throw new NotFoundException('実会議が見つかりません');
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, required);
     return row;
   }
 

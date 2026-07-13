@@ -1,6 +1,7 @@
 // meeting-occurrence.controller.spec.ts
-// list() の検索条件（会議帯 / キーワード横断 / 開催日レンジ）が Prisma の where に正しく落ちるかを検証。
-import { MeetingOccurrenceController } from './meeting-occurrence.controller';
+// list() の検索条件（会議帯 / キーワード横断 / 開催日レンジ）が Prisma の where に正しく落ちるかと、
+// by-id ルートの認可が「principal（＝APIキーのスコープを含む）」で判定されるかを検証。
+import { MeetingOccurrenceController, MeetingOccurrenceByIdController } from './meeting-occurrence.controller';
 
 function makePrisma() {
   return {
@@ -76,5 +77,50 @@ describe('MeetingOccurrenceController.list（検索）', () => {
     await c.list('p1');
     const arg = prisma.meetingOccurrence.findMany.mock.calls.at(-1)[0];
     expect(arg.orderBy).toEqual([{ heldAt: 'desc' }, { createdAt: 'desc' }]);
+  });
+});
+
+describe('MeetingOccurrenceByIdController の認可（APIキーのプロジェクトスコープを効かせる）', () => {
+  const occRow = { id: 'occ2', projectId: 'P2', title: 't', heldAt: null, attendees: null, agenda: null, minutes: null, decisions: null, nextActions: null, source: null, sourceRef: null, order: 0, createdAt: new Date(), updatedAt: new Date() };
+  function makePrismaById() {
+    return {
+      meetingOccurrence: {
+        findUnique: jest.fn(async ({ select }: any) => (select?.projectId ? { projectId: 'P2' } : occRow)),
+        update: jest.fn(async () => occRow),
+        delete: jest.fn(async () => occRow),
+      },
+      meeting: { findFirst: jest.fn(async () => ({ id: 'm1' })) },
+    } as any;
+  }
+  // 実 ProjectAccessService は使わず、assertPrincipalAccess の呼ばれ方だけを検証する。
+  function makeAccess() {
+    return { assertPrincipalAccess: jest.fn(async () => undefined) } as any;
+  }
+  const generalKeyPrincipal = { id: 'issuer', email: '', apiKeyRole: 'GENERAL_USER', organizationId: 'orgA', projectId: 'P1' };
+
+  it('GET :id は assertProjectAccess(userIdのみ)ではなく principal 全体で assertPrincipalAccess する', async () => {
+    const prisma = makePrismaById();
+    const access = makeAccess();
+    const c = new MeetingOccurrenceByIdController(prisma, access);
+    await c.get(generalKeyPrincipal as any, 'occ2');
+    // occ2 は P2 所属。principal（P1 スコープのキー）と対象 projectId=P2 を渡していること。
+    expect(access.assertPrincipalAccess).toHaveBeenCalledWith(generalKeyPrincipal, 'P2', 'view');
+  });
+
+  it('DELETE :id は edit レベルで principal 判定してから削除する', async () => {
+    const prisma = makePrismaById();
+    const access = makeAccess();
+    const c = new MeetingOccurrenceByIdController(prisma, access);
+    await c.remove(generalKeyPrincipal as any, 'occ2');
+    expect(access.assertPrincipalAccess).toHaveBeenCalledWith(generalKeyPrincipal, 'P2', 'edit');
+    expect(prisma.meetingOccurrence.delete).toHaveBeenCalledWith({ where: { id: 'occ2' } });
+  });
+
+  it('assertPrincipalAccess が拒否(throw)すると更新まで到達しない', async () => {
+    const prisma = makePrismaById();
+    const access = { assertPrincipalAccess: jest.fn(async () => { throw new Error('You do not have access to this project'); }) } as any;
+    const c = new MeetingOccurrenceByIdController(prisma, access);
+    await expect(c.patch(generalKeyPrincipal as any, 'occ2', { title: 'x' } as any)).rejects.toThrow();
+    expect(prisma.meetingOccurrence.update).not.toHaveBeenCalled();
   });
 });
