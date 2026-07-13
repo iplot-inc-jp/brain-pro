@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   ForbiddenException,
 } from '@nestjs/common';
+import { ApiKeyRole } from '@prisma/client';
 import {
   ProjectAccessService,
   RequiredAccess,
@@ -37,7 +38,9 @@ export class ProjectAccessGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
 
     // 認証情報が無いルート（@Public 等）には干渉しない。JwtAuthGuard に委ねる。
-    const user = request.user as { id?: string } | undefined;
+    const user = request.user as
+      | { id?: string; apiKeyRole?: ApiKeyRole; organizationId?: string | null; projectId?: string | null }
+      | undefined;
     if (!user || !user.id) {
       return true;
     }
@@ -49,10 +52,17 @@ export class ProjectAccessGuard implements CanActivate {
     }
 
     const required = this.requiredLevel(request.method);
-    const level = await this.projectAccess.resolveProjectAccess(
-      projectId,
-      user.id,
-    );
+    // サービスアカウントAPIキーの場合は、発行者の会員権限ではなくキー自身のスコープで判定する。
+    const level = user.apiKeyRole
+      ? await this.projectAccess.resolveApiKeyProjectAccess(
+          {
+            apiKeyRole: user.apiKeyRole,
+            organizationId: user.organizationId ?? null,
+            projectId: user.projectId ?? null,
+          },
+          projectId,
+        )
+      : await this.projectAccess.resolveProjectAccess(projectId, user.id);
     if (this.projectAccess.satisfies(level, required)) {
       return true;
     }

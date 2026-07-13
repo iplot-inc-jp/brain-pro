@@ -22,9 +22,14 @@ export default function AccountSettingsPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  // 公開API/MCP用のAPIキー（sk_…）。IPROくん等の外部連携で使う。発行時だけ平文が返る。
-  const [apiKeys, setApiKeys] = useState<Array<{ id: string; name: string; keyPrefix: string; projectId: string | null; createdAt: string }>>([]);
+  // 公開API/MCP用のサービスアカウントAPIキー（sk_…）。IPROくん等の外部連携で使う。発行時だけ平文が返る。
+  const [apiKeys, setApiKeys] = useState<Array<{ id: string; name: string; role?: string; organizationId?: string | null; keyPrefix: string; projectId: string | null; createdAt: string }>>([]);
   const [newKeyName, setNewKeyName] = useState('');
+  const [keyRole, setKeyRole] = useState<'COMPANY_ADMIN' | 'GENERAL_USER'>('COMPANY_ADMIN');
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState('');
+  const [orgProjects, setOrgProjects] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [issuedKey, setIssuedKey] = useState<string | null>(null); // 発行直後だけ表示する平文キー
   const [keysBusy, setKeysBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -61,6 +66,8 @@ export default function AccountSettingsPage() {
     fetchUserSettings();
     // 発行済みAPIキー一覧を取得
     fetchApiKeys();
+    // 自分が属する会社（APIキーの発行先候補）を取得
+    fetchOrgs();
   }, []);
 
   const fetchUserSettings = async () => {
@@ -260,8 +267,52 @@ export default function AccountSettingsPage() {
     }
   }, [getHeaders]);
 
+  // 自分が属する会社一覧（キーの発行先）。取得後、先頭を既定選択にする。
+  const fetchOrgs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/organizations`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: Array<{ id: string; name: string }> = await res.json();
+        setOrgs(data);
+        setSelectedOrgId((cur) => cur || data[0]?.id || '');
+      }
+    } catch (err) {
+      console.error('Failed to fetch organizations:', err);
+    }
+  }, [getHeaders]);
+
+  // 選択中の会社のプロジェクト一覧（一般ユーザーキーの紐付け先）。
+  const fetchOrgProjects = useCallback(async (orgId: string) => {
+    if (!orgId) { setOrgProjects([]); return; }
+    try {
+      const res = await fetch(`${API_URL}/api/organizations/${orgId}/projects`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: Array<{ id: string; name: string }> = await res.json();
+        setOrgProjects(data);
+        setSelectedProjectId((cur) => cur || data[0]?.id || '');
+      } else {
+        setOrgProjects([]);
+      }
+    } catch {
+      setOrgProjects([]);
+    }
+  }, [getHeaders]);
+
+  // 一般ユーザーを選ぶか会社を変えたら、その会社のプロジェクトを読み直す。
+  useEffect(() => {
+    if (keyRole === 'GENERAL_USER' && selectedOrgId) fetchOrgProjects(selectedOrgId);
+  }, [keyRole, selectedOrgId, fetchOrgProjects]);
+
   const handleIssueKey = async () => {
     const name = newKeyName.trim() || 'IPROくん連携';
+    if (!selectedOrgId) {
+      setMessage({ type: 'error', text: '会社を選択してください' });
+      return;
+    }
+    if (keyRole === 'GENERAL_USER' && !selectedProjectId) {
+      setMessage({ type: 'error', text: '一般ユーザーのキーには紐付けるプロジェクトが必要です' });
+      return;
+    }
     setKeysBusy(true);
     setMessage(null);
     setIssuedKey(null);
@@ -269,7 +320,12 @@ export default function AccountSettingsPage() {
       const res = await fetch(`${API_URL}/api/api-keys`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          role: keyRole,
+          organizationId: selectedOrgId,
+          ...(keyRole === 'GENERAL_USER' ? { projectId: selectedProjectId } : {}),
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -278,7 +334,8 @@ export default function AccountSettingsPage() {
         await fetchApiKeys();
         setMessage({ type: 'success', text: 'APIキーを発行しました。下のキーを今すぐコピーしてください（再表示できません）。' });
       } else {
-        setMessage({ type: 'error', text: 'APIキーの発行に失敗しました（ログイン状態を確認してください）' });
+        const err = await res.json().catch(() => null);
+        setMessage({ type: 'error', text: err?.message || 'APIキーの発行に失敗しました（会社の管理者のみ発行できます）' });
       }
     } catch {
       setMessage({ type: 'error', text: 'エラーが発生しました' });
@@ -602,17 +659,59 @@ export default function AccountSettingsPage() {
             <CardContent className="space-y-6">
               <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                 <p className="text-sm text-gray-600 mb-4">
-                  公開API・AIエージェント（IPROくん等）向けのAPIキー（<code className="font-mono">sk_…</code>）を発行します。
+                  公開API・AIエージェント（IPROくん等）向けの<strong>サービスアカウントAPIキー</strong>（<code className="font-mono">sk_…</code>）を発行します。
+                  キーは<strong>会社とロール（企業管理者／一般ユーザー）</strong>を持ちます。
                   キーは<strong>発行時に一度だけ全体が表示され</strong>、以後は先頭のみ表示されます。必ず控えを保存してください。
                 </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-600">会社</Label>
+                    <select
+                      value={selectedOrgId}
+                      onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId(''); }}
+                      className="w-full h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-700"
+                    >
+                      {orgs.length === 0 && <option value="">（会社がありません）</option>}
+                      {orgs.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-600">ロール</Label>
+                    <select
+                      value={keyRole}
+                      onChange={(e) => setKeyRole(e.target.value as 'COMPANY_ADMIN' | 'GENERAL_USER')}
+                      className="w-full h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-700"
+                    >
+                      <option value="COMPANY_ADMIN">企業管理者（会社の全プロジェクト）</option>
+                      <option value="GENERAL_USER">一般ユーザー（紐付けプロジェクトのみ）</option>
+                    </select>
+                  </div>
+                  {keyRole === 'GENERAL_USER' && (
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs text-gray-600">紐付けるプロジェクト</Label>
+                      <select
+                        value={selectedProjectId}
+                        onChange={(e) => setSelectedProjectId(e.target.value)}
+                        className="w-full h-9 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-700"
+                      >
+                        {orgProjects.length === 0 && <option value="">（この会社にプロジェクトがありません）</option>}
+                        {orgProjects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row mt-3">
                   <Input
                     placeholder="キーの名前（例: IPROくん連携）"
                     value={newKeyName}
                     onChange={(e) => setNewKeyName(e.target.value)}
                     className="bg-white border-gray-300 text-gray-700"
                   />
-                  <Button onClick={handleIssueKey} disabled={keysBusy} className="shrink-0">
+                  <Button onClick={handleIssueKey} disabled={keysBusy || !selectedOrgId} className="shrink-0">
                     {keysBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'キーを発行'}
                   </Button>
                 </div>
@@ -639,9 +738,19 @@ export default function AccountSettingsPage() {
                   apiKeys.map((k) => (
                     <div key={k.id} className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white">
                       <div>
-                        <p className="text-sm text-gray-800">{k.name}</p>
+                        <p className="text-sm text-gray-800">
+                          {k.name}
+                          {k.role && (
+                            <span className="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 align-middle">
+                              {k.role === 'COMPANY_ADMIN' ? '企業管理者' : '一般ユーザー'}
+                            </span>
+                          )}
+                        </p>
                         <p className="text-xs text-gray-500 font-mono">
-                          {k.keyPrefix}…・{new Date(k.createdAt).toLocaleDateString('ja-JP')}
+                          {k.keyPrefix}…
+                          {k.organizationId && `・${orgs.find((o) => o.id === k.organizationId)?.name ?? '会社'}`}
+                          {k.projectId && '・案件紐付け'}
+                          ・{new Date(k.createdAt).toLocaleDateString('ja-JP')}
                         </p>
                       </div>
                       <Button

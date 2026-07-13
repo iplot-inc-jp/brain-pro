@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { ApiKeyRole } from '@prisma/client';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 import { ForbiddenError } from '../../domain';
+
+/** サービスアカウントAPIキーのスコープ（会社・ロール・紐付けプロジェクト）。 */
+export interface ApiKeyScope {
+  apiKeyRole: ApiKeyRole;
+  organizationId: string | null;
+  projectId: string | null;
+}
 
 /**
  * プロジェクト単位の実効アクセスレベル。
@@ -83,6 +91,31 @@ export class ProjectAccessService {
     });
     if (!projectMember) return null;
     return projectMember.accessLevel as ProjectAccessLevelValue;
+  }
+
+  /**
+   * サービスアカウントAPIキーの実効アクセスレベル（EDIT/VIEW/null）を返す。
+   * 発行ユーザーの会員権限には依存せず、キー自身の会社・ロール・紐付けだけで判定する。
+   *   - 他社のプロジェクト … 常に null（越境不可）
+   *   - COMPANY_ADMIN     … 自社の全プロジェクトで EDIT
+   *   - GENERAL_USER      … 紐付いた projectId のみ EDIT、それ以外は null
+   */
+  async resolveApiKeyProjectAccess(
+    scope: ApiKeyScope,
+    targetProjectId: string,
+  ): Promise<ProjectAccessLevelValue | null> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: targetProjectId },
+      select: { organizationId: true },
+    });
+    if (!project) return null;
+    if (!scope.organizationId || project.organizationId !== scope.organizationId) {
+      return null; // 会社が違う（またはキーに会社が無い）
+    }
+    if (scope.apiKeyRole === ApiKeyRole.COMPANY_ADMIN) return 'EDIT';
+    // GENERAL_USER: 紐付いたプロジェクトだけ
+    if (scope.projectId && scope.projectId === targetProjectId) return 'EDIT';
+    return null;
   }
 
   /**

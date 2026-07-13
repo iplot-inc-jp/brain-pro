@@ -195,6 +195,7 @@ model Organization {
   invites  OrganizationInvite[]
   projects Project[]
   iproBotConnection IproBotConnection?
+  apiKeys  ApiKey[]
 
   @@map("organizations")
 }
@@ -1253,22 +1254,36 @@ enum GapStatus {
 // 公開APIキー（/api/v1 + MCP用）
 // ===========================================
 
+// サービスアカウント的なAPIキー。ipro-db の service_accounts と同じ発想:
+//   role=COMPANY_ADMIN … organizationId の会社の全プロジェクトにフルアクセス
+//   role=GENERAL_USER  … organizationId の会社のうち projectId に紐付いたプロジェクトのみ
+// キー自体が会社・ロール・紐付けを持つ（「会社のキーが中に入っている」）。認可は ProjectAccessGuard が
+// このスコープで判定する。userId は発行者（監査・後方互換）。
 model ApiKey {
-  id         String    @id @default(uuid())
-  userId     String    @map("user_id")
-  projectId  String?   @map("project_id")
-  name       String
-  keyHash    String    @unique @map("key_hash")
-  keyPrefix  String    @map("key_prefix")
-  scopes     String[]  @default([])
-  lastUsedAt DateTime? @map("last_used_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id             String     @id @default(uuid())
+  userId         String     @map("user_id")
+  organizationId String?    @map("organization_id")
+  role           ApiKeyRole @default(GENERAL_USER)
+  projectId      String?    @map("project_id")
+  name           String
+  keyHash        String     @unique @map("key_hash")
+  keyPrefix      String     @map("key_prefix")
+  scopes         String[]   @default([])
+  lastUsedAt     DateTime?  @map("last_used_at")
+  revokedAt      DateTime?  @map("revoked_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
 
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("api_keys")
+}
+
+// APIキーのロール（サービスアカウント）。企業管理者=自社フル / 一般ユーザー=紐付けプロジェクトのみ。
+enum ApiKeyRole {
+  COMPANY_ADMIN
+  GENERAL_USER
 }
 
 // BusinessFlow 用の判別子

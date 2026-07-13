@@ -52,4 +52,85 @@ describe('ProjectAccessGuard (feature-section import authz)', () => {
       ForbiddenException,
     );
   });
+
+  // サービスアカウントAPIキーのリクエストは、発行者の会員権限ではなくキーのスコープで判定する。
+  it('APIキー(apiKeyRole)のリクエストは resolveApiKeyProjectAccess で判定（user 権限は見ない）', async () => {
+    const resolveApiKeyProjectAccess = jest.fn().mockResolvedValue('EDIT');
+    const resolveProjectAccess = jest.fn().mockResolvedValue(null);
+    const svc = {
+      resolveApiKeyProjectAccess,
+      resolveProjectAccess,
+      satisfies: realService.satisfies.bind(realService),
+    } as unknown as ProjectAccessService;
+    const ctx = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          method: 'POST',
+          user: { id: 'issuer', apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org-1', projectId: null },
+          params: { projectId: 'proj-1' },
+        }),
+      }),
+      getClass: () => ({ name: 'FeatureIoController' }),
+    } as never;
+    const guard = new ProjectAccessGuard(svc);
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(resolveApiKeyProjectAccess).toHaveBeenCalled();
+    expect(resolveProjectAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProjectAccessService.resolveApiKeyProjectAccess (サービスアカウントのスコープ)', () => {
+  const makeSvc = (projectOrgId: string | null) => {
+    const prisma = {
+      project: {
+        findUnique: jest.fn().mockResolvedValue(projectOrgId ? { organizationId: projectOrgId } : null),
+      },
+    };
+    return new ProjectAccessService(prisma as never);
+  };
+
+  it('他社のプロジェクトは常に null（越境不可）', async () => {
+    const svc = makeSvc('org-OTHER');
+    const level = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org-1', projectId: null },
+      'proj-x',
+    );
+    expect(level).toBeNull();
+  });
+
+  it('COMPANY_ADMIN は自社の全プロジェクトで EDIT', async () => {
+    const svc = makeSvc('org-1');
+    const level = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org-1', projectId: null },
+      'proj-any',
+    );
+    expect(level).toBe('EDIT');
+  });
+
+  it('GENERAL_USER は紐付いたプロジェクトのみ EDIT', async () => {
+    const svc = makeSvc('org-1');
+    const bound = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1' },
+      'proj-1',
+    );
+    expect(bound).toBe('EDIT');
+  });
+
+  it('GENERAL_USER は同じ会社でも紐付け外のプロジェクトは null', async () => {
+    const svc = makeSvc('org-1');
+    const other = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'GENERAL_USER', organizationId: 'org-1', projectId: 'proj-1' },
+      'proj-2',
+    );
+    expect(other).toBeNull();
+  });
+
+  it('存在しないプロジェクトは null', async () => {
+    const svc = makeSvc(null);
+    const level = await svc.resolveApiKeyProjectAccess(
+      { apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org-1', projectId: null },
+      'missing',
+    );
+    expect(level).toBeNull();
+  });
 });

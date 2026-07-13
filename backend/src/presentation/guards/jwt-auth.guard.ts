@@ -49,10 +49,14 @@ export class JwtAuthGuard implements CanActivate {
       if (!record || record.revokedAt) {
         throw new UnauthorizedException('Invalid or revoked API key');
       }
+      // サービスアカウントのスコープを request.user に載せる（会社・ロール・紐付けプロジェクト）。
+      // 認可判定は ProjectAccessGuard がこのスコープで行う（発行ユーザーの会員権限には依存しない）。
       request.user = {
         id: record.userId,
         email: '',
         apiKeyId: record.id,
+        apiKeyRole: record.role,
+        organizationId: record.organizationId,
         projectId: record.projectId,
       };
       // 最終利用日時を更新（失敗しても認証は継続）
