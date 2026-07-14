@@ -97,19 +97,24 @@ export class OrganizationController {
     private readonly passwordHashService: PasswordHashService,
   ) {}
 
-  // 会社管理者（OWNER/ADMIN）または全体管理者か検証
+  // 会社管理者（OWNER/ADMIN）または全体管理者か検証。
+  // 管理者発行トークン(scopeOrgId 付き)は発行会社以外の管理操作を拒否（越境防止）。
   private async assertCompanyAdmin(
     organizationId: string,
-    userId: string,
+    user: CurrentUserPayload,
   ): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    // 会社スコープトークン: 対象会社が違えば即拒否（DB照会不要）。
+    if (user.scopeOrgId && user.scopeOrgId !== organizationId) {
+      throw new ForbiddenError('この会社を管理する権限がありません');
+    }
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
       select: { isSuperAdmin: true },
     });
-    if (user?.isSuperAdmin) return;
+    if (dbUser?.isSuperAdmin) return;
 
     const member = await this.prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId, userId } },
+      where: { organizationId_userId: { organizationId, userId: user.id } },
       select: { role: true },
     });
     if (member && (member.role === 'OWNER' || member.role === 'ADMIN')) {
@@ -157,7 +162,7 @@ export class OrganizationController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const org = await this.prisma.organization.findUnique({
       where: { id },
@@ -180,7 +185,7 @@ export class OrganizationController {
     @Param('id') id: string,
     @Body() dto: UpdateSettingsDto,
   ) {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const org = await this.prisma.organization.findUnique({ where: { id } });
     if (!org) {
@@ -219,7 +224,7 @@ export class OrganizationController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const members = await this.prisma.organizationMember.findMany({
       where: { organizationId: id },
@@ -243,7 +248,7 @@ export class OrganizationController {
     @Param('id') id: string,
     @Body() dto: AddMemberDto,
   ) {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const org = await this.prisma.organization.findUnique({ where: { id } });
     if (!org) {
@@ -314,7 +319,7 @@ export class OrganizationController {
     @Param('userId') userId: string,
     @Body() dto: UpdateMemberDto,
   ) {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const existing = await this.prisma.organizationMember.findUnique({
       where: { organizationId_userId: { organizationId: id, userId } },
@@ -367,7 +372,7 @@ export class OrganizationController {
     @Param('id') id: string,
     @Param('userId') userId: string,
   ): Promise<void> {
-    await this.assertCompanyAdmin(id, user.id);
+    await this.assertCompanyAdmin(id, user);
 
     const existing = await this.prisma.organizationMember.findUnique({
       where: { organizationId_userId: { organizationId: id, userId } },
