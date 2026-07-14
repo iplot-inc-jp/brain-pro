@@ -59,7 +59,7 @@ export class IngestionSourceController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ): Promise<IngestionAttachmentSource[]> {
-    await this.projectAccess.assertProjectAccess(projectId, user.id, 'view');
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'view');
 
     // プロジェクトに属する全添付（直下限定にしない＝phase/task/informationType/flow 配下も含む）。
     const rows = await this.prisma.attachment.findMany({

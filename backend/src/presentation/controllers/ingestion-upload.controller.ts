@@ -74,7 +74,7 @@ export class IngestionUploadController {
     @UploadedFiles() files: Express.Multer.File[],
   ): Promise<{ uploads: IngestionUploadResult[] }> {
     // 認可: アップロード = 課金処理の前段（書込）のため edit 強制。
-    await this.projectAccess.assertProjectAccess(projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'edit');
 
     if (!files || files.length === 0) {
       throw new BadRequestException('アップロードするファイルがありません（フィールド名 files）');

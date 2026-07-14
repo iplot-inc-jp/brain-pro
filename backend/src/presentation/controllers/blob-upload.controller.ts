@@ -46,7 +46,7 @@ export class BlobUploadController {
       request: req,
       body: body as Parameters<typeof handleUpload>[0]['body'],
       onBeforeGenerateToken: async () => {
-        await this.access.assertProjectAccess(projectId, user.id, 'edit');
+        await this.access.assertPrincipalAccess(user, projectId, 'edit');
         // allowedContentTypes は省略＝全許可。サイズは大きめに（client直なので関数ボディ上限の影響なし）。
         return {
           addRandomSuffix: true,
@@ -69,7 +69,7 @@ export class BlobUploadController {
     @Param('projectId') projectId: string,
     @Body() body: Omit<RegisterBlobInput, 'projectId'>,
   ) {
-    await this.access.assertProjectAccess(projectId, user.id, 'edit');
+    await this.access.assertPrincipalAccess(user, projectId, 'edit');
     return this.register.register({ ...body, projectId });
   }
 }

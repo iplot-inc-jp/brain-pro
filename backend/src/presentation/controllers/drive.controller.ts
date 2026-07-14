@@ -61,7 +61,7 @@ export class DriveController {
     @Param('projectId') projectId: string,
   ): Promise<{ authUrl: string; connected: boolean; email: string | null }> {
     // 接続は課金処理の前段（書込相当）。edit を要求。
-    await this.projectAccess.assertProjectAccess(projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'edit');
     if (!this.drive.driveEnabled) {
       throw new HttpException(
         'Google Drive 連携が未構成です（管理者が GOOGLE_CLIENT_ID 等を設定する必要があります）',
@@ -144,7 +144,7 @@ export class DriveController {
     email: string | null;
     files: Awaited<ReturnType<DriveService['listFiles']>>;
   }> {
-    await this.projectAccess.assertProjectAccess(projectId, user.id, 'view');
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'view');
     if (!this.drive.driveEnabled) {
       throw new HttpException(
         'Google Drive 連携が未構成です',
@@ -179,7 +179,7 @@ export class DriveController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ): Promise<{ deleted: number }> {
-    await this.projectAccess.assertProjectAccess(projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'edit');
     return this.drive.deleteConnection(projectId);
   }
 

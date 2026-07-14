@@ -331,7 +331,7 @@ export class KnowledgeDocumentController {
     if (!doc) {
       throw new EntityNotFoundError('KnowledgeDocument', id);
     }
-    await this.projectAccess.assertProjectAccess(doc.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, doc.projectId, 'edit');
 
     return this.extractService.extract(id, user.id);
   }
