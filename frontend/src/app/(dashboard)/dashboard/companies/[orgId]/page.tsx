@@ -60,6 +60,15 @@ type Member = {
   role: MemberRole;
 };
 
+type MemberApiToken = {
+  id: string;
+  name: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+  issuedByUserId: string | null;
+  issuedByName: string | null;
+};
+
 // 会社管理者 = OWNER/ADMIN, 会社メンバー = MEMBER/VIEWER
 function isCompanyAdminRole(role: MemberRole): boolean {
   return role === 'OWNER' || role === 'ADMIN';
@@ -101,6 +110,13 @@ export default function CompanySettingsPage() {
   const [newMemberPassword, setNewMemberPassword] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<'admin' | 'general'>('general');
   const [addingMember, setAddingMember] = useState(false);
+
+  // メンバー別 会社スコープトークン（展開している memberUserId をキーに保持）。
+  const [tokenPanelFor, setTokenPanelFor] = useState<string | null>(null);
+  const [memberTokens, setMemberTokens] = useState<MemberApiToken[]>([]);
+  const [newMemberTokenName, setNewMemberTokenName] = useState('');
+  const [memberTokenBusy, setMemberTokenBusy] = useState(false);
+  const [issuedMemberToken, setIssuedMemberToken] = useState<string | null>(null);
 
   const getHeaders = useCallback(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
@@ -363,6 +379,75 @@ export default function CompanySettingsPage() {
     } catch (err) {
       console.error('Failed to remove member:', err);
       setMessage({ type: 'error', text: 'エラーが発生しました' });
+    }
+  };
+
+  const openTokenPanel = useCallback(
+    async (member: Member) => {
+      setTokenPanelFor(member.userId);
+      setIssuedMemberToken(null);
+      setNewMemberTokenName('');
+      setMemberTokens([]);
+      try {
+        const res = await fetch(
+          `${API_URL}/api/organizations/${orgId}/members/${member.userId}/api-tokens`,
+          { headers: getHeaders() },
+        );
+        if (res.ok) setMemberTokens(await res.json());
+      } catch (err) {
+        console.error('Failed to fetch member tokens:', err);
+      }
+    },
+    [orgId, getHeaders],
+  );
+
+  const issueMemberToken = async (member: Member) => {
+    const name = newMemberTokenName.trim();
+    if (!name) return;
+    setMemberTokenBusy(true);
+    setMessage(null);
+    setIssuedMemberToken(null);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/organizations/${orgId}/members/${member.userId}/api-tokens`,
+        { method: 'POST', headers: getHeaders(), body: JSON.stringify({ name }) },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setIssuedMemberToken(data.token);
+        setNewMemberTokenName('');
+        await openTokenPanel(member);
+        setIssuedMemberToken(data.token); // openTokenPanel が null 化するので再セット
+        setMessage({
+          type: 'success',
+          text: `${member.name || member.email} 用のトークンを発行しました。今すぐコピーしてください（再表示できません）。`,
+        });
+      } else {
+        const err = await res.json().catch(() => null);
+        setMessage({ type: 'error', text: err?.message || 'トークンの発行に失敗しました' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'エラーが発生しました' });
+    } finally {
+      setMemberTokenBusy(false);
+    }
+  };
+
+  const revokeMemberToken = async (member: Member, tokenId: string) => {
+    if (!window.confirm('このトークンを失効しますか？このトークンを使う連携は無効になります。')) return;
+    try {
+      const res = await fetch(
+        `${API_URL}/api/organizations/${orgId}/members/${member.userId}/api-tokens/${tokenId}`,
+        { method: 'DELETE', headers: getHeaders() },
+      );
+      if (res.ok) {
+        await openTokenPanel(member);
+        setMessage({ type: 'success', text: 'トークンを失効しました' });
+      } else {
+        setMessage({ type: 'error', text: '失効に失敗しました' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: '失効に失敗しました' });
     }
   };
 
@@ -700,54 +785,142 @@ export default function CompanySettingsPage() {
                       : 'general';
                     const isMe = m.userId === myUserId;
                     return (
-                      <div
-                        key={m.userId}
-                        className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
-                            {m.name || m.email}
-                            {isMe && <span className="ml-2 text-xs text-blue-600">(自分)</span>}
-                          </p>
-                          <p className="text-xs text-gray-500 truncate">{m.email}</p>
+                      <div key={m.userId}>
+                        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {m.name || m.email}
+                              {isMe && <span className="ml-2 text-xs text-blue-600">(自分)</span>}
+                            </p>
+                            <p className="text-xs text-gray-500 truncate">{m.email}</p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                            <span className="hidden sm:inline text-xs text-gray-400">
+                              {roleLabel(m.role)}
+                            </span>
+                            <Select
+                              value={kind}
+                              onValueChange={(v) => handleChangeRole(m, v as 'admin' | 'general')}
+                            >
+                              <SelectTrigger className="w-[150px] bg-white border-gray-300 text-gray-900 h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white border-gray-200">
+                                <SelectItem value="general" className="text-gray-700">
+                                  会社メンバー
+                                </SelectItem>
+                                <SelectItem value="admin" className="text-gray-700">
+                                  会社管理者
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                tokenPanelFor === m.userId
+                                  ? setTokenPanelFor(null)
+                                  : openTokenPanel(m)
+                              }
+                              title="このメンバー用のAPIトークン（会社スコープ）を発行/管理"
+                            >
+                              <KeyRound className="h-4 w-4 mr-1" />
+                              トークン
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleResetPassword(m)}
+                              title="パスワードを設定/再設定"
+                            >
+                              <KeyRound className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRemoveMember(m)}
+                              className="border-red-300 text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-                          <span className="hidden sm:inline text-xs text-gray-400">
-                            {roleLabel(m.role)}
-                          </span>
-                          <Select
-                            value={kind}
-                            onValueChange={(v) => handleChangeRole(m, v as 'admin' | 'general')}
-                          >
-                            <SelectTrigger className="w-[150px] bg-white border-gray-300 text-gray-900 h-9">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent className="bg-white border-gray-200">
-                              <SelectItem value="general" className="text-gray-700">
-                                会社メンバー
-                              </SelectItem>
-                              <SelectItem value="admin" className="text-gray-700">
-                                会社管理者
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleResetPassword(m)}
-                            title="パスワードを設定/再設定"
-                          >
-                            <KeyRound className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRemoveMember(m)}
-                            className="border-red-300 text-red-600 hover:bg-red-50"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        {tokenPanelFor === m.userId && (
+                          <div className="px-4 pb-4 space-y-3 bg-gray-50 border-t border-gray-100">
+                            <p className="text-xs text-gray-500 pt-3">
+                              このメンバーの権限で動く、この会社だけに効くAPIトークン（JWT）です。ipro など外部連携に貼り付けて使います。
+                            </p>
+                            <div className="flex gap-2">
+                              <Input
+                                value={newMemberTokenName}
+                                onChange={(e) => setNewMemberTokenName(e.target.value)}
+                                placeholder="用途（例: ipro連携）"
+                                className="bg-white border-gray-300 text-gray-900 h-9"
+                              />
+                              <Button
+                                size="sm"
+                                onClick={() => issueMemberToken(m)}
+                                disabled={!newMemberTokenName.trim() || memberTokenBusy}
+                              >
+                                {memberTokenBusy ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  '発行'
+                                )}
+                              </Button>
+                            </div>
+                            {issuedMemberToken && (
+                              <div className="p-2 rounded bg-amber-50 border border-amber-200 space-y-1">
+                                <p className="text-xs text-amber-800">
+                                  このトークンは一度だけ表示されます。今すぐコピーしてください。
+                                </p>
+                                <div className="flex gap-2 items-center">
+                                  <code className="flex-1 text-xs break-all bg-white p-1.5 rounded border border-amber-200">
+                                    {issuedMemberToken}
+                                  </code>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(issuedMemberToken);
+                                      setMessage({ type: 'success', text: 'トークンをコピーしました' });
+                                    }}
+                                  >
+                                    コピー
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                            {memberTokens.length > 0 ? (
+                              <div className="space-y-1">
+                                {memberTokens.map((t) => (
+                                  <div
+                                    key={t.id}
+                                    className="flex items-center justify-between text-xs bg-white border border-gray-200 rounded px-2 py-1.5"
+                                  >
+                                    <div className="min-w-0">
+                                      <span className="font-medium text-gray-800">{t.name}</span>
+                                      <span className="text-gray-400 ml-2">
+                                        発行: {t.issuedByName ?? '—'} ・{' '}
+                                        {new Date(t.createdAt).toLocaleDateString('ja-JP')}
+                                      </span>
+                                    </div>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="border-red-300 text-red-600 hover:bg-red-50 h-7"
+                                      onClick={() => revokeMemberToken(m, t.id)}
+                                    >
+                                      失効
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-400">発行済みトークンはありません</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
