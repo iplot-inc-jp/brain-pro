@@ -409,6 +409,7 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { ProjectReadinessController } from './presentation/controllers/project-readiness.controller';
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
+import { UserApiTokenController } from './presentation/controllers/user-api-token.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
 import {
   PageScreenshotController,
@@ -574,6 +575,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     SharedViewController,
     UserSettingsController,
     ApiKeyController,
+    UserApiTokenController,
     GithubConnectionController,
     PageScreenshotController,
     PageScreenshotByIdController,
