@@ -92,7 +92,8 @@ export class JwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid or revoked API token');
       }
       // apiKeyRole を付けない＝ProjectAccessService がユーザーの会員RBACで認可（権限追従）。
-      request.user = { id: resolved.userId };
+      // scopeOrgId があれば「発行会社にだけ効く」制約が resolveForPrincipal / assertCompanyAdmin で適用される。
+      request.user = { id: resolved.userId, scopeOrgId: resolved.scopeOrgId ?? null };
       return true;
     }
 

@@ -15,6 +15,8 @@ export interface CurrentUserPayload {
   projectId?: string | null;
   // GENERAL_USER キーが紐付く全プロジェクト（複数可）。空/未設定なら projectId（単一）にフォールバック。
   projectIds?: string[] | null;
+  // 会社スコープ（管理者発行の user-api トークン）。null/undefined=全社追従（従来どおり）。
+  scopeOrgId?: string | null;
 }
 
 export const CurrentUser = createParamDecorator(

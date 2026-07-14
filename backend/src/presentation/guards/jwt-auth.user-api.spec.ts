@@ -12,15 +12,15 @@ describe('JwtAuthGuard (user-api token 経路)', () => {
   const ctxWith = (authorization: string, req: any = {}) =>
     ({ switchToHttp: () => ({ getRequest: () => (req.headers = { authorization }, req) }), getHandler: () => ({}), getClass: () => ({}) }) as any;
 
-  it('有効な user-api トークンなら request.user={id} を載せ、apiKeyRole は付けない', async () => {
-    const userApi = { resolve: jest.fn().mockResolvedValue({ userId: 'user-1' }) } as any;
+  it('有効な user-api トークンなら request.user={id, scopeOrgId} を載せ、apiKeyRole は付けない', async () => {
+    const userApi = { resolve: jest.fn().mockResolvedValue({ userId: 'user-1', scopeOrgId: null }) } as any;
     const guard = new JwtAuthGuard(tokenService, reflector, prisma, apiKeyService, userApi);
     // kind:"user-api" の本物の署名トークンを作る
     const { signUserApiJwt } = require('../../infrastructure/services/user-api-jwt');
     const token = signUserApiJwt({ userId: 'user-1', jti: 'tok-1' }, Math.floor(Date.now() / 1000));
     const req: any = {};
     await expect(guard.canActivate(ctxWith(`Bearer ${token}`, req))).resolves.toBe(true);
-    expect(req.user).toEqual({ id: 'user-1' });
+    expect(req.user).toEqual({ id: 'user-1', scopeOrgId: null });
     expect(req.user.apiKeyRole).toBeUndefined();
   });
 
