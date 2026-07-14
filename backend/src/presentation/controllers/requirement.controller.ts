@@ -131,7 +131,7 @@ export class RequirementController {
   /** requirement.id -> projectId を解決して指定レベルを強制（:id 系の view/edit 用） */
   private async assertRequirementAccess(
     id: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit',
   ): Promise<{ projectId: string }> {
     const row = await this.prisma.requirement.findUnique({
@@ -141,7 +141,7 @@ export class RequirementController {
     if (!row) {
       throw new HttpException('Requirement not found', HttpStatus.NOT_FOUND);
     }
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, required);
     return { projectId: row.projectId };
   }
 
@@ -197,7 +197,7 @@ export class RequirementController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'view');
+    await this.assertRequirementAccess(id, user, 'view');
     const requirement = await this.prisma.requirement.findUnique({
       where: { id },
       include: {
@@ -241,7 +241,7 @@ export class RequirementController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateRequirementDto,
   ) {
-    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, dto.projectId, 'edit');
     // 親要求がある場合はdepthを計算
     let depth = 0;
     if (dto.parentId) {
@@ -299,7 +299,7 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() dto: UpdateRequirementDto,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     const requirement = await this.prisma.requirement.update({
       where: { id },
       data: {
@@ -326,7 +326,7 @@ export class RequirementController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     await this.prisma.requirement.delete({ where: { id } });
     return { success: true };
   }
@@ -339,7 +339,7 @@ export class RequirementController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: ParseRequirementsDto,
   ) {
-    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, dto.projectId, 'edit');
     // APIキーを取得（会社(Organization)キー > ユーザー設定 > 環境変数）
     const apiKey = await this.companyKeyService.resolveForProject(
       dto.projectId,
@@ -388,9 +388,9 @@ export class RequirementController {
       throw new HttpException('Requirement not found', HttpStatus.NOT_FOUND);
     }
 
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      user,
       requirement.projectId,
-      user.id,
       'edit',
     );
 
@@ -437,7 +437,7 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() dto: LinkFlowDto,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     const mapping = await this.prisma.requirementFlowMapping.create({
       data: {
         id: uuid(),
@@ -462,7 +462,7 @@ export class RequirementController {
     @Param('id') id: string,
     @Param('mappingId') mappingId: string,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     await this.prisma.requirementFlowMapping.delete({
       where: { id: mappingId },
     });
@@ -476,7 +476,7 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() dto: LinkCrudDto,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     const mapping = await this.prisma.requirementCrudMapping.create({
       data: {
         id: uuid(),
@@ -505,7 +505,7 @@ export class RequirementController {
     @Param('id') id: string,
     @Param('mappingId') mappingId: string,
   ) {
-    await this.assertRequirementAccess(id, user.id, 'edit');
+    await this.assertRequirementAccess(id, user, 'edit');
     await this.prisma.requirementCrudMapping.delete({
       where: { id: mappingId },
     });

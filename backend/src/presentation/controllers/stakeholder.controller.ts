@@ -417,9 +417,9 @@ export class StakeholderByIdController {
     }
     await assertOrganizationMember(this.prisma, project.organizationId, user.id);
     // プロジェクト単位 RBAC: 担当領域の置換は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      user,
       stakeholder.projectId,
-      user.id,
       'edit',
     );
 

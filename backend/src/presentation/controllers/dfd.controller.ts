@@ -308,7 +308,7 @@ export class DfdController {
     @Param('diagramId') diagramId: string,
   ) {
     // 認可: diagram -> project -> organization メンバーシップ
-    await this.assertDiagramMembership(diagramId, user.id);
+    await this.assertDiagramMembership(diagramId, user);
 
     const rows = await this.prisma.dfdAnnotation.findMany({
       where: { diagramId },
@@ -326,7 +326,7 @@ export class DfdController {
     @Body() dto: CreateDfdAnnotationDto,
   ) {
     // 認可: diagram -> project -> organization メンバーシップ + edit 強制
-    await this.assertDiagramMembership(diagramId, user.id, 'edit');
+    await this.assertDiagramMembership(diagramId, user, 'edit');
 
     const created = await this.prisma.dfdAnnotation.create({
       data: {
@@ -357,7 +357,7 @@ export class DfdController {
     const annotation = await this.prisma.dfdAnnotation.findUnique({ where: { id } });
     if (!annotation) throw new EntityNotFoundError('DfdAnnotation', id);
     // 認可: annotation -> diagram -> project -> organization メンバーシップ + edit 強制
-    await this.assertDiagramMembership(annotation.diagramId, user.id, 'edit');
+    await this.assertDiagramMembership(annotation.diagramId, user, 'edit');
 
     const data: {
       kind?: DfdAnnotationKind;
@@ -395,7 +395,7 @@ export class DfdController {
     const annotation = await this.prisma.dfdAnnotation.findUnique({ where: { id } });
     if (!annotation) throw new EntityNotFoundError('DfdAnnotation', id);
     // 認可: annotation -> diagram -> project -> organization メンバーシップ + edit 強制
-    await this.assertDiagramMembership(annotation.diagramId, user.id, 'edit');
+    await this.assertDiagramMembership(annotation.diagramId, user, 'edit');
 
     await this.prisma.dfdAnnotation.delete({ where: { id } });
     return { success: true };
@@ -407,17 +407,17 @@ export class DfdController {
    */
   private async assertDiagramMembership(
     diagramId: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit' = 'view',
   ): Promise<void> {
     const diagram = await this.dfdRepo.findDiagramById(diagramId);
     if (!diagram) throw new EntityNotFoundError('DfdDiagram', diagramId);
     const project = await this.projectRepo.findById(diagram.projectId);
     if (!project) throw new EntityNotFoundError('Project', diagram.projectId);
-    if (!(await this.orgRepo.isMember(project.organizationId, userId))) {
+    if (!(await this.orgRepo.isMember(project.organizationId, principal.id))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
-    await this.projectAccess.assertProjectAccess(diagram.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, diagram.projectId, required);
   }
 
   private annotationToResponse(a: {

@@ -50,13 +50,13 @@ export class RoleController {
   ) {}
 
   /** roleId -> projectId を解決して edit 強制（:id 書込用） */
-  private async assertRoleEditAccess(id: string, userId: string): Promise<void> {
+  private async assertRoleEditAccess(id: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.role.findUnique({
       where: { id },
       select: { projectId: true },
     });
     if (!row) throw new EntityNotFoundError('Role', id);
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, 'edit');
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, 'edit');
   }
 
   @Get('project/:projectId')
@@ -86,7 +86,7 @@ export class RoleController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateRoleRequestDto,
   ): Promise<RoleResponseDto> {
-    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, dto.projectId, 'edit');
     const result = await this.createRoleUseCase.execute({
       projectId: dto.projectId,
       name: dto.name,
@@ -115,7 +115,7 @@ export class RoleController {
     @Param('id') id: string,
     @Body() dto: UpdateRoleRequestDto,
   ): Promise<RoleResponseDto> {
-    await this.assertRoleEditAccess(id, user.id);
+    await this.assertRoleEditAccess(id, user);
     const result = await this.updateRoleUseCase.execute({
       id,
       name: dto.name,
@@ -186,7 +186,7 @@ export class RoleController {
     @Param('id') id: string,
     @Body() dto: UpdateRoleLaneHeightDto,
   ): Promise<RoleResponseDto> {
-    await this.assertRoleEditAccess(id, user.id);
+    await this.assertRoleEditAccess(id, user);
     const role = await this.prisma.role.update({
       where: { id },
       data: { laneHeight: dto.laneHeight },
@@ -218,7 +218,7 @@ export class RoleController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertRoleEditAccess(id, user.id);
+    await this.assertRoleEditAccess(id, user);
     await this.roleRepository.delete(id);
     return { success: true };
   }
