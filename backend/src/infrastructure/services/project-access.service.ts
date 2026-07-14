@@ -22,6 +22,8 @@ export interface AccessPrincipal {
   organizationId?: string | null;
   projectId?: string | null;
   projectIds?: string[] | null;
+  // 会社スコープ（管理者発行の user-api トークン）。あれば対象プロジェクトの会社と一致必須（越境拒否）。
+  scopeOrgId?: string | null;
 }
 
 /**
@@ -164,6 +166,15 @@ export class ProjectAccessService {
         },
         targetProjectId,
       );
+    }
+    // 会社スコープ（管理者発行トークン）: 対象プロジェクトの会社が scopeOrgId と違えば越境拒否。
+    // ここで先に弾くことで、以降の live RBAC は「発行会社のプロジェクト」だけに効く。
+    if (principal.scopeOrgId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: targetProjectId },
+        select: { organizationId: true },
+      });
+      if (!project || project.organizationId !== principal.scopeOrgId) return null;
     }
     // 通常ユーザー、または organization 未設定の旧APIキー（発行者権限にフォールバック）。
     return this.resolveProjectAccess(targetProjectId, principal.id);

@@ -45,6 +45,7 @@ export class ProjectAccessGuard implements CanActivate {
           organizationId?: string | null;
           projectId?: string | null;
           projectIds?: string[] | null;
+          scopeOrgId?: string | null;
         }
       | undefined;
     if (!user || !user.id) {
@@ -68,6 +69,8 @@ export class ProjectAccessGuard implements CanActivate {
         projectId: user.projectId ?? null,
         // 複数プロジェクト紐付けキーの全対象を渡す（これを落とすと先頭プロジェクト以外が 403 になる）。
         projectIds: user.projectIds ?? null,
+        // 管理者発行トークンの会社スコープ（越境拒否）。
+        scopeOrgId: user.scopeOrgId ?? null,
       },
       projectId,
     );
