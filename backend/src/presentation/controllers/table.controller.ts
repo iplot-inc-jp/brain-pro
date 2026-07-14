@@ -195,38 +195,38 @@ export class TableController {
   ) {}
 
   /** projectId の edit 権限を強制 */
-  private async assertProjectEdit(projectId: string, userId: string): Promise<void> {
-    await this.projectAccess.assertProjectAccess(projectId, userId, 'edit');
+  private async assertProjectEdit(projectId: string, principal: CurrentUserPayload): Promise<void> {
+    await this.projectAccess.assertPrincipalAccess(principal, projectId, 'edit');
   }
 
   /** tableId -> projectId を解決して edit 強制 */
-  private async assertTableEdit(tableId: string, userId: string): Promise<void> {
+  private async assertTableEdit(tableId: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.table.findUnique({
       where: { id: tableId },
       select: { projectId: true },
     });
     if (!row) throw new EntityNotFoundError('Table', tableId);
-    await this.assertProjectEdit(row.projectId, userId);
+    await this.assertProjectEdit(row.projectId, principal);
   }
 
   /** columnId -> table.projectId を解決して edit 強制 */
-  private async assertColumnEdit(columnId: string, userId: string): Promise<void> {
+  private async assertColumnEdit(columnId: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.column.findUnique({
       where: { id: columnId },
       select: { table: { select: { projectId: true } } },
     });
     if (!row) throw new EntityNotFoundError('Column', columnId);
-    await this.assertProjectEdit(row.table.projectId, userId);
+    await this.assertProjectEdit(row.table.projectId, principal);
   }
 
   /** crudMappingId -> column.table.projectId を解決して edit 強制 */
-  private async assertCrudMappingEdit(mappingId: string, userId: string): Promise<void> {
+  private async assertCrudMappingEdit(mappingId: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.crudMapping.findUnique({
       where: { id: mappingId },
       select: { column: { select: { table: { select: { projectId: true } } } } },
     });
     if (!row) throw new EntityNotFoundError('CrudMapping', mappingId);
-    await this.assertProjectEdit(row.column.table.projectId, userId);
+    await this.assertProjectEdit(row.column.table.projectId, principal);
   }
 
   @Get('project/:projectId')
@@ -256,7 +256,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateTableDto,
   ) {
-    await this.assertProjectEdit(dto.projectId, user.id);
+    await this.assertProjectEdit(dto.projectId, user);
     const table = Table.create({
       id: uuid(),
       projectId: dto.projectId,
@@ -281,7 +281,7 @@ export class TableController {
     if (!table) {
       return { error: 'Table not found' };
     }
-    await this.assertProjectEdit(table.projectId, user.id);
+    await this.assertProjectEdit(table.projectId, user);
     if (dto.name) table.updateName(dto.name);
     if (dto.displayName !== undefined) table.updateDisplayName(dto.displayName);
     if (dto.description !== undefined) table.updateDescription(dto.description);
@@ -303,7 +303,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertTableEdit(id, user.id);
+    await this.assertTableEdit(id, user);
     await this.tableRepository.delete(id);
     return { success: true };
   }
@@ -324,7 +324,7 @@ export class TableController {
     @Param('tableId') tableId: string,
     @Body() dto: CreateColumnDto,
   ) {
-    await this.assertTableEdit(tableId, user.id);
+    await this.assertTableEdit(tableId, user);
     const column = Column.create({
       id: uuid(),
       tableId,
@@ -351,7 +351,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('columnId') columnId: string,
   ) {
-    await this.assertColumnEdit(columnId, user.id);
+    await this.assertColumnEdit(columnId, user);
     await this.columnRepository.delete(columnId);
     return { success: true };
   }
@@ -381,7 +381,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateCrudMappingDto,
   ) {
-    await this.assertColumnEdit(dto.columnId, user.id);
+    await this.assertColumnEdit(dto.columnId, user);
     const { CrudMapping } = await import('../../domain/entities/crud-mapping.entity');
     const mapping = CrudMapping.create({
       id: uuid(),
@@ -414,7 +414,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertCrudMappingEdit(id, user.id);
+    await this.assertCrudMappingEdit(id, user);
     await this.crudMappingRepository.delete(id);
     return { success: true };
   }
@@ -427,7 +427,7 @@ export class TableController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: ImportCsvDto,
   ): Promise<CsvImportResult> {
-    await this.assertProjectEdit(dto.projectId, user.id);
+    await this.assertProjectEdit(dto.projectId, user);
     const errors: string[] = [];
     let tablesCreated = 0;
     let columnsCreated = 0;

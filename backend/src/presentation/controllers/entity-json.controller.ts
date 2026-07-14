@@ -70,7 +70,7 @@ export class EntityJsonController {
   ): Promise<FlowBundle> {
     const result = await this.entityJson.getFlowBundle(id);
     if (!result) throw new EntityNotFoundError('BusinessFlow', id);
-    await this.assertProjectAccess(result.projectId, user.id, 'view');
+    await this.assertProjectAccess(result.projectId, user, 'view');
     return result.bundle;
   }
 
@@ -89,7 +89,7 @@ export class EntityJsonController {
       select: { projectId: true },
     });
     if (!flow) throw new EntityNotFoundError('BusinessFlow', id);
-    await this.assertProjectAccess(flow.projectId, user.id, 'edit');
+    await this.assertProjectAccess(flow.projectId, user, 'edit');
     await this.entityJson.replaceFlowFromBundle(id, body as unknown as FlowBundle);
     const result = await this.entityJson.getFlowBundle(id);
     return result!.bundle;
@@ -103,7 +103,7 @@ export class EntityJsonController {
     @Param('projectId') projectId: string,
     @Body() body: BundleBody,
   ): Promise<FlowBundle> {
-    await this.assertProjectAccess(projectId, user.id, 'edit');
+    await this.assertProjectAccess(projectId, user, 'edit');
     const { flowId } = await this.entityJson.createFlowFromBundle(
       projectId,
       body as unknown as FlowBundle,
@@ -128,7 +128,7 @@ export class EntityJsonController {
       select: { projectId: true },
     });
     if (!flow) throw new EntityNotFoundError('BusinessFlow', flowId);
-    await this.assertProjectAccess(flow.projectId, user.id, 'view');
+    await this.assertProjectAccess(flow.projectId, user, 'view');
     const { bundle } = await this.entityJson.getDfdBundle(flow.projectId, flowId);
     return bundle;
   }
@@ -146,7 +146,7 @@ export class EntityJsonController {
       select: { projectId: true },
     });
     if (!flow) throw new EntityNotFoundError('BusinessFlow', flowId);
-    await this.assertProjectAccess(flow.projectId, user.id, 'edit');
+    await this.assertProjectAccess(flow.projectId, user, 'edit');
     await this.entityJson.replaceDfdFromBundle(
       flow.projectId,
       flowId,
@@ -163,7 +163,7 @@ export class EntityJsonController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ): Promise<DfdBundle> {
-    await this.assertProjectAccess(projectId, user.id, 'view');
+    await this.assertProjectAccess(projectId, user, 'view');
     const { bundle } = await this.entityJson.getDfdBundle(projectId, null);
     return bundle;
   }
@@ -176,7 +176,7 @@ export class EntityJsonController {
     @Param('projectId') projectId: string,
     @Body() body: BundleBody,
   ): Promise<DfdBundle> {
-    await this.assertProjectAccess(projectId, user.id, 'edit');
+    await this.assertProjectAccess(projectId, user, 'edit');
     await this.entityJson.replaceDfdFromBundle(
       projectId,
       null,
@@ -199,7 +199,7 @@ export class EntityJsonController {
   ): Promise<IssueTreeBundle> {
     const result = await this.entityJson.getIssueTreeBundle(id);
     if (!result) throw new EntityNotFoundError('IssueTree', id);
-    await this.assertProjectAccess(result.projectId, user.id, 'view');
+    await this.assertProjectAccess(result.projectId, user, 'view');
     return result.bundle;
   }
 
@@ -216,7 +216,7 @@ export class EntityJsonController {
       select: { projectId: true },
     });
     if (!tree) throw new EntityNotFoundError('IssueTree', id);
-    await this.assertProjectAccess(tree.projectId, user.id, 'edit');
+    await this.assertProjectAccess(tree.projectId, user, 'edit');
     await this.entityJson.replaceIssueTreeFromBundle(
       id,
       body as unknown as IssueTreeBundle,
@@ -233,7 +233,7 @@ export class EntityJsonController {
     @Param('projectId') projectId: string,
     @Body() body: BundleBody,
   ): Promise<IssueTreeBundle> {
-    await this.assertProjectAccess(projectId, user.id, 'edit');
+    await this.assertProjectAccess(projectId, user, 'edit');
     const { treeId } = await this.entityJson.createIssueTreeFromBundle(
       projectId,
       body as unknown as IssueTreeBundle,
@@ -248,7 +248,7 @@ export class EntityJsonController {
    */
   private async assertProjectAccess(
     projectId: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit',
   ): Promise<void> {
     const project = await this.prisma.project.findUnique({
@@ -256,10 +256,10 @@ export class EntityJsonController {
       select: { organizationId: true },
     });
     if (!project) throw new EntityNotFoundError('Project', projectId);
-    if (!(await this.orgRepo.isMember(project.organizationId, userId))) {
+    if (!(await this.orgRepo.isMember(project.organizationId, principal.id))) {
       throw new ForbiddenError('You are not a member of this organization');
     }
-    await this.projectAccess.assertProjectAccess(projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, projectId, required);
   }
 }
 
