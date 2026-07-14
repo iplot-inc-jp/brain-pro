@@ -29,6 +29,7 @@ model User {
   organizationMembers OrganizationMember[]
   settings            UserSetting?
   apiKeys             ApiKey[]
+  userApiTokens       UserApiToken[]
   projectMemberships  ProjectMember[]
   createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
 
@@ -1282,6 +1283,22 @@ model ApiKey {
   projects     ApiKeyProject[]
 
   @@map("api_keys")
+}
+
+// ユーザー追従APIトークン（JWT）の失効台帳。トークン自体は署名済みJWTで中身を持たず、
+// id（JWT の jti）で失効/最終使用のみをここに記録する。
+model UserApiToken {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  name       String
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_api_tokens")
 }
 
 // サービスアカウントAPIキー ⇄ プロジェクトの多対多（GENERAL_USER キーを複数プロジェクトに紐付ける）。
