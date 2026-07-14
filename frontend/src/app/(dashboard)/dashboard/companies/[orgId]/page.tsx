@@ -581,7 +581,31 @@ export default function CompanySettingsPage() {
         </TabsContent>
 
         {/* メンバー */}
-        <TabsContent value="members">
+        <TabsContent value="members" className="space-y-6">
+          {/* 外部連携用の個人クレデンシャル（sk_ APIキー / ユーザー追従JWT）への導線。
+              これらは会社スコープではなく各メンバー個人が「アカウント」設定で発行する（発行者の権限に追従）。 */}
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-blue-50 border border-blue-200">
+            <KeyRound className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium text-blue-900">
+                外部連携用のAPIキー・トークンは「アカウント」設定で発行します
+              </p>
+              <p className="text-blue-700">
+                ipro などの外部連携で使う <b>APIキー（sk_…）</b> と <b>ユーザー追従トークン（JWT）</b> は、
+                会社スコープではなく<b>各メンバー個人</b>が発行します（発行したメンバーの現在の権限に追従します）。
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-1 border-blue-300 text-blue-700 hover:bg-blue-100"
+                onClick={() => router.push('/dashboard/settings')}
+              >
+                <KeyRound className="h-4 w-4 mr-2" />
+                アカウント設定を開く
+              </Button>
+            </div>
+          </div>
+
           <Card className="bg-white border-gray-200">
             <CardHeader>
               <CardTitle className="text-gray-900 flex items-center gap-2">
