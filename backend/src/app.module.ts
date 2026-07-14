@@ -409,6 +409,7 @@ import { RequirementController } from './presentation/controllers/requirement.co
 import { ProjectReadinessController } from './presentation/controllers/project-readiness.controller';
 import { UserSettingsController } from './presentation/controllers/user-settings.controller';
 import { ApiKeyController } from './presentation/controllers/api-key.controller';
+import { UserApiTokenController } from './presentation/controllers/user-api-token.controller';
 import { GithubConnectionController } from './presentation/controllers/github-connection.controller';
 import {
   PageScreenshotController,
@@ -466,6 +467,7 @@ import { ClaudeService } from './infrastructure/services/claude.service';
 import { IproBotGatewayService } from './infrastructure/services/ipro-bot-gateway.service';
 import { ExcelTaskImportService } from './infrastructure/services/excel-task-import.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
+import { UserApiTokenService } from './infrastructure/services/user-api-token.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
 import { ShareLinkService } from './infrastructure/services/share-link.service';
@@ -573,6 +575,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     SharedViewController,
     UserSettingsController,
     ApiKeyController,
+    UserApiTokenController,
     GithubConnectionController,
     PageScreenshotController,
     PageScreenshotByIdController,
@@ -1105,6 +1108,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     ClaudeService,
     IproBotGatewayService,
     ApiKeyService,
+    UserApiTokenService,
     CryptoService,
     CompanyKeyService,
     ShareLinkService,

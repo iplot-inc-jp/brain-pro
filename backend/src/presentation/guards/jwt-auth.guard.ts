@@ -9,6 +9,8 @@ import { Reflector } from '@nestjs/core';
 import { TokenService, TOKEN_SERVICE } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ApiKeyService } from '../../infrastructure/services/api-key.service';
+import { UserApiTokenService } from '../../infrastructure/services/user-api-token.service';
+import { peekKind } from '../../infrastructure/services/user-api-jwt';
 
 export const IS_PUBLIC_KEY = 'isPublic';
 
@@ -26,6 +28,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
     private readonly apiKeyService: ApiKeyService,
+    private readonly userApiTokenService: UserApiTokenService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -73,6 +76,23 @@ export class JwtAuthGuard implements CanActivate {
       this.prisma.apiKey
         .update({ where: { id: record.id }, data: { lastUsedAt: new Date() } })
         .catch(() => undefined);
+      return true;
+    }
+
+    // 1.5 ユーザー追従APIトークン（kind:"user-api" JWT）。sk_ でない Bearer JWT のうち、
+    //     payload.kind==="user-api" のものだけをここで処理する（ログインJWTは kind 無し＝素通り）。
+    const authForApi = request.headers.authorization;
+    const bearerForApi =
+      typeof authForApi === 'string' && authForApi.startsWith('Bearer ')
+        ? authForApi.substring(7)
+        : null;
+    if (bearerForApi && peekKind(bearerForApi) === 'user-api') {
+      const resolved = await this.userApiTokenService.resolve(bearerForApi, Date.now());
+      if (!resolved) {
+        throw new UnauthorizedException('Invalid or revoked API token');
+      }
+      // apiKeyRole を付けない＝ProjectAccessService がユーザーの会員RBACで認可（権限追従）。
+      request.user = { id: resolved.userId };
       return true;
     }
 
