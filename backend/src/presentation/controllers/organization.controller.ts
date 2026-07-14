@@ -11,7 +11,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsIn, MaxLength } from 'class-validator';
 import {
   CreateOrganizationUseCase,
   GetOrganizationsUseCase,
@@ -75,6 +75,7 @@ class UpdateMemberDto {
 
 class IssueMemberApiTokenDto {
   @IsString()
+  @MaxLength(100)
   name: string;
 }
 

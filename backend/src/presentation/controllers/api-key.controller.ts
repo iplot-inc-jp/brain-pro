@@ -58,14 +58,18 @@ export class ApiKeyController {
   ) {}
 
   /** 発行者がその会社の管理者（OWNER/ADMIN）か super-admin であることを保証。 */
-  private async assertOrgAdmin(userId: string, organizationId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  private async assertOrgAdmin(user: CurrentUserPayload, organizationId: string): Promise<void> {
+    // 会社スコープトークン: 対象会社が違えば即拒否（DB照会不要）。
+    if (user.scopeOrgId && user.scopeOrgId !== organizationId) {
+      throw new ForbiddenException('この会社を操作する権限がありません');
+    }
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
       select: { isSuperAdmin: true },
     });
-    if (user?.isSuperAdmin) return;
+    if (dbUser?.isSuperAdmin) return;
     const member = await this.prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId, userId } },
+      where: { organizationId_userId: { organizationId, userId: user.id } },
       select: { role: true },
     });
     if (member && (member.role === 'OWNER' || member.role === 'ADMIN')) return;
@@ -81,7 +85,7 @@ export class ApiKeyController {
       select: { id: true },
     });
     if (!org) throw new BadRequestException('会社が見つかりません');
-    await this.assertOrgAdmin(user.id, dto.organizationId);
+    await this.assertOrgAdmin(user, dto.organizationId);
 
     // 一般ユーザーは紐付けプロジェクト（1つ以上）必須＋すべてその会社のプロジェクトであること。
     let projectId: string | null = null; // 後方互換の単一フィールド（先頭を入れる）

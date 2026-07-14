@@ -31,15 +31,19 @@ export class IproBotConnectionController {
     private readonly crypto: CryptoService,
   ) {}
 
-  private async assertCompanyAdmin(organizationId: string, userId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  private async assertCompanyAdmin(organizationId: string, user: CurrentUserPayload): Promise<void> {
+    // 会社スコープトークン: 対象会社が違えば即拒否（DB照会不要）。
+    if (user.scopeOrgId && user.scopeOrgId !== organizationId) {
+      throw new ForbiddenError('この会社を管理する権限がありません');
+    }
+    const dbUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
       select: { isSuperAdmin: true },
     });
-    if (user?.isSuperAdmin) return;
+    if (dbUser?.isSuperAdmin) return;
 
     const member = await this.prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId, userId } },
+      where: { organizationId_userId: { organizationId, userId: user.id } },
       select: { role: true },
     });
     if (member && (member.role === 'OWNER' || member.role === 'ADMIN')) {
@@ -67,7 +71,7 @@ export class IproBotConnectionController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('organizationId') organizationId: string,
   ): Promise<IproBotConnectionView> {
-    await this.assertCompanyAdmin(organizationId, user.id);
+    await this.assertCompanyAdmin(organizationId, user);
     const conn = await this.prisma.iproBotConnection.findUnique({ where: { organizationId } });
     return this.toView(conn);
   }
@@ -79,7 +83,7 @@ export class IproBotConnectionController {
     @Param('organizationId') organizationId: string,
     @Body() dto: UpdateIproBotConnectionDto,
   ): Promise<IproBotConnectionView> {
-    await this.assertCompanyAdmin(organizationId, user.id);
+    await this.assertCompanyAdmin(organizationId, user);
     const existing = await this.prisma.iproBotConnection.findUnique({ where: { organizationId } });
     if (!existing && (!dto.baseUrl || !dto.apiToken)) {
       throw new ValidationError('初回設定には baseUrl と apiToken が必要です');
@@ -116,7 +120,7 @@ export class IproBotConnectionController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('organizationId') organizationId: string,
   ): Promise<{ ok: boolean; detail?: string; error?: string }> {
-    await this.assertCompanyAdmin(organizationId, user.id);
+    await this.assertCompanyAdmin(organizationId, user);
     const conn = await this.prisma.iproBotConnection.findUnique({ where: { organizationId } });
     if (!conn) return { ok: false, error: '未設定です' };
     try {
