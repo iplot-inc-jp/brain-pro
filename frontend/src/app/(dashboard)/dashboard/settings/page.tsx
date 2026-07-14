@@ -32,6 +32,11 @@ export default function AccountSettingsPage() {
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]); // 一般ユーザーキーの紐付け先（複数可）
   const [issuedKey, setIssuedKey] = useState<string | null>(null); // 発行直後だけ表示する平文キー
   const [keysBusy, setKeysBusy] = useState(false);
+  // ユーザー追従APIトークン（JWT）。sk_ キーとは別枠で、あなたの現在の権限に追従する。発行時だけ平文JWTが返る。
+  const [apiTokens, setApiTokens] = useState<Array<{ id: string; name: string; lastUsedAt: string | null; createdAt: string }>>([]);
+  const [newTokenName, setNewTokenName] = useState('');
+  const [issuedToken, setIssuedToken] = useState<string | null>(null); // 発行直後だけ表示する平文JWT
+  const [tokenBusy, setTokenBusy] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
   // AI APIキー
@@ -68,6 +73,8 @@ export default function AccountSettingsPage() {
     fetchApiKeys();
     // 自分が属する会社（APIキーの発行先候補）を取得
     fetchOrgs();
+    // 発行済みAPIトークン一覧を取得
+    loadApiTokens();
   }, []);
 
   const fetchUserSettings = async () => {
@@ -364,6 +371,66 @@ export default function AccountSettingsPage() {
     if (!issuedKey) return;
     navigator.clipboard.writeText(issuedKey);
     setMessage({ type: 'success', text: 'APIキーをコピーしました' });
+  };
+
+  // ユーザー追従APIトークン（JWT）: 発行 / 一覧 / 失効。バックエンドは POST/GET/DELETE /api/user/api-tokens。
+  const loadApiTokens = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/user/api-tokens`, { headers: getHeaders() });
+      if (res.ok) setApiTokens(await res.json());
+    } catch (err) {
+      console.error('Failed to fetch api tokens:', err);
+    }
+  }, [getHeaders]);
+
+  const createApiToken = async () => {
+    const name = newTokenName.trim();
+    if (!name) return;
+    setTokenBusy(true);
+    setMessage(null);
+    setIssuedToken(null);
+    try {
+      const res = await fetch(`${API_URL}/api/user/api-tokens`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIssuedToken(data.token); // 平文JWTはこのレスポンスでのみ返る
+        setNewTokenName('');
+        await loadApiTokens();
+        setMessage({ type: 'success', text: 'APIトークンを発行しました。下のトークンを今すぐコピーしてください（再表示できません）。' });
+      } else {
+        const err = await res.json().catch(() => null);
+        setMessage({ type: 'error', text: err?.message || 'APIトークンの発行に失敗しました' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'エラーが発生しました' });
+    } finally {
+      setTokenBusy(false);
+    }
+  };
+
+  const revokeApiToken = async (id: string) => {
+    if (!window.confirm('このAPIトークンを失効しますか？このトークンを使っている連携は無効になります。')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/user/api-tokens/${id}`, { method: 'DELETE', headers: getHeaders() });
+      if (res.ok) {
+        await loadApiTokens();
+        setMessage({ type: 'success', text: 'APIトークンを失効しました' });
+      } else {
+        setMessage({ type: 'error', text: '失効に失敗しました' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: '失効に失敗しました' });
+    }
+  };
+
+  const copyIssuedToken = () => {
+    if (!issuedToken) return;
+    navigator.clipboard.writeText(issuedToken);
+    setMessage({ type: 'success', text: 'APIトークンをコピーしました' });
   };
 
   return (
@@ -800,6 +867,71 @@ export default function AccountSettingsPage() {
                 発行したキーを IPROくんの <span className="font-mono">agent.ipro.iplot.jp/agent/links</span> の「APIキー」欄に貼り、
                 このBrain ProのURLと一緒に保存すると連携が有効になります。
               </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white border-gray-200 mt-6">
+            <CardHeader>
+              <CardTitle className="text-gray-900">APIトークン（ユーザー追従・JWT）</CardTitle>
+              <CardDescription className="text-gray-500">
+                あなたの権限で外部連携（IPROくん等）から brain-pro を操作するトークンです。触れる範囲はあなたの現在の権限に追従するため、
+                会社やロール、プロジェクトの選択は不要です。発行時だけ平文が表示され、失効するとそのトークンだけ即座に無効になります。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    placeholder="トークンの名前（例: IPROくん連携）"
+                    value={newTokenName}
+                    onChange={(e) => setNewTokenName(e.target.value)}
+                    className="bg-white border-gray-300 text-gray-700"
+                  />
+                  <Button onClick={createApiToken} disabled={tokenBusy || !newTokenName.trim()} className="shrink-0">
+                    {tokenBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'トークンを発行'}
+                  </Button>
+                </div>
+                {issuedToken && (
+                  <div className="mt-4 p-3 rounded-lg border border-amber-300 bg-amber-50">
+                    <p className="text-xs text-amber-800 mb-2">
+                      ⚠️ このトークンは今だけ表示されます。今すぐコピーして安全な場所に保存してください（再表示できません）。
+                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input readOnly value={issuedToken} className="bg-white border-gray-300 text-gray-800 font-mono" />
+                      <Button variant="outline" onClick={copyIssuedToken} className="border-gray-300 text-gray-700 shrink-0">
+                        コピー
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">発行済みのトークン</p>
+                {apiTokens.length === 0 ? (
+                  <p className="text-sm text-gray-500">まだ発行されたトークンはありません。</p>
+                ) : (
+                  apiTokens.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white">
+                      <div>
+                        <p className="text-sm text-gray-800">{t.name}</p>
+                        <p className="text-xs text-gray-500">
+                          発行日: {new Date(t.createdAt).toLocaleDateString('ja-JP')}
+                          {t.lastUsedAt && `・最終利用: ${new Date(t.lastUsedAt).toLocaleDateString('ja-JP')}`}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={() => revokeApiToken(t.id)}
+                        className="border-red-200 text-red-600 hover:bg-red-50 shrink-0"
+                        title="このトークンを失効"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
             </CardContent>
           </Card>
 
