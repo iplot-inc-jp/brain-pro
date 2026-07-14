@@ -281,7 +281,7 @@ export class OverviewMatrixByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('matrixId') matrixId: string,
   ) {
-    await this.assertAccess(matrixId, user.id, 'view');
+    await this.assertAccess(matrixId, user, 'view');
     return this.getSnapshot(matrixId);
   }
 
@@ -295,7 +295,7 @@ export class OverviewMatrixByIdController {
     @Param('matrixId') matrixId: string,
     @Body() dto: ReplaceOverviewMatrixDto,
   ) {
-    await this.assertAccess(matrixId, user.id, 'edit');
+    await this.assertAccess(matrixId, user, 'edit');
 
     const axes = dto.axes ?? [];
     const cells = dto.cells ?? [];
@@ -379,7 +379,7 @@ export class OverviewMatrixByIdController {
     @Param('matrixId') matrixId: string,
     @Body() dto: PatchOverviewMatrixDto,
   ) {
-    await this.assertAccess(matrixId, user.id, 'edit');
+    await this.assertAccess(matrixId, user, 'edit');
 
     const data: Prisma.OverviewMatrixUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -407,14 +407,14 @@ export class OverviewMatrixByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('matrixId') matrixId: string,
   ) {
-    await this.assertAccess(matrixId, user.id, 'edit');
+    await this.assertAccess(matrixId, user, 'edit');
     await this.prisma.overviewMatrix.delete({ where: { id: matrixId } });
   }
 
   /** matrix をロードして projectId を求め、明示的に認可する。 */
   private async assertAccess(
     matrixId: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit',
   ): Promise<void> {
     const matrix = await this.prisma.overviewMatrix.findUnique({
@@ -424,9 +424,9 @@ export class OverviewMatrixByIdController {
     if (!matrix) {
       throw new NotFoundException('俯瞰マトリクスが見つかりません');
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      principal,
       matrix.projectId,
-      userId,
       required,
     );
   }

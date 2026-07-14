@@ -194,7 +194,7 @@ export class ImageBoardByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('boardId') boardId: string,
   ) {
-    await this.assertBoardAccess(boardId, user.id, 'view');
+    await this.assertBoardAccess(boardId, user, 'view');
     const board = await this.prisma.imageBoard.findUnique({
       where: { id: boardId },
     });
@@ -210,7 +210,7 @@ export class ImageBoardByIdController {
     @Param('boardId') boardId: string,
     @Body() dto: PatchBoardDto,
   ) {
-    await this.assertBoardAccess(boardId, user.id, 'edit');
+    await this.assertBoardAccess(boardId, user, 'edit');
     const data: Prisma.ImageBoardUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.kind !== undefined) data.kind = dto.kind;
@@ -242,14 +242,14 @@ export class ImageBoardByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('boardId') boardId: string,
   ) {
-    await this.assertBoardAccess(boardId, user.id, 'edit');
+    await this.assertBoardAccess(boardId, user, 'edit');
     await this.prisma.imageBoard.delete({ where: { id: boardId } });
   }
 
   /** board をロードして projectId を求め、明示的に認可する。 */
   private async assertBoardAccess(
     boardId: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit',
   ): Promise<void> {
     const board = await this.prisma.imageBoard.findUnique({
@@ -257,9 +257,9 @@ export class ImageBoardByIdController {
       select: { projectId: true },
     });
     if (!board) throw new NotFoundException('業務イメージボードが見つかりません');
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      principal,
       board.projectId,
-      userId,
       required,
     );
   }

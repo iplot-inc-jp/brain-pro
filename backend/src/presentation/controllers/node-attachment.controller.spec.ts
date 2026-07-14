@@ -25,7 +25,7 @@ const bridge = () => ({
 }) as any;
 
 function makeProjectAccess() {
-  return { assertProjectAccess: jest.fn(async () => undefined) } as any;
+  return { assertPrincipalAccess: jest.fn(async () => undefined) } as any;
 }
 
 describe('NodeAttachmentByIdController.remove', () => {

@@ -25,7 +25,7 @@ function makePrisma(overrides: any = {}) {
   p.$transaction = jest.fn(async (cb: any) => cb(p));
   return p as any;
 }
-const access = () => ({ assertProjectAccess: jest.fn(async () => undefined) }) as any;
+const access = () => ({ assertPrincipalAccess: jest.fn(async () => undefined) }) as any;
 const user = { id: 'u1' } as any;
 
 describe('DiagramElementController', () => {
@@ -154,7 +154,7 @@ describe('DiagramElementByIdController', () => {
     const acc = access();
     const c = new DiagramElementByIdController(prisma, acc);
     await c.patch(user, 'de1', { positionX: 10, positionY: 20 } as any);
-    expect(acc.assertProjectAccess).toHaveBeenCalledWith('p1', 'u1', 'edit');
+    expect(acc.assertPrincipalAccess).toHaveBeenCalledWith(user, 'p1', 'edit');
     const data = prisma.diagramElement.update.mock.calls[0][0].data;
     expect(data).toEqual({ positionX: 10, positionY: 20 });
   });
@@ -164,7 +164,7 @@ describe('DiagramElementByIdController', () => {
     const acc = access();
     const c = new DiagramElementByIdController(prisma, acc);
     await c.remove(user, 'de1');
-    expect(acc.assertProjectAccess).toHaveBeenCalledWith('p1', 'u1', 'edit');
+    expect(acc.assertPrincipalAccess).toHaveBeenCalledWith(user, 'p1', 'edit');
     expect(prisma.diagramElement.delete).toHaveBeenCalledWith({ where: { id: 'de1' } });
   });
 });

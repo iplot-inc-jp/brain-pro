@@ -300,12 +300,12 @@ export class DiagramElementByIdController {
     private readonly projectAccess: ProjectAccessService,
   ) {}
 
-  private async assert(id: string, userId: string, required: 'view' | 'edit') {
+  private async assert(id: string, principal: CurrentUserPayload, required: 'view' | 'edit') {
     const row = await this.prisma.diagramElement.findUnique({
       where: { id }, select: { projectId: true },
     });
     if (!row) throw new NotFoundException('図要素が見つかりません');
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, required);
   }
 
   @Patch(':id')
@@ -314,7 +314,7 @@ export class DiagramElementByIdController {
     @Param('id') id: string,
     @Body() dto: PatchDiagramElementDto,
   ) {
-    await this.assert(id, user.id, 'edit');
+    await this.assert(id, user, 'edit');
     const data: Prisma.DiagramElementUpdateInput = {};
     for (const k of ['positionX','positionY','width','height','z','rotation','color','text'] as const) {
       if (dto[k] !== undefined) (data as any)[k] = dto[k];
@@ -326,7 +326,7 @@ export class DiagramElementByIdController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.assert(id, user.id, 'edit');
+    await this.assert(id, user, 'edit');
     await this.prisma.diagramElement.delete({ where: { id } });
   }
 }

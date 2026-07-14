@@ -70,14 +70,14 @@ export class SubProjectController {
   /** subProjectId から所属プロジェクトを引いて edit 権限を強制する（:id 書込用） */
   private async assertSubProjectEditAccess(
     id: string,
-    userId: string,
+    principal: CurrentUserPayload,
   ): Promise<void> {
     const row = await this.prisma.subProject.findUnique({
       where: { id },
       select: { projectId: true },
     });
     if (!row) throw new EntityNotFoundError('SubProject', id);
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, 'edit');
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, 'edit');
   }
 
   @Get('projects/:projectId/sub-projects')
@@ -121,7 +121,7 @@ export class SubProjectController {
     @Param('id') id: string,
     @Body() dto: UpdateSubProjectDto,
   ) {
-    await this.assertSubProjectEditAccess(id, user.id);
+    await this.assertSubProjectEditAccess(id, user);
     const data: {
       name?: string;
       description?: string;
@@ -148,7 +148,7 @@ export class SubProjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertSubProjectEditAccess(id, user.id);
+    await this.assertSubProjectEditAccess(id, user);
     // 紐づくフローの subProjectId はスキーマの onDelete: SetNull で自動的に NULL になる
     await this.prisma.subProject.delete({ where: { id } });
     return { success: true };

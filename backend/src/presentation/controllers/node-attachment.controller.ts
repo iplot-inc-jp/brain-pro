@@ -148,15 +148,15 @@ export class NodeAttachmentByIdController {
     private readonly bridge: DiagramKgBridgeService,
   ) {}
 
-  private async assert(id: string, userId: string, required: 'view' | 'edit') {
+  private async assert(id: string, principal: CurrentUserPayload, required: 'view' | 'edit') {
     const row = await this.prisma.nodeAttachment.findUnique({ where: { id }, select: { projectId: true } });
     if (!row) throw new NotFoundException('ノード添付が見つかりません');
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, required);
   }
 
   @Patch(':id')
   async patch(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string, @Body() dto: PatchNodeAttachmentDto) {
-    await this.assert(id, user.id, 'edit');
+    await this.assert(id, user, 'edit');
     const data: { order?: number; caption?: string } = {};
     if (dto.order !== undefined) data.order = dto.order;
     if (dto.caption !== undefined) data.caption = dto.caption;
@@ -169,7 +169,7 @@ export class NodeAttachmentByIdController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.assert(id, user.id, 'edit');
+    await this.assert(id, user, 'edit');
     const row = await this.prisma.nodeAttachment.findUnique({ where: { id }, select: { projectId: true, attachmentId: true } });
     await this.prisma.nodeAttachment.delete({ where: { id } });
     try {

@@ -229,7 +229,7 @@ export class MeetingDocumentByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertDocAccess(id, user.id, 'view');
+    await this.assertDocAccess(id, user, 'view');
     const doc = await this.prisma.meetingDocument.findUnique({ where: { id } });
     if (!doc) throw new NotFoundException('ドキュメントが見つかりません');
     return docToResponse(doc as DocRow, true);
@@ -244,7 +244,7 @@ export class MeetingDocumentByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    const { projectId } = await this.assertDocAccess(id, user.id, 'edit');
+    const { projectId } = await this.assertDocAccess(id, user, 'edit');
     const doc = await this.prisma.meetingDocument.findUnique({ where: { id } });
     if (!doc) throw new NotFoundException('ドキュメントが見つかりません');
     if (doc.kind !== 'GOOGLE_DOC' || !doc.googleDocUrl) {
@@ -306,7 +306,7 @@ export class MeetingDocumentByIdController {
     @Param('id') id: string,
   ) {
     // タブ構成は閲覧側のキャッシュなので view 権限で更新可（閲覧のみのユーザーにもタブを出す）。
-    const { projectId } = await this.assertDocAccess(id, user.id, 'view');
+    const { projectId } = await this.assertDocAccess(id, user, 'view');
     const doc = await this.prisma.meetingDocument.findUnique({ where: { id } });
     if (!doc) throw new NotFoundException('ドキュメントが見つかりません');
     if (doc.kind !== 'GOOGLE_DOC' || !doc.googleDocUrl) {
@@ -355,7 +355,7 @@ export class MeetingDocumentByIdController {
     @Param('id') id: string,
     @Body() dto: PatchMeetingDocumentDto,
   ) {
-    const doc = await this.assertDocAccess(id, user.id, 'edit');
+    const doc = await this.assertDocAccess(id, user, 'edit');
     const data: Prisma.MeetingDocumentUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.googleDocUrl !== undefined) {
@@ -389,14 +389,14 @@ export class MeetingDocumentByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertDocAccess(id, user.id, 'edit');
+    await this.assertDocAccess(id, user, 'edit');
     await this.prisma.meetingDocument.delete({ where: { id } });
   }
 
   /** doc をロードして projectId を求め、明示的に認可する。 */
   private async assertDocAccess(
     id: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit',
   ): Promise<{ projectId: string }> {
     const doc = await this.prisma.meetingDocument.findUnique({
@@ -404,7 +404,7 @@ export class MeetingDocumentByIdController {
       select: { projectId: true },
     });
     if (!doc) throw new NotFoundException('ドキュメントが見つかりません');
-    await this.projectAccess.assertProjectAccess(doc.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, doc.projectId, required);
     return doc;
   }
 }

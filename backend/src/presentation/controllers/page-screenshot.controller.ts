@@ -232,7 +232,7 @@ export class PageScreenshotByIdController {
     @Param('id') id: string,
     @Body() dto: UpdateScreenshotDto,
   ) {
-    await this.assertAccess(id, user.id, 'edit');
+    await this.assertAccess(id, user, 'edit');
     const data: {
       slug?: string;
       caption?: string;
@@ -251,16 +251,16 @@ export class PageScreenshotByIdController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'スクリーンショットを削除' })
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.assertAccess(id, user.id, 'edit');
+    await this.assertAccess(id, user, 'edit');
     await this.prisma.pageScreenshot.delete({ where: { id } });
   }
 
-  private async assertAccess(id: string, userId: string, required: 'view' | 'edit') {
+  private async assertAccess(id: string, principal: CurrentUserPayload, required: 'view' | 'edit') {
     const row = await this.prisma.pageScreenshot.findUnique({
       where: { id },
       select: { projectId: true },
     });
     if (!row) throw new NotFoundException('スクリーンショットが見つかりません');
-    await this.projectAccess.assertProjectAccess(row.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, row.projectId, required);
   }
 }

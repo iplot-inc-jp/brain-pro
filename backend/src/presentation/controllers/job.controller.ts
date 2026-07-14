@@ -286,7 +286,7 @@ export class JobByIdController {
 
     if (job.projectId) {
       // projectId に view 権限を要求
-      await this.projectAccess.assertProjectAccess(job.projectId, user.id, 'view');
+      await this.projectAccess.assertPrincipalAccess(user, job.projectId, 'view');
       return job;
     }
 
