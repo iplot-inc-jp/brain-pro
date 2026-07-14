@@ -1288,16 +1288,21 @@ model ApiKey {
 // ユーザー追従APIトークン（JWT）の失効台帳。トークン自体は署名済みJWTで中身を持たず、
 // id（JWT の jti）で失効/最終使用のみをここに記録する。
 model UserApiToken {
-  id         String    @id @default(uuid())
-  userId     String    @map("user_id")
-  name       String
-  lastUsedAt DateTime? @map("last_used_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  name           String
+  lastUsedAt     DateTime? @map("last_used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  // 会社スコープ（管理者発行トークン）。null=自己発行の全社追従（従来どおり）。
+  scopeOrgId     String?   @map("scope_org_id")
+  // 監査: 管理者が発行した場合の発行者 userId。null=本人の自己発行。
+  issuedByUserId String?   @map("issued_by_user_id")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([scopeOrgId])
   @@map("user_api_tokens")
 }
 
