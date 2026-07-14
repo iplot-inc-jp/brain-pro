@@ -22,6 +22,7 @@ import {
 } from '../dto';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
+import { UserApiTokenService } from '../../infrastructure/services/user-api-token.service';
 import {
   EntityNotFoundError,
   ForbiddenError,
@@ -72,6 +73,11 @@ class UpdateMemberDto {
   password?: string; // 管理者によるパスワード再設定（任意）
 }
 
+class IssueMemberApiTokenDto {
+  @IsString()
+  name: string;
+}
+
 // 日本語ロール or MemberRole を受け取り、保存する MemberRole に正規化
 function normalizeRole(role?: string): 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER' {
   const r = (role ?? '').trim();
@@ -95,6 +101,7 @@ export class OrganizationController {
     private readonly cryptoService: CryptoService,
     @Inject(PASSWORD_HASH_SERVICE)
     private readonly passwordHashService: PasswordHashService,
+    private readonly userApiTokenService: UserApiTokenService,
   ) {}
 
   // 会社管理者（OWNER/ADMIN）または全体管理者か検証。
@@ -385,5 +392,81 @@ export class OrganizationController {
     await this.prisma.organizationMember.delete({
       where: { organizationId_userId: { organizationId: id, userId } },
     });
+  }
+
+  // ========== メンバー用APIトークン（会社スコープ） ==========
+
+  // 発行/一覧/失効の対象メンバーを検証: この会社のメンバーであること・super-admin でないこと。
+  private async assertTargetMember(organizationId: string, targetUserId: string): Promise<void> {
+    const member = await this.prisma.organizationMember.findUnique({
+      where: { organizationId_userId: { organizationId, userId: targetUserId } },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new ForbiddenError('対象はこの会社のメンバーではありません');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { isSuperAdmin: true },
+    });
+    if (target?.isSuperAdmin) {
+      throw new ForbiddenError('全体管理者を対象にしたトークン発行はできません');
+    }
+  }
+
+  @Post(':id/members/:userId/api-tokens')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'メンバー用APIトークン(会社スコープ)を発行（平文JWTは一度だけ返却）' })
+  async issueMemberApiToken(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @Body() dto: IssueMemberApiTokenDto,
+  ) {
+    await this.assertCompanyAdmin(id, user);
+    await this.assertTargetMember(id, targetUserId);
+    return this.userApiTokenService.mint(targetUserId, dto.name, Date.now(), {
+      scopeOrgId: id,
+      issuedByUserId: user.id,
+    });
+  }
+
+  @Get(':id/members/:userId/api-tokens')
+  @ApiOperation({ summary: 'メンバーの会社スコープAPIトークン一覧（平文は含まない）' })
+  async listMemberApiTokens(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+  ) {
+    await this.assertCompanyAdmin(id, user);
+    await this.assertTargetMember(id, targetUserId);
+    const tokens = await this.userApiTokenService.listForOrgMember(targetUserId, id);
+    // 監査表示用に発行者名を解決（issuedByUserId → users.name/email）。
+    const issuerIds = [...new Set(tokens.map((t) => t.issuedByUserId).filter((v): v is string => !!v))];
+    const issuers = issuerIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: issuerIds } },
+          select: { id: true, name: true, email: true },
+        })
+      : [];
+    const nameById = new Map(issuers.map((u) => [u.id, u.name || u.email]));
+    return tokens.map((t) => ({
+      ...t,
+      issuedByName: t.issuedByUserId ? (nameById.get(t.issuedByUserId) ?? null) : null,
+    }));
+  }
+
+  @Delete(':id/members/:userId/api-tokens/:tokenId')
+  @ApiOperation({ summary: 'メンバーの会社スコープAPIトークンを失効' })
+  async revokeMemberApiToken(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @Param('tokenId') tokenId: string,
+  ) {
+    await this.assertCompanyAdmin(id, user);
+    await this.assertTargetMember(id, targetUserId);
+    await this.userApiTokenService.revokeForOrgMember(targetUserId, id, tokenId);
+    return { success: true };
   }
 }
