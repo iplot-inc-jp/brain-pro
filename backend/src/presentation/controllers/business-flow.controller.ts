@@ -813,7 +813,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: SetFlowStakeholdersDto,
   ) {
-    const flow = await this.assertFlowMembership(flowId, user.id, 'edit');
+    const flow = await this.assertFlowMembership(flowId, user, 'edit');
     const uniqueIds = Array.from(new Set(dto.stakeholderIds ?? []));
     if (uniqueIds.length > 0) {
       const found = await this.prisma.stakeholder.findMany({
@@ -1076,7 +1076,7 @@ export class BusinessFlowController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateBusinessFlowDto,
   ) {
-    await this.projectAccess.assertProjectAccess(dto.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, dto.projectId, 'edit');
     let depth = 0;
 
     if (dto.parentId) {
@@ -1115,7 +1115,7 @@ export class BusinessFlowController {
     if (!flow) {
       return { error: 'Business flow not found' };
     }
-    await this.assertFlowMembership(id, user.id, 'edit');
+    await this.assertFlowMembership(id, user, 'edit');
 
     if (dto.name) flow.updateName(dto.name);
     if (dto.description !== undefined) flow.updateDescription(dto.description);
@@ -1136,7 +1136,7 @@ export class BusinessFlowController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    await this.assertFlowMembership(id, user.id, 'edit');
+    await this.assertFlowMembership(id, user, 'edit');
     await this.flowRepository.delete(id);
     return { success: true };
   }
@@ -1150,7 +1150,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowNodeDto,
   ) {
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
     const node = FlowNode.create({
       id: uuid(),
       flowId,
@@ -1198,7 +1198,7 @@ export class BusinessFlowController {
     }
 
     // プロジェクト単位 RBAC: 位置一括更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, flow.projectId, 'edit');
 
     const positions = dto.positions ?? [];
     const edgePatches = dto.edges ?? [];
@@ -1297,7 +1297,7 @@ export class BusinessFlowController {
     if (!node) {
       return { error: 'Node not found' };
     }
-    await this.assertFlowMembership(node.flowId, user.id, 'edit');
+    await this.assertFlowMembership(node.flowId, user, 'edit');
 
     if (dto.label) node.updateLabel(dto.label);
     if (dto.description !== undefined) node.updateDescription(dto.description);
@@ -1342,7 +1342,7 @@ export class BusinessFlowController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('nodeId') nodeId: string,
   ) {
-    await this.assertNodeEditAccess(nodeId, user.id);
+    await this.assertNodeEditAccess(nodeId, user);
     await this.nodeRepository.delete(nodeId);
     return { success: true };
   }
@@ -1356,7 +1356,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowEdgeDto,
   ) {
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
     const edge = await this.prisma.flowEdge.create({
       data: {
         id: uuid(),
@@ -1399,7 +1399,7 @@ export class BusinessFlowController {
     @Body() dto: UpdateFlowEdgeDto,
   ) {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     const data: {
       sourceNodeId?: string;
@@ -1451,7 +1451,7 @@ export class BusinessFlowController {
     @Param('edgeId') edgeId: string,
     @Body() dto: UpdateFlowEdgeDto,
   ) {
-    await this.assertEdgeEditAccess(edgeId, user.id);
+    await this.assertEdgeEditAccess(edgeId, user);
     const data: {
       sourceNodeId?: string;
       targetNodeId?: string;
@@ -1501,7 +1501,7 @@ export class BusinessFlowController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('edgeId') edgeId: string,
   ) {
-    await this.assertEdgeEditAccess(edgeId, user.id);
+    await this.assertEdgeEditAccess(edgeId, user);
     await this.prisma.flowEdge.delete({ where: { id: edgeId } });
     return { success: true };
   }
@@ -1516,7 +1516,7 @@ export class BusinessFlowController {
     @Param('nodeId') nodeId: string,
     @Body() dto: CreateChildFlowDto,
   ) {
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
     const parentFlow = await this.flowRepository.findById(flowId);
     const node = await this.nodeRepository.findById(nodeId);
 
@@ -1556,7 +1556,7 @@ export class BusinessFlowController {
     if (!node) {
       return { error: 'Node not found' };
     }
-    await this.assertFlowMembership(node.flowId, user.id, 'edit');
+    await this.assertFlowMembership(node.flowId, user, 'edit');
 
     node.unlinkChildFlow();
     await this.nodeRepository.save(node);
@@ -1648,7 +1648,7 @@ export class BusinessFlowController {
     @Param('nodeId') nodeId: string,
     @Body() dto: ReplaceNodeInformationLinksDto,
   ) {
-    await this.assertNodeEditAccess(nodeId, user.id);
+    await this.assertNodeEditAccess(nodeId, user);
     await this.prisma.$transaction([
       this.prisma.nodeInformationLink.deleteMany({ where: { nodeId } }),
       ...dto.links.map((link, index) =>
@@ -1686,7 +1686,7 @@ export class BusinessFlowController {
     @Body() dto: RestoreFlowDto,
   ) {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     const nodes = dto.nodes ?? [];
     const edges = dto.edges ?? [];
@@ -1782,7 +1782,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Query('limit') limit?: string,
   ) {
-    await this.assertFlowMembership(flowId, user.id);
+    await this.assertFlowMembership(flowId, user);
 
     const take = Math.min(Math.max(parseInt(limit ?? '50', 10) || 50, 1), 200);
 
@@ -1813,7 +1813,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
     @Body() dto: CreateFlowSnapshotDto,
   ) {
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     const MAX_SNAPSHOTS = 50;
 
@@ -1868,7 +1868,7 @@ export class BusinessFlowController {
     @Param('flowId') flowId: string,
   ) {
     // 認可: flow -> project -> organization メンバーシップ
-    await this.assertFlowMembership(flowId, user.id);
+    await this.assertFlowMembership(flowId, user);
 
     const rows = await this.prisma.flowAnnotation.findMany({
       where: { flowId },
@@ -1886,7 +1886,7 @@ export class BusinessFlowController {
     @Body() dto: CreateFlowAnnotationDto,
   ) {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     const created = await this.prisma.flowAnnotation.create({
       data: {
@@ -1916,7 +1916,7 @@ export class BusinessFlowController {
     @Body() dto: UpdateFlowAnnotationDto,
   ) {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     const data: {
       kind?: 'STICKY' | 'COMMENT' | 'ICON' | 'SCOPE';
@@ -1957,7 +1957,7 @@ export class BusinessFlowController {
     @Param('id') id: string,
   ) {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
-    await this.assertFlowMembership(flowId, user.id, 'edit');
+    await this.assertFlowMembership(flowId, user, 'edit');
 
     await this.prisma.flowAnnotation.delete({ where: { id } });
     return { success: true };
@@ -2190,7 +2190,7 @@ export class BusinessFlowController {
     }
 
     // プロジェクト単位 RBAC: Mermaid 取り込みは書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(flow.projectId, user.id, 'edit');
+    await this.projectAccess.assertPrincipalAccess(user, flow.projectId, 'edit');
 
     // APIキーを取得（会社(Organization)キー > ユーザー設定 > 環境変数）
     const apiKey = await this.companyKeyService.resolveForProject(
@@ -2313,7 +2313,7 @@ export class BusinessFlowController {
   // 併せてプロジェクト単位 RBAC（VIEW/EDIT）を強制する（既定 view、書込は edit）。
   private async assertFlowMembership(
     flowId: string,
-    userId: string,
+    principal: CurrentUserPayload,
     required: 'view' | 'edit' = 'view',
   ): Promise<BusinessFlow> {
     const flow = await this.flowRepository.findById(flowId);
@@ -2328,28 +2328,28 @@ export class BusinessFlowController {
 
     const isMember = await this.organizationRepository.isMember(
       project.organizationId,
-      userId,
+      principal.id,
     );
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
 
-    await this.projectAccess.assertProjectAccess(flow.projectId, userId, required);
+    await this.projectAccess.assertPrincipalAccess(principal, flow.projectId, required);
 
     return flow;
   }
 
   // 認可ヘルパー: nodeId -> flow -> project の edit 強制（書込ルート用）
-  private async assertNodeEditAccess(nodeId: string, userId: string): Promise<void> {
+  private async assertNodeEditAccess(nodeId: string, principal: CurrentUserPayload): Promise<void> {
     const node = await this.nodeRepository.findById(nodeId);
     if (!node) {
       throw new EntityNotFoundError('FlowNode', nodeId);
     }
-    await this.assertFlowMembership(node.flowId, userId, 'edit');
+    await this.assertFlowMembership(node.flowId, principal, 'edit');
   }
 
   // 認可ヘルパー: edgeId -> flow -> project の edit 強制（書込ルート用）
-  private async assertEdgeEditAccess(edgeId: string, userId: string): Promise<void> {
+  private async assertEdgeEditAccess(edgeId: string, principal: CurrentUserPayload): Promise<void> {
     const edge = await this.prisma.flowEdge.findUnique({
       where: { id: edgeId },
       select: { flowId: true },
@@ -2357,7 +2357,7 @@ export class BusinessFlowController {
     if (!edge) {
       throw new EntityNotFoundError('FlowEdge', edgeId);
     }
-    await this.assertFlowMembership(edge.flowId, userId, 'edit');
+    await this.assertFlowMembership(edge.flowId, principal, 'edit');
   }
 
   private async getBreadcrumbs(flow: BusinessFlow): Promise<{ id: string; name: string }[]> {
