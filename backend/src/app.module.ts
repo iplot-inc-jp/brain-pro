@@ -466,6 +466,7 @@ import { ClaudeService } from './infrastructure/services/claude.service';
 import { IproBotGatewayService } from './infrastructure/services/ipro-bot-gateway.service';
 import { ExcelTaskImportService } from './infrastructure/services/excel-task-import.service';
 import { ApiKeyService } from './infrastructure/services/api-key.service';
+import { UserApiTokenService } from './infrastructure/services/user-api-token.service';
 import { CryptoService } from './infrastructure/services/crypto.service';
 import { CompanyKeyService } from './infrastructure/services/company-key.service';
 import { ShareLinkService } from './infrastructure/services/share-link.service';
@@ -1105,6 +1106,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     ClaudeService,
     IproBotGatewayService,
     ApiKeyService,
+    UserApiTokenService,
     CryptoService,
     CompanyKeyService,
     ShareLinkService,
