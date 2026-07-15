@@ -31,6 +31,7 @@ import {
 } from '../decorators/current-user.decorator';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 // ========== 定数 ==========
 
@@ -287,7 +288,10 @@ export class AdoptionStatusController {
 @UseGuards(ProjectAccessGuard)
 @Controller('adoption-statuses')
 export class AdoptionStatusByIdController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
+  ) {}
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
@@ -306,7 +310,7 @@ export class AdoptionStatusByIdController {
     if (!record) {
       throw new EntityNotFoundError('AdoptionStatus', id);
     }
-    await assertProjectMember(this.prisma, record.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(user, record.projectId, 'edit');
 
     await this.prisma.adoptionStatus.delete({ where: { id } });
     return { success: true };
