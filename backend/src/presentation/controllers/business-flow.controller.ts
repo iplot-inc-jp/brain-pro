@@ -869,7 +869,19 @@ export class BusinessFlowController {
 
   @Get(':id')
   @ApiOperation({ summary: 'フロー詳細を取得（ノード・エッジ含む）' })
-  async getById(@Param('id') id: string) {
+  async getById(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertFlowMembership(id, user, 'view');
+    return this.loadFlowFull(id);
+  }
+
+  /**
+   * フロー詳細（ノード・エッジ・子・パンくず・担当者）を組み立てる内部ヘルパー。
+   * 認可は呼び出し側で済ませること（@Public な共有閲覧・edit 済みの書込後 GET から呼ばれる）。
+   */
+  private async loadFlowFull(id: string) {
     const flow = await this.flowRepository.findById(id);
     if (!flow) {
       return { error: 'Business flow not found' };
@@ -1040,7 +1052,7 @@ export class BusinessFlowController {
     }
 
     const [flow, roles, annotations, project] = await Promise.all([
-      this.getById(row.id),
+      this.loadFlowFull(row.id),
       this.prisma.role.findMany({
         where: { projectId: row.projectId },
         orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -1634,7 +1646,12 @@ export class BusinessFlowController {
 
   @Get(':flowId/nodes/:nodeId/information-links')
   @ApiOperation({ summary: 'ノードの入出力（情報種別マスタ紐づけ）一覧を取得' })
-  async getNodeInformationLinks(@Param('nodeId') nodeId: string) {
+  async getNodeInformationLinks(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Param('nodeId') nodeId: string,
+  ) {
+    await this.assertFlowMembership(flowId, user, 'view');
     const links = await this.prisma.nodeInformationLink.findMany({
       where: { nodeId },
       include: {
@@ -1774,7 +1791,7 @@ export class BusinessFlowController {
     });
 
     // restore 後の GET 相当（フル状態）を返す
-    return this.getById(flowId);
+    return this.loadFlowFull(flowId);
   }
 
   @Get(':flowId/snapshots')
@@ -2085,7 +2102,11 @@ export class BusinessFlowController {
 
   @Get(':flowId/crud-mappings')
   @ApiOperation({ summary: 'フローに紐づくCRUDマッピング一覧を取得' })
-  async getCrudMappings(@Param('flowId') flowId: string) {
+  async getCrudMappings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+  ) {
+    await this.assertFlowMembership(flowId, user, 'view');
     const mappings = await this.crudMappingRepository.findByFlowId(flowId);
     return mappings.map((m) => ({
       id: m.id,
@@ -2102,7 +2123,12 @@ export class BusinessFlowController {
 
   @Get(':flowId/nodes/:nodeId/crud-mappings')
   @ApiOperation({ summary: 'ノードに紐づくCRUDマッピング一覧を取得' })
-  async getNodeCrudMappings(@Param('nodeId') nodeId: string) {
+  async getNodeCrudMappings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('flowId') flowId: string,
+    @Param('nodeId') nodeId: string,
+  ) {
+    await this.assertFlowMembership(flowId, user, 'view');
     const mappings = await this.crudMappingRepository.findByFlowNodeId(nodeId);
     return mappings.map((m) => ({
       id: m.id,
@@ -2121,7 +2147,11 @@ export class BusinessFlowController {
 
   @Get(':id/mermaid')
   @ApiOperation({ summary: 'フローをMermaid形式でエクスポート' })
-  async exportMermaid(@Param('id') id: string) {
+  async exportMermaid(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    await this.assertFlowMembership(id, user, 'view');
     const flow = await this.flowRepository.findById(id);
     if (!flow) {
       return { error: 'Business flow not found' };
@@ -2310,7 +2340,7 @@ export class BusinessFlowController {
     }
 
     // 更新後のフロー（ノード・エッジ含む）を返す
-    return this.getById(id);
+    return this.loadFlowFull(id);
   }
 
   // 認可ヘルパー: flow -> project -> organization メンバーシップを検証
