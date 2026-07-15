@@ -13,10 +13,14 @@ import {
   ValidationError,
 } from '../../../domain';
 import { MeetingOutput, toMeetingOutput } from './create-meeting.use-case';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface SetMeetingStakeholdersInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   stakeholderIds: string[];
 }
@@ -62,9 +66,9 @@ export class SetMeetingStakeholdersUseCase {
     }
 
     // 3.5 プロジェクト単位 RBAC: 出席者の置換は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       meeting.projectId,
-      input.userId,
       'edit',
     );
 

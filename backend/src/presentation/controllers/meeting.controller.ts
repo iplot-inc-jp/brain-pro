@@ -346,6 +346,7 @@ export class MeetingByIdController {
   ): Promise<MeetingOutput> {
     return this.updateMeetingUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       name: dto.name,
       purpose: dto.purpose,
@@ -384,6 +385,7 @@ export class MeetingByIdController {
   ): Promise<MeetingOutput> {
     return this.setMeetingStakeholdersUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       stakeholderIds: dto.stakeholderIds,
     });
@@ -405,6 +407,7 @@ export class MeetingByIdController {
   ): Promise<MeetingOutput> {
     return this.setMeetingSubProjectsUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       subProjectIds: dto.subProjectIds,
     });
@@ -422,6 +425,7 @@ export class MeetingByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteMeetingUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

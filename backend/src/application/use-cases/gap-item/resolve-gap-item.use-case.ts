@@ -10,10 +10,14 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { GapItemOutput, toGapItemOutput } from './create-gap-item.use-case';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface ResolveGapItemInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -55,9 +59,9 @@ export class ResolveGapItemUseCase {
     }
 
     // 3.5 プロジェクト単位 RBAC: GAP解決は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       gapItem.projectId,
-      input.userId,
       'edit',
     );
 

@@ -11,11 +11,15 @@ import {
   ValidationError,
 } from '../../../domain';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { MeetingOutput, toMeetingOutput } from './create-meeting.use-case';
 
 export interface SetMeetingSubProjectsInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   subProjectIds: string[];
 }
@@ -61,9 +65,9 @@ export class SetMeetingSubProjectsUseCase {
     }
 
     // 3.5 プロジェクト単位 RBAC: 対象サブ領域の置換は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       meeting.projectId,
-      input.userId,
       'edit',
     );
 

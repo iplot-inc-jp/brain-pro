@@ -157,6 +157,7 @@ export class GapItemByIdController {
   ): Promise<GapItemResponseDto> {
     return this.updateGapItemUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       businessArea: dto.businessArea,
       phaseId: dto.phaseId,
@@ -186,7 +187,11 @@ export class GapItemByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<GapItemResponseDto> {
-    return this.resolveGapItemUseCase.execute({ userId: user.id, id });
+    return this.resolveGapItemUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Post(':id/reopen')
@@ -200,7 +205,11 @@ export class GapItemByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<GapItemResponseDto> {
-    return this.reopenGapItemUseCase.execute({ userId: user.id, id });
+    return this.reopenGapItemUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Delete(':id')
@@ -214,6 +223,10 @@ export class GapItemByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<void> {
-    await this.deleteGapItemUseCase.execute({ userId: user.id, id });
+    await this.deleteGapItemUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 }

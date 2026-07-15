@@ -11,10 +11,14 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { GapItemOutput, toGapItemOutput } from './create-gap-item.use-case';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateGapItemInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   businessArea?: string;
   phaseId?: string | null;
@@ -70,9 +74,9 @@ export class UpdateGapItemUseCase {
     }
 
     // 3.5 プロジェクト単位 RBAC: GAP更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       gapItem.projectId,
-      input.userId,
       'edit',
     );
 
