@@ -49,6 +49,7 @@ export class LiveblocksController {
     const { body, status } = await this.useCase.execute({
       userId: user.id,
       apiKeyId: user.apiKeyId,
+      principal: user,
       projectId,
       roomId,
     });
