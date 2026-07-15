@@ -29,6 +29,7 @@ import {
 import { EntityNotFoundError, ForbiddenError } from '../../domain';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
@@ -174,7 +175,10 @@ function normalizeNullableText(
 @UseGuards(ProjectAccessGuard)
 @Controller()
 export class AttachmentController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
+  ) {}
 
   @Post('projects/:projectId/attachments')
   @ApiOperation({ summary: 'プロジェクト直下に汎用資料ファイルをアップロード' })
@@ -279,7 +283,13 @@ export class AttachmentController {
       throw new EntityNotFoundError('Phase', phaseId);
     }
 
-    await assertProjectMember(this.prisma, phase.projectId, user.id);
+    // 認可は URL params の projectId ではなく phase.projectId 基準で行う
+    // （越境 projectId を渡して他組織スコープをすり抜けるのを防ぐ）。
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      phase.projectId,
+      'edit',
+    );
 
     const id = uuid();
 
@@ -332,7 +342,12 @@ export class AttachmentController {
       throw new EntityNotFoundError('Phase', phaseId);
     }
 
-    await assertProjectMember(this.prisma, phase.projectId, user.id);
+    // 認可は URL params の projectId ではなく phase.projectId 基準で行う。
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      phase.projectId,
+      'view',
+    );
 
     return this.prisma.attachment.findMany({
       where: { projectId: phase.projectId, phaseId },
@@ -359,7 +374,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('Task', taskId);
     }
 
-    await assertProjectMember(this.prisma, task.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      task.projectId,
+      'edit',
+    );
 
     const id = uuid();
 
@@ -408,7 +427,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('Task', taskId);
     }
 
-    await assertProjectMember(this.prisma, task.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      task.projectId,
+      'view',
+    );
 
     return this.prisma.attachment.findMany({
       where: { taskId },
@@ -437,7 +460,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('InformationType', informationTypeId);
     }
 
-    await assertProjectMember(this.prisma, informationType.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      informationType.projectId,
+      'edit',
+    );
 
     const id = uuid();
 
@@ -493,7 +520,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('InformationType', informationTypeId);
     }
 
-    await assertProjectMember(this.prisma, informationType.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      informationType.projectId,
+      'edit',
+    );
 
     const id = uuid();
     const displayName = normalizeNullableText(dto.displayName) ?? null;
@@ -538,7 +569,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('InformationType', informationTypeId);
     }
 
-    await assertProjectMember(this.prisma, informationType.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      informationType.projectId,
+      'view',
+    );
 
     return this.prisma.attachment.findMany({
       where: { informationTypeId },
@@ -567,7 +602,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('BusinessFlow', flowId);
     }
 
-    await assertProjectMember(this.prisma, flow.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      flow.projectId,
+      'edit',
+    );
 
     const id = uuid();
 
@@ -616,7 +655,11 @@ export class AttachmentController {
       throw new EntityNotFoundError('BusinessFlow', flowId);
     }
 
-    await assertProjectMember(this.prisma, flow.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      flow.projectId,
+      'view',
+    );
 
     return this.prisma.attachment.findMany({
       where: { flowId },
@@ -676,7 +719,7 @@ export class AttachmentController {
       throw new EntityNotFoundError('Attachment', id);
     }
 
-    await assertProjectMember(this.prisma, row.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(user, row.projectId, 'edit');
 
     return this.prisma.attachment.update({
       where: { id },
@@ -705,7 +748,7 @@ export class AttachmentController {
       throw new EntityNotFoundError('Attachment', id);
     }
 
-    await assertProjectMember(this.prisma, row.projectId, user.id);
+    await this.projectAccess.assertPrincipalAccess(user, row.projectId, 'edit');
 
     await this.prisma.attachment.delete({ where: { id } });
 
