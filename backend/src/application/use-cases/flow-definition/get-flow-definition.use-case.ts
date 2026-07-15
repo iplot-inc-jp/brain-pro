@@ -7,9 +7,12 @@ import {
   EntityNotFoundError, ForbiddenError,
 } from '../../../domain';
 import { FlowDefinitionOutput, toFlowDefinitionOutput } from './flow-definition.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
-export interface GetFlowDefinitionInput { userId: string; flowId: string; }
+export interface GetFlowDefinitionInput { userId: string; principal: AccessPrincipal; flowId: string; }
 
 @Injectable()
 export class GetFlowDefinitionUseCase {
@@ -30,7 +33,7 @@ export class GetFlowDefinitionUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
     // プロジェクト単位 RBAC: 読取は VIEW 以上（プロジェクト除外ユーザーを弾く）
-    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'view');
+    await this.projectAccess.assertPrincipalAccess(input.principal, flow.projectId, 'view');
     const def = await this.repo.findByFlowId(input.flowId);
     return toFlowDefinitionOutput(input.flowId, def);
   }

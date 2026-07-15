@@ -152,6 +152,7 @@ export class FlowFolderByIdController {
     if (dto.name !== undefined) {
       result = await this.renameFlowFolderUseCase.execute({
         userId: user.id,
+        principal: user,
         folderId: id,
         name: dto.name,
       });
@@ -160,6 +161,7 @@ export class FlowFolderByIdController {
     if (dto.parentId !== undefined || dto.order !== undefined) {
       result = await this.moveFlowFolderUseCase.execute({
         userId: user.id,
+        principal: user,
         folderId: id,
         parentId: dto.parentId,
         order: dto.order,
@@ -170,6 +172,7 @@ export class FlowFolderByIdController {
       // 変更項目が無い場合もリネームユースケース経由で現状を取得しないため、移動で no-op を実行
       result = await this.moveFlowFolderUseCase.execute({
         userId: user.id,
+        principal: user,
         folderId: id,
       });
     }
@@ -189,6 +192,7 @@ export class FlowFolderByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteFlowFolderUseCase.execute({
       userId: user.id,
+      principal: user,
       folderId: id,
     });
     return { success: true };

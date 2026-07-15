@@ -8,10 +8,14 @@ import {
 } from '../../../domain';
 import { FlowDefinition, FlowDefinitionFields } from '../../../domain/entities/flow-definition.entity';
 import { FlowDefinitionOutput, toFlowDefinitionOutput } from './flow-definition.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpsertFlowDefinitionInput {
   userId: string;
+  principal: AccessPrincipal;
   flowId: string;
   patch: Partial<FlowDefinitionFields>;
 }
@@ -35,7 +39,7 @@ export class UpsertFlowDefinitionUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
     // プロジェクト単位 RBAC: 書込は EDIT 必須（VIEW 専用ユーザーを弾く）
-    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'edit');
+    await this.projectAccess.assertPrincipalAccess(input.principal, flow.projectId, 'edit');
     let def = await this.repo.findByFlowId(input.flowId);
     if (!def) {
       def = FlowDefinition.create({ flowId: input.flowId, ...input.patch }, this.repo.generateId());

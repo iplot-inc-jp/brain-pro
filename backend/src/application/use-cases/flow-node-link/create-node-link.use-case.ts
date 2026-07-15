@@ -19,10 +19,14 @@ import {
   FlowNodeLinkOutput,
   toFlowNodeLinkOutput,
 } from './flow-node-link.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface CreateNodeLinkInput {
   userId: string;
+  principal: AccessPrincipal;
   nodeId: string;
   direction: FlowLinkDirectionValue;
   targetFlowId: string;
@@ -74,9 +78,9 @@ export class CreateNodeLinkUseCase {
     }
 
     // プロジェクト単位 RBAC: リンク作成は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       flow.projectId,
-      input.userId,
       'edit',
     );
 

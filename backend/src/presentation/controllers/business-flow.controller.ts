@@ -1606,6 +1606,7 @@ export class BusinessFlowController {
   ) {
     return this.createNodeLinkUseCase.execute({
       userId: user.id,
+      principal: user,
       nodeId,
       direction: dto.direction,
       targetFlowId: dto.targetFlowId,
@@ -1622,6 +1623,7 @@ export class BusinessFlowController {
   ) {
     await this.deleteNodeLinkUseCase.execute({
       userId: user.id,
+      principal: user,
       linkId,
     });
     return { success: true };

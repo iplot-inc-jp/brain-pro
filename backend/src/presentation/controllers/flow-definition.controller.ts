@@ -49,7 +49,7 @@ export class FlowDefinitionController {
   @Get('business-flows/:flowId/definition')
   @ApiOperation({ summary: '個別定義シート③（1フロー取得）' })
   async get(@CurrentUser() user: CurrentUserPayload, @Param('flowId') flowId: string) {
-    return this.getUseCase.execute({ userId: user.id, flowId });
+    return this.getUseCase.execute({ userId: user.id, principal: user, flowId });
   }
 
   @Put('business-flows/:flowId/definition')
@@ -59,6 +59,6 @@ export class FlowDefinitionController {
     @Param('flowId') flowId: string,
     @Body() dto: UpsertFlowDefinitionDto,
   ) {
-    return this.upsertUseCase.execute({ userId: user.id, flowId, patch: dto });
+    return this.upsertUseCase.execute({ userId: user.id, principal: user, flowId, patch: dto });
   }
 }
