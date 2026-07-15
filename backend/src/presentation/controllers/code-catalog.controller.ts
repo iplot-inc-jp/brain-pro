@@ -32,6 +32,7 @@ import {
 } from '../../domain';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 // ========== DTOs ==========
 class UpdateApiEndpointDto {
@@ -125,6 +126,7 @@ export class CodeCatalogController {
     private readonly companyKeyService: CompanyKeyService,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   // ========== API Endpoints ==========
@@ -142,6 +144,7 @@ export class CodeCatalogController {
   @Put('api-endpoints/:id')
   @ApiOperation({ summary: '抽出されたAPIを編集' })
   async updateApiEndpoint(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateApiEndpointDto,
   ) {
@@ -154,6 +157,11 @@ export class CodeCatalogController {
         HttpStatus.NOT_FOUND,
       );
     }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
 
     const data: Record<string, unknown> = {};
     if (dto.method !== undefined) data.method = dto.method;
@@ -165,7 +173,25 @@ export class CodeCatalogController {
 
   @Delete('api-endpoints/:id')
   @ApiOperation({ summary: '抽出されたAPIを削除' })
-  async deleteApiEndpoint(@Param('id') id: string) {
+  async deleteApiEndpoint(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const existing = await this.prisma.apiEndpoint.findUnique({
+      where: { id },
+      select: { projectId: true },
+    });
+    if (!existing) {
+      throw new HttpException(
+        'APIエンドポイントが見つかりません',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
     await this.prisma.apiEndpoint.delete({ where: { id } });
     return { success: true };
   }
@@ -173,10 +199,38 @@ export class CodeCatalogController {
   @Put('api-endpoints/:id/roles/:roleId')
   @ApiOperation({ summary: 'API×ロールの権限をupsert' })
   async upsertApiRolePermission(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') apiEndpointId: string,
     @Param('roleId') roleId: string,
     @Body() dto: UpsertApiRolePermissionDto,
   ) {
+    const apiEndpoint = await this.prisma.apiEndpoint.findUnique({
+      where: { id: apiEndpointId },
+      select: { projectId: true },
+    });
+    if (!apiEndpoint) {
+      throw new EntityNotFoundError('ApiEndpoint', apiEndpointId);
+    }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      apiEndpoint.projectId,
+      'edit',
+    );
+
+    // roleId が同一プロジェクトに属することを検証（他プロジェクトのロール混入＝IDOR を防ぐ）
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { projectId: true },
+    });
+    if (!role) {
+      throw new EntityNotFoundError('Role', roleId);
+    }
+    if (role.projectId !== apiEndpoint.projectId) {
+      throw new ValidationError(
+        `Role '${roleId}' はこのAPIエンドポイントと同じプロジェクトに属していません`,
+      );
+    }
+
     return this.prisma.apiRolePermission.upsert({
       where: { apiEndpointId_roleId: { apiEndpointId, roleId } },
       create: {
@@ -219,8 +273,14 @@ export class CodeCatalogController {
       throw new EntityNotFoundError('FlowEdge', edgeId);
     }
 
-    // 認可: edge -> flow -> project -> organization メンバーシップ
-    // （business-flows のエッジ更新系と同じパターン）
+    // 認可: edge -> flow -> project の実効権限を主体（ユーザー/APIキー）で判定。
+    // scopeOrgId 越境拒否・sk_ キースコープ・RBAC を assertPrincipalAccess に一本化する。
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      edge.flow.projectId,
+      'edit',
+    );
+    // 既存の会社メンバーシップ判定も残す（defense-in-depth）。
     const isMember = await this.organizationRepository.isMember(
       edge.flow.project.organizationId,
       user.id,
@@ -302,9 +362,23 @@ export class CodeCatalogController {
   @Post('tables/:tableId/statuses')
   @ApiOperation({ summary: 'テーブルにステータスを追加' })
   async createStatus(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('tableId') tableId: string,
     @Body() dto: CreateTableStatusDto,
   ) {
+    const table = await this.prisma.table.findUnique({
+      where: { id: tableId },
+      select: { projectId: true },
+    });
+    if (!table) {
+      throw new EntityNotFoundError('Table', tableId);
+    }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      table.projectId,
+      'edit',
+    );
+
     return this.prisma.tableStatus.create({
       data: {
         tableId,
@@ -319,11 +393,13 @@ export class CodeCatalogController {
   @Put('statuses/:id')
   @ApiOperation({ summary: 'ステータスを編集' })
   async updateStatus(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateTableStatusDto,
   ) {
     const existing = await this.prisma.tableStatus.findUnique({
       where: { id },
+      include: { table: { select: { projectId: true } } },
     });
     if (!existing) {
       throw new HttpException(
@@ -331,6 +407,11 @@ export class CodeCatalogController {
         HttpStatus.NOT_FOUND,
       );
     }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.table.projectId,
+      'edit',
+    );
 
     const data: Record<string, unknown> = {};
     if (dto.value !== undefined) data.value = dto.value;
@@ -343,7 +424,25 @@ export class CodeCatalogController {
 
   @Delete('statuses/:id')
   @ApiOperation({ summary: 'ステータスを削除' })
-  async deleteStatus(@Param('id') id: string) {
+  async deleteStatus(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const existing = await this.prisma.tableStatus.findUnique({
+      where: { id },
+      include: { table: { select: { projectId: true } } },
+    });
+    if (!existing) {
+      throw new HttpException(
+        'ステータスが見つかりません',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.table.projectId,
+      'edit',
+    );
     await this.prisma.tableStatus.delete({ where: { id } });
     return { success: true };
   }
@@ -351,10 +450,38 @@ export class CodeCatalogController {
   @Put('statuses/:statusId/roles/:roleId')
   @ApiOperation({ summary: 'ステータス×ロールの権限をupsert' })
   async upsertStatusRolePermission(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('statusId') tableStatusId: string,
     @Param('roleId') roleId: string,
     @Body() dto: UpsertStatusRolePermissionDto,
   ) {
+    const status = await this.prisma.tableStatus.findUnique({
+      where: { id: tableStatusId },
+      include: { table: { select: { projectId: true } } },
+    });
+    if (!status) {
+      throw new EntityNotFoundError('TableStatus', tableStatusId);
+    }
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      status.table.projectId,
+      'edit',
+    );
+
+    // roleId が同一プロジェクトに属することを検証（他プロジェクトのロール混入＝IDOR を防ぐ）
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { projectId: true },
+    });
+    if (!role) {
+      throw new EntityNotFoundError('Role', roleId);
+    }
+    if (role.projectId !== status.table.projectId) {
+      throw new ValidationError(
+        `Role '${roleId}' はこのステータスと同じプロジェクトに属していません`,
+      );
+    }
+
     return this.prisma.statusRolePermission.upsert({
       where: { tableStatusId_roleId: { tableStatusId, roleId } },
       create: {
