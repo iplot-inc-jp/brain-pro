@@ -1687,6 +1687,22 @@ export class BusinessFlowController {
     @Body() dto: ReplaceNodeInformationLinksDto,
   ) {
     await this.assertNodeEditAccess(nodeId, user);
+    // informationType は node が属するプロジェクトのマスタに限定
+    //（他プロジェクトの name/category を GET information-links で読み戻せる越境を防ぐ・
+    //   SetKpiInformationTypes と同型のクロス参照スコープ検査）。
+    const infoNode = await this.nodeRepository.findById(nodeId);
+    const infoFlow = infoNode
+      ? await this.flowRepository.findById(infoNode.flowId)
+      : null;
+    const infoTypeIds = [...new Set(dto.links.map((l) => l.informationTypeId))];
+    if (infoFlow && infoTypeIds.length > 0) {
+      const validCount = await this.prisma.informationType.count({
+        where: { id: { in: infoTypeIds }, projectId: infoFlow.projectId },
+      });
+      if (validCount !== infoTypeIds.length) {
+        throw new EntityNotFoundError('InformationType', infoTypeIds.join(','));
+      }
+    }
     await this.prisma.$transaction([
       this.prisma.nodeInformationLink.deleteMany({ where: { nodeId } }),
       ...dto.links.map((link, index) =>

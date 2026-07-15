@@ -84,9 +84,12 @@ export class CreateNodeLinkUseCase {
       'edit',
     );
 
-    // ターゲットフロー存在確認
+    // ターゲットフロー存在確認 + 同一プロジェクト強制。
+    // （他プロジェクトのフロー名/ノードラベルを toFlowNodeLinkOutput 経由で読み出せる
+    //   越境を防ぐ。KPI/DFD Add と同型のクロス参照スコープ検査。他プロジェクトのフローは
+    //   存在を秘匿するため 404 扱い。）
     const targetFlow = await this.flowRepository.findById(input.targetFlowId);
-    if (!targetFlow) {
+    if (!targetFlow || targetFlow.projectId !== flow.projectId) {
       throw new EntityNotFoundError('BusinessFlow', input.targetFlowId);
     }
 
@@ -94,7 +97,8 @@ export class CreateNodeLinkUseCase {
     let targetNodeLabel: string | null = null;
     if (input.targetNodeId) {
       const targetNode = await this.nodeRepository.findById(input.targetNodeId);
-      if (!targetNode) {
+      // ターゲットノードは（同一プロジェクトと確定済みの）ターゲットフロー配下に限定。
+      if (!targetNode || targetNode.flowId !== input.targetFlowId) {
         throw new EntityNotFoundError('FlowNode', input.targetNodeId);
       }
       targetNodeLabel = targetNode.label;
