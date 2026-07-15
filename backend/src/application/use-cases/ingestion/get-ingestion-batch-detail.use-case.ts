@@ -6,7 +6,10 @@ import {
   INGESTION_FILE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   IngestionBatchDetailOutput,
   toIngestionBatchOutput,
@@ -15,12 +18,13 @@ import {
 
 export interface GetIngestionBatchDetailInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
 /**
  * 取り込みバッチ詳細取得ユースケース（files 込み）。
- * id 指定（projectId はバッチから解決）→ assertProjectAccess('view')。
+ * id 指定（projectId はバッチから解決）→ assertPrincipalAccess('view')。
  */
 @Injectable()
 export class GetIngestionBatchDetailUseCase {
@@ -39,9 +43,9 @@ export class GetIngestionBatchDetailUseCase {
     if (!batch) {
       throw new EntityNotFoundError('IngestionBatch', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       batch.projectId,
-      input.userId,
       'view',
     );
     const files = await this.fileRepository.findByBatchId(batch.id);

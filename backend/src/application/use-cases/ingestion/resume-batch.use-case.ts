@@ -8,7 +8,10 @@ import {
   IngestionFileStatusValue,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { JobService } from '../../../infrastructure/services/job.service';
 import {
   IngestionBatchDetailOutput,
@@ -18,6 +21,7 @@ import {
 
 export interface ResumeBatchInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -62,9 +66,9 @@ export class ResumeBatchUseCase {
     if (!batch) {
       throw new EntityNotFoundError('IngestionBatch', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       batch.projectId,
-      input.userId,
       'edit',
     );
 

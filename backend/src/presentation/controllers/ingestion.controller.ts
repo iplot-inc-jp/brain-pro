@@ -126,6 +126,7 @@ export class IngestionBatchProjectController {
   ): Promise<IngestionBatchOutput[]> {
     return this.getIngestionBatchesUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
     });
   }
@@ -143,6 +144,7 @@ export class IngestionBatchProjectController {
   ): Promise<IngestionBatchDetailOutput> {
     return this.createIngestionBatchUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       name: dto.name ?? null,
       files: dto.files,
@@ -171,7 +173,11 @@ export class IngestionBatchByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<IngestionBatchDetailOutput> {
-    return this.getIngestionBatchDetailUseCase.execute({ userId: user.id, id });
+    return this.getIngestionBatchDetailUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Post(':id/resume')
@@ -182,7 +188,11 @@ export class IngestionBatchByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<IngestionBatchDetailOutput> {
-    return this.resumeBatchUseCase.execute({ userId: user.id, id });
+    return this.resumeBatchUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Post(':id/cancel')
@@ -193,7 +203,11 @@ export class IngestionBatchByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<IngestionBatchDetailOutput> {
-    return this.cancelBatchUseCase.execute({ userId: user.id, id });
+    return this.cancelBatchUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Delete(':id')
@@ -204,7 +218,11 @@ export class IngestionBatchByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.cancelBatchUseCase.execute({ userId: user.id, id });
+    await this.cancelBatchUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
     return { success: true };
   }
 }

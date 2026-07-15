@@ -3,7 +3,10 @@ import {
   IIngestionBatchRepository,
   INGESTION_BATCH_REPOSITORY,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   IngestionBatchOutput,
   toIngestionBatchOutput,
@@ -11,6 +14,7 @@ import {
 
 export interface GetIngestionBatchesInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
 }
 
@@ -28,9 +32,9 @@ export class GetIngestionBatchesUseCase {
   async execute(
     input: GetIngestionBatchesInput,
   ): Promise<IngestionBatchOutput[]> {
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'view',
     );
     const batches = await this.batchRepository.findByProjectId(input.projectId);

@@ -57,7 +57,11 @@ export class IngestionFileController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<IngestionFileOutput> {
-    return this.retryFileUseCase.execute({ userId: user.id, id });
+    return this.retryFileUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Post(':id/skip')
@@ -72,6 +76,7 @@ export class IngestionFileController {
   ): Promise<IngestionFileOutput> {
     return this.skipFileUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       reason: dto.reason,
     });

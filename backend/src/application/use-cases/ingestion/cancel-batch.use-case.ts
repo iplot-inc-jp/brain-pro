@@ -6,7 +6,10 @@ import {
   INGESTION_FILE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   IngestionBatchDetailOutput,
   toIngestionBatchOutput,
@@ -15,6 +18,7 @@ import {
 
 export interface CancelBatchInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -38,9 +42,9 @@ export class CancelBatchUseCase {
     if (!batch) {
       throw new EntityNotFoundError('IngestionBatch', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       batch.projectId,
-      input.userId,
       'edit',
     );
 

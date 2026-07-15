@@ -11,7 +11,10 @@ import {
   IngestionSourceTypeValue,
   ValidationError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { JobService } from '../../../infrastructure/services/job.service';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
 import {
@@ -33,6 +36,7 @@ export interface CreateIngestionFileSpec {
 
 export interface CreateIngestionBatchInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   /** 未指定（null/undefined）なら「取り込み <件数>件」を補完する。 */
   name?: string | null;
@@ -140,9 +144,9 @@ export class CreateIngestionBatchUseCase {
     input: CreateIngestionBatchInput,
   ): Promise<IngestionBatchDetailOutput> {
     // 認可: 書込（バッチ作成 = 課金処理の起票）のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'edit',
     );
 

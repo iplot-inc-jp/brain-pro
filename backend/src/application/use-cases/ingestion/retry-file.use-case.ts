@@ -4,7 +4,10 @@ import {
   INGESTION_FILE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { JobService } from '../../../infrastructure/services/job.service';
 import {
   IngestionFileOutput,
@@ -13,6 +16,7 @@ import {
 
 export interface RetryFileInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -35,9 +39,9 @@ export class RetryFileUseCase {
     if (!file) {
       throw new EntityNotFoundError('IngestionFile', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       file.projectId,
-      input.userId,
       'edit',
     );
 
