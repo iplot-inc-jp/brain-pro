@@ -60,7 +60,11 @@ export class TaskCommentController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('taskId') taskId: string,
   ): Promise<TaskCommentOutput[]> {
-    return this.getTaskCommentsUseCase.execute({ userId: user.id, taskId });
+    return this.getTaskCommentsUseCase.execute({
+      userId: user.id,
+      principal: user,
+      taskId,
+    });
   }
 
   @Post()

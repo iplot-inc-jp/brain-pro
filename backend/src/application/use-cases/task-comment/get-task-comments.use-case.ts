@@ -12,9 +12,14 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { TaskCommentOutput, toTaskCommentOutput } from './task-comment.output';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface GetTaskCommentsInput {
   userId: string;
+  principal: AccessPrincipal;
   taskId: string;
 }
 
@@ -32,6 +37,7 @@ export class GetTaskCommentsUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetTaskCommentsInput): Promise<TaskCommentOutput[]> {
@@ -52,6 +58,13 @@ export class GetTaskCommentsUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC: 会社スコープ越境を防ぐため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      task.projectId,
+      'view',
+    );
 
     const comments = await this.taskCommentRepository.findByTaskId(
       input.taskId,
