@@ -199,6 +199,11 @@ export class TableController {
     await this.projectAccess.assertPrincipalAccess(principal, projectId, 'edit');
   }
 
+  /** projectId の view 権限を強制 */
+  private async assertProjectView(projectId: string, principal: CurrentUserPayload): Promise<void> {
+    await this.projectAccess.assertPrincipalAccess(principal, projectId, 'view');
+  }
+
   /** tableId -> projectId を解決して edit 強制 */
   private async assertTableEdit(tableId: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.table.findUnique({
@@ -209,6 +214,16 @@ export class TableController {
     await this.assertProjectEdit(row.projectId, principal);
   }
 
+  /** tableId -> projectId を解決して view 強制 */
+  private async assertTableView(tableId: string, principal: CurrentUserPayload): Promise<void> {
+    const row = await this.prisma.table.findUnique({
+      where: { id: tableId },
+      select: { projectId: true },
+    });
+    if (!row) throw new EntityNotFoundError('Table', tableId);
+    await this.assertProjectView(row.projectId, principal);
+  }
+
   /** columnId -> table.projectId を解決して edit 強制 */
   private async assertColumnEdit(columnId: string, principal: CurrentUserPayload): Promise<void> {
     const row = await this.prisma.column.findUnique({
@@ -217,6 +232,16 @@ export class TableController {
     });
     if (!row) throw new EntityNotFoundError('Column', columnId);
     await this.assertProjectEdit(row.table.projectId, principal);
+  }
+
+  /** columnId -> table.projectId を解決して view 強制 */
+  private async assertColumnView(columnId: string, principal: CurrentUserPayload): Promise<void> {
+    const row = await this.prisma.column.findUnique({
+      where: { id: columnId },
+      select: { table: { select: { projectId: true } } },
+    });
+    if (!row) throw new EntityNotFoundError('Column', columnId);
+    await this.assertProjectView(row.table.projectId, principal);
   }
 
   /** crudMappingId -> column.table.projectId を解決して edit 強制 */
@@ -238,11 +263,15 @@ export class TableController {
 
   @Get(':id')
   @ApiOperation({ summary: 'テーブル詳細を取得' })
-  async getById(@Param('id') id: string) {
+  async getById(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
     const table = await this.tableRepository.findById(id);
     if (!table) {
       return { error: 'Table not found' };
     }
+    await this.assertProjectView(table.projectId, user);
     const columns = await this.columnRepository.findByTableId(id);
     return {
       ...this.toResponse(table),
@@ -312,7 +341,11 @@ export class TableController {
 
   @Get(':tableId/columns')
   @ApiOperation({ summary: 'カラム一覧を取得' })
-  async getColumns(@Param('tableId') tableId: string) {
+  async getColumns(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('tableId') tableId: string,
+  ) {
+    await this.assertTableView(tableId, user);
     const columns = await this.columnRepository.findByTableId(tableId);
     return columns.map((c) => this.columnToResponse(c));
   }
@@ -360,7 +393,11 @@ export class TableController {
 
   @Get(':tableId/columns/:columnId/crud-mappings')
   @ApiOperation({ summary: 'カラムのCRUDマッピング一覧を取得' })
-  async getCrudMappings(@Param('columnId') columnId: string) {
+  async getCrudMappings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('columnId') columnId: string,
+  ) {
+    await this.assertColumnView(columnId, user);
     const mappings = await this.crudMappingRepository.findByColumnId(columnId);
     return mappings.map((m) => ({
       id: m.id,
