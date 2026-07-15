@@ -252,7 +252,8 @@ export class ProjectJobController {
  * 単一ジョブ取得・手動リトライ（要認証）。
  *   - 取得: projectId ありの job … その projectId に view 権限が必要。
  *           projectId null の job … 起票者本人 or super-admin のみ。
- *   - リトライ: 管理者ゲート（projectId あり: isProjectAdmin、null: super-admin or 起票者）。
+ *   - リトライ: projectId ありの job … その projectId に edit 権限が必要（principal-aware）。
+ *              projectId null の job … 起票者本人 or super-admin のみ。
  */
 @ApiTags('ジョブ')
 @ApiBearerAuth()
@@ -317,14 +318,18 @@ export class JobByIdController {
       throw new NotFoundException('ジョブが見つかりません');
     }
 
-    // 管理者ゲート:
-    //   projectId あり → isProjectAdmin（super-admin or org OWNER/ADMIN）
-    //   projectId null → super-admin or 起票者本人
-    const authorized = job.projectId
-      ? await this.projectAccess.isProjectAdmin(job.projectId, user.id)
-      : (job.createdById === user.id) || (await this.isSuperAdmin(user.id));
-    if (!authorized) {
-      throw new ForbiddenException('このジョブをリトライする権限がありません');
+    // 認可（principal-aware）:
+    //   projectId あり → その projectId に edit 権限が必要。assertPrincipalAccess が
+    //     scopeOrgId 越境拒否 + sk_ キースコープ + 会員RBAC を honor する（getById と同じ入口）。
+    //   projectId null → super-admin or 起票者本人。
+    if (job.projectId) {
+      await this.projectAccess.assertPrincipalAccess(user, job.projectId, 'edit');
+    } else {
+      const authorized =
+        job.createdById === user.id || (await this.isSuperAdmin(user.id));
+      if (!authorized) {
+        throw new ForbiddenException('このジョブをリトライする権限がありません');
+      }
     }
 
     try {
