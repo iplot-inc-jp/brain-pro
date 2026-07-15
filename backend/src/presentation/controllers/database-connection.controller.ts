@@ -17,8 +17,11 @@ import { Client } from 'pg';
 import { createConnection } from 'mysql2/promise';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
+import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { EntityNotFoundError } from '../../domain';
 
 // ========== DTOs ==========
 class CreateDatabaseConnectionDto {
@@ -69,6 +72,7 @@ export class DatabaseConnectionController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cryptoService: CryptoService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   @Get('projects/:projectId/database-connections')
@@ -106,6 +110,7 @@ export class DatabaseConnectionController {
     summary: 'DB接続を更新（connStringが渡された場合のみ再暗号化）',
   })
   async update(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateDatabaseConnectionDto,
   ) {
@@ -113,8 +118,14 @@ export class DatabaseConnectionController {
       where: { id },
     });
     if (!existing) {
-      throw new HttpException('DB接続が見つかりません', HttpStatus.NOT_FOUND);
+      throw new EntityNotFoundError('DatabaseConnection', id);
     }
+    // 越境IDOR防止: 対象接続のプロジェクトへの edit 権限を強制（更新の副作用より前）
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
 
     const data: Record<string, unknown> = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -133,7 +144,22 @@ export class DatabaseConnectionController {
 
   @Delete('database-connections/:id')
   @ApiOperation({ summary: 'DB接続を削除' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const existing = await this.prisma.databaseConnection.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      throw new EntityNotFoundError('DatabaseConnection', id);
+    }
+    // 越境IDOR防止: 対象接続のプロジェクトへの edit 権限を強制（削除の副作用より前）
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
     await this.prisma.databaseConnection.delete({ where: { id } });
     return { success: true };
   }
@@ -143,13 +169,22 @@ export class DatabaseConnectionController {
     summary:
       'DBに接続してスキーマを取得し、テーブル/カラムをカタログにupsert（postgres/mysql）',
   })
-  async introspect(@Param('id') id: string) {
+  async introspect(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
     const connection = await this.prisma.databaseConnection.findUnique({
       where: { id },
     });
     if (!connection) {
-      throw new HttpException('DB接続が見つかりません', HttpStatus.NOT_FOUND);
+      throw new EntityNotFoundError('DatabaseConnection', id);
     }
+    // 越境IDOR防止: 復号・外部DB接続の前に対象プロジェクトへの edit 権限を強制
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      connection.projectId,
+      'edit',
+    );
 
     if (connection.dialect !== 'postgres' && connection.dialect !== 'mysql') {
       throw new HttpException(

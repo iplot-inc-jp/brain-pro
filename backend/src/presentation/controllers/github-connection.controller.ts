@@ -16,9 +16,11 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { CryptoService } from '../../infrastructure/services/crypto.service';
 import { SyncService } from '../../infrastructure/services/sync.service';
 import { CompanyKeyService } from '../../infrastructure/services/company-key.service';
+import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { EntityNotFoundError } from '../../domain';
 
 // ========== DTOs ==========
 class CreateGithubConnectionDto {
@@ -76,6 +78,7 @@ export class GithubConnectionController {
     private readonly cryptoService: CryptoService,
     private readonly syncService: SyncService,
     private readonly companyKeyService: CompanyKeyService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   @Get('projects/:projectId/github-connections')
@@ -113,6 +116,7 @@ export class GithubConnectionController {
   @Put('github-connections/:id')
   @ApiOperation({ summary: 'GitHub連携を更新（tokenが渡された場合のみ再暗号化）' })
   async update(
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateGithubConnectionDto,
   ) {
@@ -120,11 +124,14 @@ export class GithubConnectionController {
       where: { id },
     });
     if (!existing) {
-      throw new HttpException(
-        'GitHub連携が見つかりません',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new EntityNotFoundError('GithubConnection', id);
     }
+    // 越境IDOR防止: 対象連携のプロジェクトへの edit 権限を強制（更新の副作用より前）
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
 
     const data: Record<string, unknown> = {};
     if (dto.repoFullName !== undefined) data.repoFullName = dto.repoFullName;
@@ -147,7 +154,22 @@ export class GithubConnectionController {
 
   @Delete('github-connections/:id')
   @ApiOperation({ summary: 'GitHub連携を削除' })
-  async delete(@Param('id') id: string) {
+  async delete(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const existing = await this.prisma.githubConnection.findUnique({
+      where: { id },
+    });
+    if (!existing) {
+      throw new EntityNotFoundError('GithubConnection', id);
+    }
+    // 越境IDOR防止: 対象連携のプロジェクトへの edit 権限を強制（削除の副作用より前）
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      existing.projectId,
+      'edit',
+    );
     await this.prisma.githubConnection.delete({ where: { id } });
     return { success: true };
   }
@@ -162,11 +184,14 @@ export class GithubConnectionController {
       where: { id },
     });
     if (!connection) {
-      throw new HttpException(
-        'GitHub連携が見つかりません',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new EntityNotFoundError('GithubConnection', id);
     }
+    // 越境IDOR防止: キー解決・外部同期(runSync)の前に対象プロジェクトへの edit 権限を強制
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      connection.projectId,
+      'edit',
+    );
 
     // 会社(Organization)キー → ユーザーキー → 環境変数 の順で解決
     const apiKey = await this.companyKeyService.resolveForProject(
@@ -187,7 +212,22 @@ export class GithubConnectionController {
 
   @Get('github-connections/:id/runs')
   @ApiOperation({ summary: '同期実行履歴を取得（最新20件）' })
-  async runs(@Param('id') id: string) {
+  async runs(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const connection = await this.prisma.githubConnection.findUnique({
+      where: { id },
+    });
+    if (!connection) {
+      throw new EntityNotFoundError('GithubConnection', id);
+    }
+    // 越境IDOR防止: 実行履歴の閲覧前に対象プロジェクトへの view 権限を強制
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      connection.projectId,
+      'view',
+    );
     return this.prisma.syncRun.findMany({
       where: { connectionId: id },
       orderBy: { startedAt: 'desc' },
