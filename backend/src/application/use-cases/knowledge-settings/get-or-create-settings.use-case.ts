@@ -4,7 +4,10 @@ import {
   IProjectKnowledgeSettingsRepository,
   PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   ProjectKnowledgeSettingsOutput,
   toProjectKnowledgeSettingsOutput,
@@ -12,6 +15,7 @@ import {
 
 export interface GetOrCreateSettingsInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
 }
 
@@ -30,9 +34,9 @@ export class GetOrCreateSettingsUseCase {
   async execute(
     input: GetOrCreateSettingsInput,
   ): Promise<ProjectKnowledgeSettingsOutput> {
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'view',
     );
 

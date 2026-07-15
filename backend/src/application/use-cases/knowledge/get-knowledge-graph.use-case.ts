@@ -3,7 +3,10 @@ import {
   IKnowledgeRepository,
   KNOWLEDGE_REPOSITORY,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeGraphOutput,
   toKnowledgeGraphOutput,
@@ -11,6 +14,7 @@ import {
 
 export interface GetKnowledgeGraphInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
 }
 
@@ -26,9 +30,9 @@ export class GetKnowledgeGraphUseCase {
   ) {}
 
   async execute(input: GetKnowledgeGraphInput): Promise<KnowledgeGraphOutput> {
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'view',
     );
     const graph = await this.knowledgeRepository.getGraph(input.projectId);

@@ -152,7 +152,11 @@ export class KnowledgeProjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ): Promise<KnowledgeGraphOutput> {
-    return this.getKnowledgeGraphUseCase.execute({ userId: user.id, projectId });
+    return this.getKnowledgeGraphUseCase.execute({
+      userId: user.id,
+      principal: user,
+      projectId,
+    });
   }
 
   @Get('search')
@@ -166,6 +170,7 @@ export class KnowledgeProjectController {
   ): Promise<KnowledgeSearchOutput> {
     return this.searchKnowledgeUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       query: q ?? '',
     });
@@ -193,7 +198,11 @@ export class KnowledgeNodeController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<KnowledgeNodeDetailOutput> {
-    return this.getKnowledgeNodeUseCase.execute({ userId: user.id, id });
+    return this.getKnowledgeNodeUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Patch(':id')
@@ -210,6 +219,7 @@ export class KnowledgeNodeController {
   ): Promise<KnowledgeNodeOutput> {
     return this.updateKnowledgeNodeUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       label: dto.label,
       description: dto.description,
@@ -239,6 +249,7 @@ export class KnowledgeNodeController {
   ): Promise<KnowledgeNodeOutput> {
     return this.mergeKnowledgeNodesUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       targetNodeId: dto.targetNodeId,
     });
@@ -253,7 +264,11 @@ export class KnowledgeNodeController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.deleteKnowledgeNodeUseCase.execute({ userId: user.id, id });
+    await this.deleteKnowledgeNodeUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
     return { success: true };
   }
 }
@@ -284,6 +299,7 @@ export class KnowledgeDocumentController {
   ): Promise<KnowledgeDocumentOutput> {
     return this.updateDocumentPositionUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       positionX: dto.positionX,
       positionY: dto.positionY,
@@ -301,6 +317,7 @@ export class KnowledgeDocumentController {
   ): Promise<KnowledgeDocumentOutput> {
     return this.updateKnowledgeDocumentUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       title: dto.title,
       summary: dto.summary,
@@ -347,7 +364,11 @@ export class KnowledgeDocumentController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.deleteKnowledgeDocumentUseCase.execute({ userId: user.id, id });
+    await this.deleteKnowledgeDocumentUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
     return { success: true };
   }
 }
@@ -374,6 +395,7 @@ export class KnowledgeRelationController {
   ): Promise<KnowledgeEdgeOutput> {
     return this.updateKnowledgeRelationUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       label: dto.label,
       type: dto.type,
@@ -389,7 +411,11 @@ export class KnowledgeRelationController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.deleteKnowledgeRelationUseCase.execute({ userId: user.id, id });
+    await this.deleteKnowledgeRelationUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
     return { success: true };
   }
 }

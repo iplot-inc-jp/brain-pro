@@ -3,7 +3,10 @@ import {
   IKnowledgeRepository,
   KNOWLEDGE_REPOSITORY,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeSearchOutput,
   toKnowledgeSearchOutput,
@@ -11,6 +14,7 @@ import {
 
 export interface SearchKnowledgeInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   query: string;
 }
@@ -27,9 +31,9 @@ export class SearchKnowledgeUseCase {
   ) {}
 
   async execute(input: SearchKnowledgeInput): Promise<KnowledgeSearchOutput> {
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'view',
     );
     const result = await this.knowledgeRepository.search(

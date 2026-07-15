@@ -5,7 +5,10 @@ import {
   EntityNotFoundError,
   KnowledgeNodeTypeValue,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeNodeOutput,
   toKnowledgeNodeOutput,
@@ -13,6 +16,7 @@ import {
 
 export interface UpdateKnowledgeNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   label?: string;
   description?: string | null;
@@ -41,9 +45,9 @@ export class UpdateKnowledgeNodeUseCase {
     if (!node) {
       throw new EntityNotFoundError('KnowledgeNode', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       node.projectId,
-      input.userId,
       'edit',
     );
 

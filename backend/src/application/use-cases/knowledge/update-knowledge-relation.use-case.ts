@@ -4,7 +4,10 @@ import {
   KNOWLEDGE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeEdgeOutput,
   toKnowledgeEdgeOutput,
@@ -12,6 +15,7 @@ import {
 
 export interface UpdateKnowledgeRelationInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   label?: string | null;
   type?: string | null;
@@ -35,9 +39,9 @@ export class UpdateKnowledgeRelationUseCase {
     if (!rel) {
       throw new EntityNotFoundError('KnowledgeRelation', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       rel.projectId,
-      input.userId,
       'edit',
     );
 

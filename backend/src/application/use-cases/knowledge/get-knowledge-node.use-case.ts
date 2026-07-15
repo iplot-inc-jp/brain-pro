@@ -4,7 +4,10 @@ import {
   KNOWLEDGE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeNodeDetailOutput,
   toKnowledgeNodeDetailOutput,
@@ -12,12 +15,13 @@ import {
 
 export interface GetKnowledgeNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
 /**
  * ナレッジノード詳細取得ユースケース（mentions 込み）。
- * id 指定（projectId はノードから解決）→ assertProjectAccess('view')。
+ * id 指定（projectId はノードから解決）→ assertPrincipalAccess('view')。
  */
 @Injectable()
 export class GetKnowledgeNodeUseCase {
@@ -34,9 +38,9 @@ export class GetKnowledgeNodeUseCase {
     if (!detail) {
       throw new EntityNotFoundError('KnowledgeNode', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       detail.node.projectId,
-      input.userId,
       'view',
     );
     return toKnowledgeNodeDetailOutput(detail);

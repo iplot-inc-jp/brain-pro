@@ -5,7 +5,10 @@ import {
   PROJECT_KNOWLEDGE_SETTINGS_REPOSITORY,
   ImagingModeValue,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   ProjectKnowledgeSettingsOutput,
   toProjectKnowledgeSettingsOutput,
@@ -13,6 +16,7 @@ import {
 
 export interface UpdateSettingsInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   aiExtractionEnabled?: boolean;
   ocrEnabled?: boolean;
@@ -36,9 +40,9 @@ export class UpdateSettingsUseCase {
   async execute(
     input: UpdateSettingsInput,
   ): Promise<ProjectKnowledgeSettingsOutput> {
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'edit',
     );
 

@@ -4,10 +4,14 @@ import {
   KNOWLEDGE_REPOSITORY,
   EntityNotFoundError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteKnowledgeNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -28,9 +32,9 @@ export class DeleteKnowledgeNodeUseCase {
     if (!node) {
       throw new EntityNotFoundError('KnowledgeNode', input.id);
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       node.projectId,
-      input.userId,
       'edit',
     );
     await this.knowledgeRepository.deleteNode(input.id);

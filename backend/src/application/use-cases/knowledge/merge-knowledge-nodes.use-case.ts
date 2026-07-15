@@ -5,7 +5,10 @@ import {
   EntityNotFoundError,
   ValidationError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   KnowledgeNodeOutput,
   toKnowledgeNodeOutput,
@@ -13,6 +16,7 @@ import {
 
 export interface MergeKnowledgeNodesInput {
   userId: string;
+  principal: AccessPrincipal;
   /** マージ元（削除される側）ノードID */
   id: string;
   /** マージ先（残る側）ノードID */
@@ -52,9 +56,9 @@ export class MergeKnowledgeNodesUseCase {
     }
 
     // 認可は source 側 projectId で edit を要求。
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       source.projectId,
-      input.userId,
       'edit',
     );
 

@@ -80,6 +80,7 @@ export class KnowledgeSettingsController {
   ): Promise<ProjectKnowledgeSettingsOutput> {
     return this.getOrCreateSettingsUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
     });
   }
@@ -95,6 +96,7 @@ export class KnowledgeSettingsController {
   ): Promise<ProjectKnowledgeSettingsOutput> {
     return this.updateSettingsUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       aiExtractionEnabled: dto.aiExtractionEnabled,
       ocrEnabled: dto.ocrEnabled,
