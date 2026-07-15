@@ -20,6 +20,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
+import { EntityNotFoundError, ForbiddenError } from '../../domain';
 
 class GapLedgerRowDto {
   @ApiProperty()
@@ -109,6 +110,35 @@ export class GapLedgerController {
     @Body() dto: UpsertGapLedgerDto,
   ) {
     const incoming = dto.rows ?? [];
+
+    // ── body-id IDOR 封鎖 ──────────────────────────────────────────────
+    // ガードは URL の projectId に edit を強制するが、下の upsert は
+    // where:{gapId}（gapId は global unique）で URL の projectId を参照しない。
+    // そのままだと、A プロジェクトへの edit 権限で body に他プロジェクト B の
+    // gapId を混ぜると、B の GapLedger を上書き（更新時）／B の GAP を指す台帳を
+    // A に生成（作成時）できてしまう。
+    // → 各 gapId の所有者（GapItem.projectId）を先にロードし、URL の projectId と
+    //   一致するものだけを許可する。存在しなければ 404、他プロジェクト所有なら 403。
+    const gapIds = Array.from(new Set(incoming.map((r) => r.gapId)));
+    if (gapIds.length > 0) {
+      const gaps = await this.prisma.gapItem.findMany({
+        where: { id: { in: gapIds } },
+        select: { id: true, projectId: true },
+      });
+      const ownerByGapId = new Map(gaps.map((g) => [g.id, g.projectId]));
+      for (const gapId of gapIds) {
+        const ownerProjectId = ownerByGapId.get(gapId);
+        if (ownerProjectId === undefined) {
+          // GapLedger.gapId は GapItem への FK。存在しない gapId は upsert 対象外。
+          throw new EntityNotFoundError('GapItem', gapId);
+        }
+        if (ownerProjectId !== projectId) {
+          throw new ForbiddenError(
+            'You cannot modify a gap ledger that belongs to another project',
+          );
+        }
+      }
+    }
 
     for (const row of incoming) {
       // update には呼び出し側が「明示的に渡したキーのみ」を含める
