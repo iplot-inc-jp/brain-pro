@@ -94,6 +94,7 @@ export class ProjectController {
   ): Promise<ProjectResponseDto> {
     const result = await this.createProjectUseCase.execute({
       userId: user.id,
+      principal: user,
       organizationId,
       name: dto.name,
       slug: dto.slug,
@@ -113,6 +114,7 @@ export class ProjectController {
   ): Promise<ProjectResponseDto[]> {
     const result = await this.getProjectsUseCase.execute({
       userId: user.id,
+      principal: user,
       organizationId,
     });
     return result;

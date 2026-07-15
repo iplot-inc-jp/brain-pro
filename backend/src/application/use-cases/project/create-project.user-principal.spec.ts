@@ -32,6 +32,9 @@ describe('CreateProjectUseCase — ユーザー主体（権限追従）', () => 
     await expect(
       useCase.execute({
         userId: 'not-a-member',
+        // 権限追従トークンは request.user = { id } しか載せない（scopeOrgId / apiKey 無し）。
+        // → 会社スコープ検査は素通りし、認可は isMember に帰着する。
+        principal: { id: 'not-a-member' },
         organizationId: 'org-1',
         name: 'X',
         slug: 'x',
