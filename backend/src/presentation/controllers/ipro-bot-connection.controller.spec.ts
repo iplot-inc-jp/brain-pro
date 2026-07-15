@@ -36,6 +36,29 @@ describe('IproBotConnectionController', () => {
     await expect(c.get(user, 'org1')).rejects.toBeInstanceOf(ForbiddenError);
   });
 
+  it('COMPANY_ADMIN の sk_ キーが別会社を指すと ForbiddenError（会員照会せず即拒否）', async () => {
+    const prisma = makePrisma({ role: 'ADMIN', isSuperAdmin: true });
+    const c = new IproBotConnectionController(prisma, crypto);
+    const keyUser = { id: 'k1', email: 'k@b.c', apiKeyRole: 'COMPANY_ADMIN', organizationId: 'orgX' } as any;
+    await expect(c.get(keyUser, 'org1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('GENERAL_USER の sk_ キーは会社管理不可（自社を指していても拒否）', async () => {
+    const prisma = makePrisma({ role: 'ADMIN', isSuperAdmin: true });
+    const c = new IproBotConnectionController(prisma, crypto);
+    const keyUser = { id: 'k1', email: 'k@b.c', apiKeyRole: 'GENERAL_USER', organizationId: 'org1' } as any;
+    await expect(c.get(keyUser, 'org1')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('COMPANY_ADMIN の sk_ キーが自社を指すなら通す', async () => {
+    const prisma = makePrisma({ role: 'ADMIN' });
+    const c = new IproBotConnectionController(prisma, crypto);
+    const keyUser = { id: 'k1', email: 'k@b.c', apiKeyRole: 'COMPANY_ADMIN', organizationId: 'org1' } as any;
+    expect(await c.get(keyUser, 'org1')).toEqual({ configured: false });
+  });
+
   it('GET: 未設定なら configured=false', async () => {
     const c = new IproBotConnectionController(makePrisma({ role: 'ADMIN' }), crypto);
     expect(await c.get(user, 'org1')).toEqual({ configured: false });

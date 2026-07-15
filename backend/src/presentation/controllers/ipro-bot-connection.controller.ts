@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiKeyRole } from '@prisma/client';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../infrastructure/services/crypto.service';
@@ -35,6 +36,18 @@ export class IproBotConnectionController {
     // 会社スコープトークン: 対象会社が違えば即拒否（DB照会不要）。
     if (user.scopeOrgId && user.scopeOrgId !== organizationId) {
       throw new ForbiddenError('この会社を管理する権限がありません');
+    }
+    // サービスアカウントAPIキー（sk_）: キー自身の会社スコープを強制（発行ユーザーの会員権限に依らない）。
+    // organizationId 未設定＝移行前の旧キーは発行者権限に委ねるため素通り（後方互換）。
+    if (user.apiKeyRole && user.organizationId) {
+      if (user.apiKeyRole === ApiKeyRole.COMPANY_ADMIN) {
+        if (user.organizationId !== organizationId) {
+          throw new ForbiddenError('この会社を管理する権限がありません');
+        }
+      } else {
+        // GENERAL_USER: 紐付けプロジェクトのみ操作可のキー。会社管理（ipro-bot 接続設定）は不可。
+        throw new ForbiddenError('この会社を管理する権限がありません');
+      }
     }
     const dbUser = await this.prisma.user.findUnique({
       where: { id: user.id },

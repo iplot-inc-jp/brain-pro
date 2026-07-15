@@ -39,7 +39,7 @@ export class InviteController {
   @Get('organizations/:id/invites')
   @ApiOperation({ summary: '会社の招待リンク一覧' })
   async list(@Param('id') organizationId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.listInvitesUseCase.execute({ organizationId, requesterUserId: user.id });
+    return this.listInvitesUseCase.execute({ organizationId, requesterUserId: user.id, principal: user });
   }
 
   @Post('organizations/:id/invites')
@@ -52,6 +52,7 @@ export class InviteController {
     return this.createInviteUseCase.execute({
       organizationId,
       requesterUserId: user.id,
+      principal: user,
       role: dto.role,
       expiresInDays: dto.expiresInDays,
       maxUses: dto.maxUses,
@@ -65,7 +66,7 @@ export class InviteController {
     @Param('inviteId') inviteId: string,
     @CurrentUser() user: CurrentUserPayload,
   ) {
-    await this.revokeInviteUseCase.execute({ organizationId, requesterUserId: user.id, inviteId });
+    await this.revokeInviteUseCase.execute({ organizationId, requesterUserId: user.id, inviteId, principal: user });
     return { success: true };
   }
 }

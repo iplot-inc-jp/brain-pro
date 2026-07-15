@@ -243,6 +243,7 @@ export class MyIngestionBatchController {
     return this.getAllAccessibleIngestionBatchesUseCase.execute({
       userId: user.id,
       apiKeyId: user.apiKeyId,
+      scopeOrgId: user.scopeOrgId,
     });
   }
 }

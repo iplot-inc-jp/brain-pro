@@ -21,7 +21,7 @@ describe('CreateInviteUseCase', () => {
     userRepo.findById.mockResolvedValue({ isSuperAdmin: false });
     orgRepo.getMemberRole.mockResolvedValue('ADMIN');
 
-    const view = await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1' });
+    const view = await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', principal: { id: 'u-1' } });
 
     expect(inviteRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: 'org-1', token: 'tok-1', role: 'MEMBER', maxUses: null, expiresAt: null }),
@@ -34,7 +34,7 @@ describe('CreateInviteUseCase', () => {
     userRepo.findById.mockResolvedValue({ isSuperAdmin: true });
     orgRepo.getMemberRole.mockResolvedValue(null);
 
-    await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', expiresInDays: 7, maxUses: 5, role: 'VIEWER' });
+    await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', principal: { id: 'u-1' }, expiresInDays: 7, maxUses: 5, role: 'VIEWER' });
 
     const arg = inviteRepo.create.mock.calls[0][0];
     expect(arg.role).toBe('VIEWER');
@@ -45,6 +45,28 @@ describe('CreateInviteUseCase', () => {
   it('権限が無ければ ForbiddenError', async () => {
     userRepo.findById.mockResolvedValue({ isSuperAdmin: false });
     orgRepo.getMemberRole.mockResolvedValue('MEMBER');
-    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', principal: { id: 'u-1' } })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('会社スコープトークンが別会社を指すと ForbiddenError（会員照会せず即拒否）', async () => {
+    await expect(
+      useCase.execute({
+        organizationId: 'org-1',
+        requesterUserId: 'u-1',
+        principal: { id: 'u-1', scopeOrgId: 'org-OTHER' },
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(orgRepo.getMemberRole).not.toHaveBeenCalled();
+  });
+
+  it('GENERAL_USER の会社スコープAPIキーは招待作成不可（COMPANY_ADMIN のみ）', async () => {
+    await expect(
+      useCase.execute({
+        organizationId: 'org-1',
+        requesterUserId: 'u-1',
+        principal: { id: 'u-1', apiKeyRole: 'GENERAL_USER' as any, organizationId: 'org-1' },
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(orgRepo.getMemberRole).not.toHaveBeenCalled();
   });
 });

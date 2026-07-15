@@ -72,6 +72,23 @@ describe('GetAllAccessibleIngestionBatchesUseCase', () => {
     expect(out[0].id).toBe('b249');
   });
 
+  it('会社スコープトークンは candidate を scopeOrgId の会社に閉じ込める', async () => {
+    const d = makeDeps({
+      orgs: [{ id: 'o1' }, { id: 'o2' }],
+      projectsByOrg: { o1: [{ id: 'pA', name: 'A' }], o2: [{ id: 'pB', name: 'B' }] },
+      accessByProject: { pA: 'EDIT', pB: 'EDIT' },
+      batchesByProject: {
+        pA: [batch('a', 'pA', '2026-06-01T00:00:00Z')],
+        pB: [batch('b', 'pB', '2026-06-02T00:00:00Z')],
+      },
+    });
+    const out = await makeUseCase(d).execute({ userId: 'u1', scopeOrgId: 'o1' });
+    // o2 のプロジェクト（pB）は集約されない。
+    expect(out.map((b) => b.id)).toEqual(['a']);
+    expect(d.projectRepo.findByOrganizationId).toHaveBeenCalledWith('o1');
+    expect(d.projectRepo.findByOrganizationId).not.toHaveBeenCalledWith('o2');
+  });
+
   it('returns empty when the user is in no orgs', async () => {
     const d = makeDeps({ orgs: [], projectsByOrg: {}, accessByProject: {}, batchesByProject: {} });
     expect(await makeUseCase(d).execute({ userId: 'u1' })).toEqual([]);

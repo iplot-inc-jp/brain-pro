@@ -13,23 +13,35 @@ describe('RevokeInviteUseCase', () => {
 
   it('対象会社の招待なら revoke する', async () => {
     inviteRepo.findById.mockResolvedValue({ id: 'inv-1', organizationId: 'org-1' });
-    await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-1' });
+    await useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-1', principal: { id: 'u-1' } });
     expect(inviteRepo.revoke).toHaveBeenCalledWith('inv-1');
   });
 
   it('存在しなければ EntityNotFoundError', async () => {
     inviteRepo.findById.mockResolvedValue(null);
-    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'x' })).rejects.toBeInstanceOf(EntityNotFoundError);
+    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'x', principal: { id: 'u-1' } })).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('別会社の招待は EntityNotFoundError（漏洩防止）', async () => {
     inviteRepo.findById.mockResolvedValue({ id: 'inv-9', organizationId: 'org-OTHER' });
-    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-9' })).rejects.toBeInstanceOf(EntityNotFoundError);
+    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-9', principal: { id: 'u-1' } })).rejects.toBeInstanceOf(EntityNotFoundError);
   });
 
   it('権限が無ければ ForbiddenError', async () => {
     userRepo.findById.mockResolvedValue({ isSuperAdmin: false });
     orgRepo.getMemberRole.mockResolvedValue('VIEWER');
-    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-1' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(useCase.execute({ organizationId: 'org-1', requesterUserId: 'u-1', inviteId: 'inv-1', principal: { id: 'u-1' } })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('会社スコープトークンが別会社を指すと ForbiddenError（招待照会せず即拒否）', async () => {
+    await expect(
+      useCase.execute({
+        organizationId: 'org-1',
+        requesterUserId: 'u-1',
+        inviteId: 'inv-1',
+        principal: { id: 'u-1', scopeOrgId: 'org-OTHER' },
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(inviteRepo.findById).not.toHaveBeenCalled();
   });
 });

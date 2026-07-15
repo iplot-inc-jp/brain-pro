@@ -6,11 +6,15 @@ import {
   EntityNotFoundError,
 } from '../../../domain';
 import { assertOrgAdmin } from './assert-org-admin';
+import { assertInviteOrgScope } from './assert-org-scope';
+import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
 
 export interface RevokeInviteInput {
   organizationId: string;
   requesterUserId: string;
   inviteId: string;
+  // リクエスト主体（会社スコープトークン / サービスアカウントAPIキーの越境をここで弾く）。
+  principal: AccessPrincipal;
 }
 
 @Injectable()
@@ -22,6 +26,8 @@ export class RevokeInviteUseCase {
   ) {}
 
   async execute(input: RevokeInviteInput): Promise<void> {
+    // 会社スコープ越境防止（route param :organizationId はガードで強制されない）。
+    assertInviteOrgScope(input.principal, input.organizationId);
     await assertOrgAdmin(this.userRepository, this.organizationRepository, input.organizationId, input.requesterUserId);
 
     const invite = await this.inviteRepository.findById(input.inviteId);
