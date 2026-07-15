@@ -59,7 +59,7 @@ export class TrackerWebhookController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    return this.manageWebhook.enable(id, user.id);
+    return this.manageWebhook.enable(id, user);
   }
 
   @Post('tracker-connections/:id/webhook/regenerate')
@@ -68,7 +68,7 @@ export class TrackerWebhookController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    return this.manageWebhook.regenerate(id, user.id);
+    return this.manageWebhook.regenerate(id, user);
   }
 
   @Post('tracker-connections/:id/webhook/disable')
@@ -77,7 +77,7 @@ export class TrackerWebhookController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    return this.manageWebhook.disable(id, user.id);
+    return this.manageWebhook.disable(id, user);
   }
 
   @Get('tracker-connections/:id/webhook/url')
@@ -86,6 +86,6 @@ export class TrackerWebhookController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    return this.manageWebhook.getUrl(id, user.id);
+    return this.manageWebhook.getUrl(id, user);
   }
 }

@@ -6,7 +6,10 @@ import {
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
 import { CryptoService } from '../../../infrastructure/services/crypto.service';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 /** enable/regenerate/getUrl の戻り値（秘密入り URL を返す。disable/無効時は url=null）。 */
 export interface WebhookUrlResult {
@@ -35,8 +38,11 @@ export class ManageTrackerWebhookUseCase {
   ) {}
 
   /** 秘密を新規発行し webhook を有効化、秘密入り URL を返す。 */
-  async enable(connectionId: string, userId: string): Promise<WebhookUrlResult> {
-    const conn = await this.requireAdminConnection(connectionId, userId);
+  async enable(
+    connectionId: string,
+    principal: AccessPrincipal,
+  ): Promise<WebhookUrlResult> {
+    const conn = await this.requireAdminConnection(connectionId, principal);
     const secret = this.generateSecret();
     await this.prisma.issueTrackerConnection.update({
       where: { id: conn.id },
@@ -48,18 +54,18 @@ export class ManageTrackerWebhookUseCase {
   /** 秘密を新しいものに置換し、新 URL を返す（旧 URL は無効化される）。 */
   async regenerate(
     connectionId: string,
-    userId: string,
+    principal: AccessPrincipal,
   ): Promise<WebhookUrlResult> {
     // enable と同じく新しい秘密で上書きするだけ（旧秘密は破棄）。
-    return this.enable(connectionId, userId);
+    return this.enable(connectionId, principal);
   }
 
   /** webhook を無効化（秘密を破棄）。 */
   async disable(
     connectionId: string,
-    userId: string,
+    principal: AccessPrincipal,
   ): Promise<WebhookUrlResult> {
-    const conn = await this.requireAdminConnection(connectionId, userId);
+    const conn = await this.requireAdminConnection(connectionId, principal);
     await this.prisma.issueTrackerConnection.update({
       where: { id: conn.id },
       data: { webhookSecretEnc: null },
@@ -70,9 +76,9 @@ export class ManageTrackerWebhookUseCase {
   /** 現在の秘密を復号して URL を返す（無効なら null）。管理画面の再表示用。 */
   async getUrl(
     connectionId: string,
-    userId: string,
+    principal: AccessPrincipal,
   ): Promise<WebhookUrlResult> {
-    const conn = await this.requireAdminConnection(connectionId, userId);
+    const conn = await this.requireAdminConnection(connectionId, principal);
     if (!conn.webhookSecretEnc) return { url: null };
     const secret = this.crypto.decrypt(conn.webhookSecretEnc);
     return { url: this.buildUrl(conn.provider, conn.id, secret) };
@@ -80,17 +86,36 @@ export class ManageTrackerWebhookUseCase {
 
   // ========== Private ==========
 
-  /** 接続を取得し、プロジェクト管理者でなければ Forbidden。 */
-  private async requireAdminConnection(connectionId: string, userId: string) {
+  /**
+   * 接続を取得し、主体（ユーザー or サービスアカウント）が当該プロジェクトの
+   * 管理者スコープを持たなければ Forbidden。
+   *
+   * by-id ルート（URL に projectId が無く、接続行から projectId を解決する）なので、
+   *   1. assertPrincipalAccess で scopeOrgId 越境拒否 + apiKey（org/projectIds）スコープの
+   *      カバレッジ + RBAC(edit) を効かせ（＝isProjectAdmin だけでは無視されるスコープを強制）、
+   *   2. さらに isProjectAdmin で「OWNER/ADMIN（or super-admin）」の管理者ゲートを課す
+   * の二段で防御する。
+   */
+  private async requireAdminConnection(
+    connectionId: string,
+    principal: AccessPrincipal,
+  ) {
     const conn = await this.prisma.issueTrackerConnection.findUnique({
       where: { id: connectionId },
     });
     if (!conn) {
       throw new NotFoundException('トラッカー接続が見つかりません');
     }
+    // (a) scopeOrgId 越境拒否 + (b) apiKey スコープ（org/projectIds）カバレッジ + RBAC。
+    await this.projectAccess.assertPrincipalAccess(
+      principal,
+      conn.projectId,
+      'edit',
+    );
+    // 管理者ゲート: 加えて OWNER/ADMIN（or super-admin）であることを要求する。
     const isAdmin = await this.projectAccess.isProjectAdmin(
       conn.projectId,
-      userId,
+      principal.id,
     );
     if (!isAdmin) {
       throw new ForbiddenException(

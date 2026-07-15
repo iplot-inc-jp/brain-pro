@@ -2,13 +2,21 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CryptoService } from '../../../infrastructure/services/crypto.service';
 import { ManageTrackerWebhookUseCase } from './manage-tracker-webhook.use-case';
 
+/** 主体（サービスアカウント/ユーザー）の最小プリンシパル。id だけあれば足りる。 */
+const principal = { id: 'u1' };
+
 /**
  * prisma.issueTrackerConnection の最小モック（findUnique / update）と
- * ProjectAccessService.isProjectAdmin の最小モックを返す。
+ * ProjectAccessService（assertPrincipalAccess / isProjectAdmin）の最小モックを返す。
+ *
+ *   - scopeDenied=true … assertPrincipalAccess が ForbiddenException を投げる
+ *     （scopeOrgId 越境や apiKey スコープ外＝スコープゲートで弾く経路）。
+ *   - isAdmin=false    … スコープは通るが管理者ゲート（isProjectAdmin）で弾く経路。
  */
 function makeDeps(opts?: {
   connection?: Record<string, unknown> | null;
   isAdmin?: boolean;
+  scopeDenied?: boolean;
 }) {
   const connection =
     opts?.connection === undefined
@@ -30,6 +38,11 @@ function makeDeps(opts?: {
     },
   };
   const projectAccess = {
+    assertPrincipalAccess: jest.fn(async () => {
+      if (opts?.scopeDenied) {
+        throw new ForbiddenException('You do not have edit access to this project');
+      }
+    }),
     isProjectAdmin: jest.fn(async () => opts?.isAdmin ?? true),
   };
   const crypto = new CryptoService();
@@ -58,7 +71,7 @@ describe('ManageTrackerWebhookUseCase', () => {
     const d = makeDeps();
     const uc = makeUseCase(d);
 
-    const result = await uc.enable('conn1', 'u1');
+    const result = await uc.enable('conn1', principal);
 
     // webhookSecretEnc が更新された
     expect(d.prisma.issueTrackerConnection.update).toHaveBeenCalledTimes(1);
@@ -79,8 +92,24 @@ describe('ManageTrackerWebhookUseCase', () => {
     const d = makeDeps({ isAdmin: false });
     const uc = makeUseCase(d);
 
-    await expect(uc.enable('conn1', 'u1')).rejects.toBeInstanceOf(
+    await expect(uc.enable('conn1', principal)).rejects.toBeInstanceOf(
       ForbiddenException,
+    );
+    expect(d.prisma.issueTrackerConnection.update).not.toHaveBeenCalled();
+  });
+
+  it('enable: スコープ外（scopeOrgId 越境 / apiKey スコープ外）は Forbidden で弾く（更新しない）', async () => {
+    // isAdmin=true でも assertPrincipalAccess のスコープゲートで先に弾かれること。
+    const d = makeDeps({ scopeDenied: true, isAdmin: true });
+    const uc = makeUseCase(d);
+
+    await expect(uc.enable('conn1', principal)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(d.projectAccess.assertPrincipalAccess).toHaveBeenCalledWith(
+      principal,
+      'p1',
+      'edit',
     );
     expect(d.prisma.issueTrackerConnection.update).not.toHaveBeenCalled();
   });
@@ -88,7 +117,7 @@ describe('ManageTrackerWebhookUseCase', () => {
   it('enable: 接続が無ければ NotFoundException', async () => {
     const d = makeDeps({ connection: null });
     const uc = makeUseCase(d);
-    await expect(uc.enable('missing', 'u1')).rejects.toBeInstanceOf(
+    await expect(uc.enable('missing', principal)).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
@@ -105,7 +134,7 @@ describe('ManageTrackerWebhookUseCase', () => {
     });
     const uc = makeUseCase(d);
 
-    const result = await uc.regenerate('conn1', 'u1');
+    const result = await uc.regenerate('conn1', principal);
     const data = d.updates[0].data;
     const newSecret = d.crypto.decrypt(data.webhookSecretEnc as string);
 
@@ -126,7 +155,7 @@ describe('ManageTrackerWebhookUseCase', () => {
     });
     const uc = makeUseCase(d);
 
-    const result = await uc.disable('conn1', 'u1');
+    const result = await uc.disable('conn1', principal);
     expect(d.updates[0].data.webhookSecretEnc).toBeNull();
     expect(result.url).toBeNull();
   });
@@ -142,21 +171,21 @@ describe('ManageTrackerWebhookUseCase', () => {
       },
     });
     const ucEnabled = makeUseCase(enabled);
-    const r1 = await ucEnabled.getUrl('conn1', 'u1');
+    const r1 = await ucEnabled.getUrl('conn1', principal);
     expect(r1.url).toBe(
       `https://example.test/api/trackers/webhook/jira/conn1/${secret}`,
     );
 
     const disabled = makeDeps(); // webhookSecretEnc=null
     const ucDisabled = makeUseCase(disabled);
-    const r2 = await ucDisabled.getUrl('conn1', 'u1');
+    const r2 = await ucDisabled.getUrl('conn1', principal);
     expect(r2.url).toBeNull();
   });
 
   it('getUrl: 非adminは ForbiddenException', async () => {
     const d = makeDeps({ isAdmin: false });
     const uc = makeUseCase(d);
-    await expect(uc.getUrl('conn1', 'u1')).rejects.toBeInstanceOf(
+    await expect(uc.getUrl('conn1', principal)).rejects.toBeInstanceOf(
       ForbiddenException,
     );
   });

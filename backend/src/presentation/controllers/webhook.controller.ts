@@ -126,7 +126,7 @@ export class WebhookController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    await this.assertAdmin(projectId, user.id);
+    await this.assertAdmin(projectId, user);
     const webhooks = await this.prisma.webhook.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
@@ -141,7 +141,7 @@ export class WebhookController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateWebhookDto,
   ) {
-    await this.assertAdmin(projectId, user.id);
+    await this.assertAdmin(projectId, user);
     await this.assertSafeTargetUrl(dto.targetUrl);
     const secretEnc =
       dto.secret && dto.secret.length > 0
@@ -169,7 +169,7 @@ export class WebhookController {
     @Body() dto: UpdateWebhookDto,
   ) {
     const existing = await this.requireWebhook(id);
-    await this.assertAdmin(existing.projectId, user.id);
+    await this.assertAdmin(existing.projectId, user);
     if (dto.targetUrl !== undefined) {
       await this.assertSafeTargetUrl(dto.targetUrl);
     }
@@ -199,7 +199,7 @@ export class WebhookController {
     @Param('id') id: string,
   ) {
     const existing = await this.requireWebhook(id);
-    await this.assertAdmin(existing.projectId, user.id);
+    await this.assertAdmin(existing.projectId, user);
     await this.prisma.webhook.delete({ where: { id } });
     return { success: true };
   }
@@ -211,7 +211,7 @@ export class WebhookController {
     @Param('id') id: string,
   ) {
     const webhook = await this.requireWebhook(id);
-    await this.assertAdmin(webhook.projectId, user.id);
+    await this.assertAdmin(webhook.projectId, user);
 
     // 内部発火のみ（外部からは type 許可リストに無いため直接 enqueue 不可）。
     const job = await this.jobService.enqueue(
@@ -237,9 +237,25 @@ export class WebhookController {
 
   // ========== Private Methods ==========
 
-  /** プロジェクト管理者でなければ 403。 */
-  private async assertAdmin(projectId: string, userId: string): Promise<void> {
-    const isAdmin = await this.projectAccess.isProjectAdmin(projectId, userId);
+  /**
+   * プロジェクト管理者ゲート。主体（ユーザー or サービスアカウント）のスコープを効かせたうえで
+   * 管理者権限を要求する。
+   *
+   * /webhooks/:id 系は URL に projectId が無く ProjectAccessGuard が素通りするため、
+   *   1. assertPrincipalAccess で scopeOrgId 越境拒否 + apiKey（org/projectIds）スコープの
+   *      カバレッジ + RBAC(edit) を強制し（isProjectAdmin だけでは無視されるスコープを効かせる）、
+   *   2. さらに isProjectAdmin で OWNER/ADMIN（or super-admin）の管理者ゲートを課す。
+   */
+  private async assertAdmin(
+    projectId: string,
+    principal: CurrentUserPayload,
+  ): Promise<void> {
+    // (a) scopeOrgId 越境拒否 + (b) apiKey スコープ（org/projectIds）カバレッジ + RBAC。
+    await this.projectAccess.assertPrincipalAccess(principal, projectId, 'edit');
+    const isAdmin = await this.projectAccess.isProjectAdmin(
+      projectId,
+      principal.id,
+    );
     if (!isAdmin) {
       throw new HttpException(
         'Webhook の管理にはプロジェクト管理者権限が必要です',

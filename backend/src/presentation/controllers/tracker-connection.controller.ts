@@ -143,7 +143,7 @@ export class TrackerConnectionController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    await this.assertAdmin(projectId, user.id);
+    await this.assertAdmin(projectId, user);
     const rows = await this.prisma.issueTrackerConnection.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
@@ -158,7 +158,7 @@ export class TrackerConnectionController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateTrackerConnectionDto,
   ) {
-    await this.assertAdmin(projectId, user.id);
+    await this.assertAdmin(projectId, user);
 
     if (dto.provider === 'JIRA' && !dto.email) {
       throw new HttpException(
@@ -194,7 +194,7 @@ export class TrackerConnectionController {
     @Body() dto: UpdateTrackerConnectionDto,
   ) {
     const existing = await this.requireConnection(id);
-    await this.assertAdmin(existing.projectId, user.id);
+    await this.assertAdmin(existing.projectId, user);
 
     const data: Record<string, unknown> = {};
     if (dto.host !== undefined) {
@@ -229,7 +229,7 @@ export class TrackerConnectionController {
     @Param('id') id: string,
   ) {
     const existing = await this.requireConnection(id);
-    await this.assertAdmin(existing.projectId, user.id);
+    await this.assertAdmin(existing.projectId, user);
     await this.prisma.issueTrackerConnection.delete({ where: { id } });
     return { success: true };
   }
@@ -241,7 +241,7 @@ export class TrackerConnectionController {
     @Param('id') id: string,
   ) {
     const conn = await this.requireConnection(id);
-    await this.assertAdmin(conn.projectId, user.id);
+    await this.assertAdmin(conn.projectId, user);
 
     const credential = this.crypto.decrypt(conn.credentialEnc);
     const result =
@@ -272,7 +272,7 @@ export class TrackerConnectionController {
     @Body() dto: ImportTrackerDto,
   ) {
     const conn = await this.requireConnection(id);
-    await this.assertAdmin(conn.projectId, user.id);
+    await this.assertAdmin(conn.projectId, user);
 
     const mode: 'full' | 'incremental' =
       dto.mode === 'incremental' ? 'incremental' : 'full';
@@ -289,9 +289,25 @@ export class TrackerConnectionController {
 
   // ========== Private Methods ==========
 
-  /** プロジェクト管理者でなければ 403。 */
-  private async assertAdmin(projectId: string, userId: string): Promise<void> {
-    const isAdmin = await this.projectAccess.isProjectAdmin(projectId, userId);
+  /**
+   * プロジェクト管理者ゲート。主体（ユーザー or サービスアカウント）のスコープを効かせたうえで
+   * 管理者権限を要求する。
+   *
+   * /tracker-connections/:id 系は URL に projectId が無く ProjectAccessGuard が素通りするため、
+   *   1. assertPrincipalAccess で scopeOrgId 越境拒否 + apiKey（org/projectIds）スコープの
+   *      カバレッジ + RBAC(edit) を強制し（isProjectAdmin だけでは無視されるスコープを効かせる）、
+   *   2. さらに isProjectAdmin で OWNER/ADMIN（or super-admin）の管理者ゲートを課す。
+   */
+  private async assertAdmin(
+    projectId: string,
+    principal: CurrentUserPayload,
+  ): Promise<void> {
+    // (a) scopeOrgId 越境拒否 + (b) apiKey スコープ（org/projectIds）カバレッジ + RBAC。
+    await this.projectAccess.assertPrincipalAccess(principal, projectId, 'edit');
+    const isAdmin = await this.projectAccess.isProjectAdmin(
+      projectId,
+      principal.id,
+    );
     if (!isAdmin) {
       throw new HttpException(
         'トラッカー接続の管理にはプロジェクト管理者権限が必要です',
