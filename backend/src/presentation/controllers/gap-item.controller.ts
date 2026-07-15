@@ -140,7 +140,11 @@ export class GapItemByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<GapItemResponseDto> {
-    return this.getGapItemUseCase.execute({ userId: user.id, id });
+    return this.getGapItemUseCase.execute({
+      userId: user.id,
+      principal: user,
+      id,
+    });
   }
 
   @Put(':id')

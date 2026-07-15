@@ -1593,6 +1593,7 @@ export class BusinessFlowController {
   ) {
     return this.getNodeLinksUseCase.execute({
       userId: user.id,
+      principal: user,
       nodeId,
     });
   }

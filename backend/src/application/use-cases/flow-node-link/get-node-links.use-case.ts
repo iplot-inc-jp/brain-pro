@@ -15,12 +15,17 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
+import {
   FlowNodeLinkOutput,
   toFlowNodeLinkOutput,
 } from './flow-node-link.output';
 
 export interface GetNodeLinksInput {
   userId: string;
+  principal: AccessPrincipal;
   nodeId: string;
 }
 
@@ -51,6 +56,7 @@ export class GetNodeLinksUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetNodeLinksInput): Promise<NodeLinksOutput> {
@@ -76,6 +82,13 @@ export class GetNodeLinksUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC（会社スコープ）: 読取のため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      flow.projectId,
+      'view',
+    );
 
     const outgoingLinks = await this.linkRepository.findByNodeId(input.nodeId);
     const incomingLinks = await this.linkRepository.findByTargetNodeId(

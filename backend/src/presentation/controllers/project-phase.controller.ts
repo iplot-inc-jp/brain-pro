@@ -135,6 +135,7 @@ export class PhaseByIdController {
   ): Promise<PhaseResponseDto> {
     return this.getPhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       phaseId: id,
     });
   }

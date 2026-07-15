@@ -9,10 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 import { GapItemOutput, toGapItemOutput } from './create-gap-item.use-case';
 
 export interface GetGapItemInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -28,6 +33,7 @@ export class GetGapItemUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetGapItemInput): Promise<GapItemOutput> {
@@ -51,6 +57,13 @@ export class GetGapItemUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3-2. プロジェクト単位 RBAC（会社スコープ）: 読取のため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      gapItem.projectId,
+      'view',
+    );
 
     // 4. 出力返却
     return toGapItemOutput(gapItem);

@@ -16,9 +16,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface GetIssueTreeInput {
   userId: string;
+  principal: AccessPrincipal;
   treeId: string;
 }
 
@@ -65,6 +70,7 @@ export class GetIssueTreeUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetIssueTreeInput): Promise<IssueTreeWithNodesDto> {
@@ -88,6 +94,13 @@ export class GetIssueTreeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
+
+    // 3-2. プロジェクト単位 RBAC（会社スコープ）: 読取のため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      tree.projectId,
+      'view',
+    );
 
     // 4. ノード取得（depth, order でソート済み）
     const nodes = await this.issueNodeRepository.findByTreeId(tree.id);

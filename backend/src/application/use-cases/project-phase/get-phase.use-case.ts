@@ -11,9 +11,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface GetPhaseInput {
   userId: string;
+  principal: AccessPrincipal;
   phaseId: string;
 }
 
@@ -40,6 +45,7 @@ export class GetPhaseUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetPhaseInput): Promise<GetPhaseByIdOutput> {
@@ -63,6 +69,13 @@ export class GetPhaseUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // 3-2. プロジェクト単位 RBAC（会社スコープ）: 読取のため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      phase.projectId,
+      'view',
+    );
 
     // 4. 出力返却
     return {

@@ -184,6 +184,7 @@ export class IssueTreeController {
   ): Promise<IssueTreeWithNodesResponseDto> {
     const result = await this.getIssueTreeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId: id,
     });
     return {
@@ -400,6 +401,7 @@ export class IssueTreeController {
     // 1. 認可 + ツリー/ノード取得（ツリー→project→org メンバー確認は use-case 側で実施）
     const tree = await this.getIssueTreeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId,
     });
 

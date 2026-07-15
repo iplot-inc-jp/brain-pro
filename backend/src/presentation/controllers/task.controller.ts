@@ -739,7 +739,11 @@ export class TaskByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<TaskOutput> {
-    return this.getTaskUseCase.execute({ userId: user.id, taskId: id });
+    return this.getTaskUseCase.execute({
+      userId: user.id,
+      principal: user,
+      taskId: id,
+    });
   }
 
   @Put(':id')

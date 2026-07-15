@@ -9,10 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 import { TaskOutput, toTaskOutput } from './task.output';
 
 export interface GetTaskInput {
   userId: string;
+  principal: AccessPrincipal;
   taskId: string;
 }
 
@@ -28,6 +33,7 @@ export class GetTaskUseCase {
     private readonly projectRepository: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY)
     private readonly organizationRepository: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetTaskInput): Promise<TaskOutput> {
@@ -48,6 +54,13 @@ export class GetTaskUseCase {
     if (!isMember) {
       throw new ForbiddenError('You are not a member of this organization');
     }
+
+    // プロジェクト単位 RBAC（会社スコープ）: 読取のため view 強制
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      task.projectId,
+      'view',
+    );
 
     return toTaskOutput(task);
   }
