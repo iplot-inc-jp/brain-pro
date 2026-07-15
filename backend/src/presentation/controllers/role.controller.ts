@@ -15,7 +15,7 @@ import {
   RoleTypeDto,
 } from '../dto';
 import { Inject } from '@nestjs/common';
-import { ROLE_REPOSITORY, RoleRepository, EntityNotFoundError } from '../../domain';
+import { ROLE_REPOSITORY, RoleRepository, EntityNotFoundError, ForbiddenError } from '../../domain';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
@@ -142,6 +142,24 @@ export class RoleController {
     @Param('projectId') projectId: string,
     @Body() dto: UpdateRoleOrderDto,
   ): Promise<RoleResponseDto[]> {
+    // 越境防止(IDOR): body の全 roleId が :projectId に属することを検証してから並び替える。
+    // ガードは :projectId への edit しか強制しないため、他プロジェクトのロールIDを混ぜて
+    // その order を書き換える攻撃を、$transaction 前にここで弾く。
+    const roleIds = dto.roleIds ?? [];
+    if (roleIds.length > 0) {
+      const owned = await this.prisma.role.findMany({
+        where: { id: { in: roleIds }, projectId },
+        select: { id: true },
+      });
+      const ownedIds = new Set(owned.map((r) => r.id));
+      const foreign = roleIds.filter((id) => !ownedIds.has(id));
+      if (foreign.length > 0) {
+        throw new ForbiddenError(
+          '指定されたロールにこのプロジェクト外のものが含まれています',
+        );
+      }
+    }
+
     // トランザクションで一括更新
     await this.prisma.$transaction(
       dto.roleIds.map((roleId, index) =>

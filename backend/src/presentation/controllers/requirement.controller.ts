@@ -437,7 +437,29 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() dto: LinkFlowDto,
   ) {
-    await this.assertRequirementAccess(id, user, 'edit');
+    const { projectId } = await this.assertRequirementAccess(id, user, 'edit');
+    // 越境防止(IDOR): 紐付ける flow が要求と同一プロジェクトであることを検証する。
+    // これが無いと、自分の要求に他プロジェクトの flowId を紐付けられてしまう。
+    const flow = await this.prisma.businessFlow.findUnique({
+      where: { id: dto.flowId },
+      select: { projectId: true },
+    });
+    if (!flow || flow.projectId !== projectId) {
+      throw new HttpException('業務フローが見つかりません', HttpStatus.NOT_FOUND);
+    }
+    // flowNodeId 指定時は、そのノードが対象 flow に属することも検証する。
+    if (dto.flowNodeId) {
+      const node = await this.prisma.flowNode.findUnique({
+        where: { id: dto.flowNodeId },
+        select: { flowId: true },
+      });
+      if (!node || node.flowId !== dto.flowId) {
+        throw new HttpException(
+          'ノードが業務フローに属していません',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
     const mapping = await this.prisma.requirementFlowMapping.create({
       data: {
         id: uuid(),
@@ -463,9 +485,14 @@ export class RequirementController {
     @Param('mappingId') mappingId: string,
   ) {
     await this.assertRequirementAccess(id, user, 'edit');
-    await this.prisma.requirementFlowMapping.delete({
-      where: { id: mappingId },
+    // 越境防止(IDOR): 対象 mapping が :id の要求に属することを where に含めて削除する。
+    // これが無いと、自分の要求の edit 権で他要求の紐付けを id 指定で削除できてしまう。
+    const deleted = await this.prisma.requirementFlowMapping.deleteMany({
+      where: { id: mappingId, requirementId: id },
     });
+    if (deleted.count === 0) {
+      throw new HttpException('紐付けが見つかりません', HttpStatus.NOT_FOUND);
+    }
     return { success: true };
   }
 
@@ -476,7 +503,19 @@ export class RequirementController {
     @Param('id') id: string,
     @Body() dto: LinkCrudDto,
   ) {
-    await this.assertRequirementAccess(id, user, 'edit');
+    const { projectId } = await this.assertRequirementAccess(id, user, 'edit');
+    // 越境防止(IDOR): 紐付ける CRUD マッピングが要求と同一プロジェクトであることを検証する。
+    // CrudMapping は projectId を持たないため column -> table -> projectId で解決する。
+    const crud = await this.prisma.crudMapping.findUnique({
+      where: { id: dto.crudMappingId },
+      select: { column: { select: { table: { select: { projectId: true } } } } },
+    });
+    if (!crud || crud.column.table.projectId !== projectId) {
+      throw new HttpException(
+        'CRUDマッピングが見つかりません',
+        HttpStatus.NOT_FOUND,
+      );
+    }
     const mapping = await this.prisma.requirementCrudMapping.create({
       data: {
         id: uuid(),
@@ -506,9 +545,13 @@ export class RequirementController {
     @Param('mappingId') mappingId: string,
   ) {
     await this.assertRequirementAccess(id, user, 'edit');
-    await this.prisma.requirementCrudMapping.delete({
-      where: { id: mappingId },
+    // 越境防止(IDOR): 対象 mapping が :id の要求に属することを where に含めて削除する。
+    const deleted = await this.prisma.requirementCrudMapping.deleteMany({
+      where: { id: mappingId, requirementId: id },
     });
+    if (deleted.count === 0) {
+      throw new HttpException('紐付けが見つかりません', HttpStatus.NOT_FOUND);
+    }
     return { success: true };
   }
 

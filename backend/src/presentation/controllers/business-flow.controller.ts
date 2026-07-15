@@ -1413,6 +1413,16 @@ export class BusinessFlowController {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
     await this.assertFlowMembership(flowId, user, 'edit');
 
+    // 越境防止(IDOR): 対象 edge が URL の flowId に属することを検証する。
+    // これが無いと、edit 権のある flowId 経由で他フローの edge を id 指定で改変できてしまう。
+    const existingEdge = await this.prisma.flowEdge.findUnique({
+      where: { id: edgeId },
+      select: { flowId: true },
+    });
+    if (!existingEdge || existingEdge.flowId !== flowId) {
+      throw new EntityNotFoundError('FlowEdge', edgeId);
+    }
+
     const data: {
       sourceNodeId?: string;
       targetNodeId?: string;
@@ -1534,6 +1544,12 @@ export class BusinessFlowController {
 
     if (!parentFlow || !node) {
       return { error: 'Parent flow or node not found' };
+    }
+
+    // 越境防止(IDOR): 対象ノードが URL の flowId に属することを検証する。
+    // これが無いと、自フローの edit 権で他フローのノードに子フローを紐付け（改変）できてしまう。
+    if (node.flowId !== flowId) {
+      throw new EntityNotFoundError('FlowNode', nodeId);
     }
 
     // 子フローを作成
@@ -1713,6 +1729,29 @@ export class BusinessFlowController {
     const edges = dto.edges ?? [];
     const keepNodeIds = nodes.map((n) => n.id);
     const keepEdgeIds = edges.map((e) => e.id);
+
+    // 越境防止(IDOR): body の node/edge id が他フローの既存行を指す場合は拒否する。
+    // upsert の update 分岐は id で全フロー横断的に一致するため、この検査が無いと
+    // 他フローの node/edge を id 指定で上書きできてしまう（存在しない id は create で自フローに固定される）。
+    const [existingNodesForIds, existingEdgesForIds] = await Promise.all([
+      keepNodeIds.length > 0
+        ? this.prisma.flowNode.findMany({
+            where: { id: { in: keepNodeIds } },
+            select: { id: true, flowId: true },
+          })
+        : Promise.resolve([] as { id: string; flowId: string }[]),
+      keepEdgeIds.length > 0
+        ? this.prisma.flowEdge.findMany({
+            where: { id: { in: keepEdgeIds } },
+            select: { id: true, flowId: true },
+          })
+        : Promise.resolve([] as { id: string; flowId: string }[]),
+    ]);
+    const hasForeignNode = existingNodesForIds.some((n) => n.flowId !== flowId);
+    const hasForeignEdge = existingEdgesForIds.some((e) => e.flowId !== flowId);
+    if (hasForeignNode || hasForeignEdge) {
+      throw new ForbiddenError('復元データに他フローの要素が含まれています');
+    }
 
     await this.prisma.$transaction(async (tx) => {
       // ① スナップショットに無い既存 edge を削除（FK 単純化のため先に消す）
@@ -1962,6 +2001,15 @@ export class BusinessFlowController {
     if (dto.borderStyle !== undefined) data.borderStyle = dto.borderStyle;
     if (dto.fillOpacity !== undefined) data.fillOpacity = dto.fillOpacity;
 
+    // 越境防止(IDOR): 対象注釈が URL の flowId に属することを検証してから更新する。
+    const existing = await this.prisma.flowAnnotation.findUnique({
+      where: { id },
+      select: { flowId: true },
+    });
+    if (!existing || existing.flowId !== flowId) {
+      throw new EntityNotFoundError('FlowAnnotation', id);
+    }
+
     const updated = await this.prisma.flowAnnotation.update({
       where: { id },
       data,
@@ -1980,7 +2028,13 @@ export class BusinessFlowController {
     // 認可: flow -> project -> organization メンバーシップ + edit 強制
     await this.assertFlowMembership(flowId, user, 'edit');
 
-    await this.prisma.flowAnnotation.delete({ where: { id } });
+    // 越境防止(IDOR): 対象注釈が URL の flowId に属することを where に含めて削除する。
+    const deleted = await this.prisma.flowAnnotation.deleteMany({
+      where: { id, flowId },
+    });
+    if (deleted.count === 0) {
+      throw new EntityNotFoundError('FlowAnnotation', id);
+    }
     return { success: true };
   }
 
