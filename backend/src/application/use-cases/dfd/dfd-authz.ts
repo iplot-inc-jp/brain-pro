@@ -7,6 +7,7 @@ import {
   DfdDiagram,
 } from '../../../domain';
 import {
+  AccessPrincipal,
   ProjectAccessService,
   RequiredAccess,
 } from '../../../infrastructure/services/project-access.service';
@@ -21,7 +22,7 @@ export async function authorizeDiagram(
   projectRepo: ProjectRepository,
   orgRepo: OrganizationRepository,
   diagramId: string,
-  userId: string,
+  principal: AccessPrincipal,
   projectAccess?: ProjectAccessService,
   required: RequiredAccess = 'view',
 ): Promise<DfdDiagram> {
@@ -29,11 +30,11 @@ export async function authorizeDiagram(
   if (!diagram) throw new EntityNotFoundError('DfdDiagram', diagramId);
   const project = await projectRepo.findById(diagram.projectId);
   if (!project) throw new EntityNotFoundError('Project', diagram.projectId);
-  if (!(await orgRepo.isMember(project.organizationId, userId))) {
+  if (!(await orgRepo.isMember(project.organizationId, principal.id))) {
     throw new ForbiddenError('You are not a member of this organization');
   }
   if (projectAccess) {
-    await projectAccess.assertProjectAccess(diagram.projectId, userId, required);
+    await projectAccess.assertPrincipalAccess(principal, diagram.projectId, required);
   }
   return diagram;
 }

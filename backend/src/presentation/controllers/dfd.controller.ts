@@ -205,13 +205,13 @@ export class DfdController {
   @Get('business-flows/:flowId/dfd')
   @ApiOperation({ summary: '第2レベルDFD取得（get-or-create）' })
   async getByFlow(@CurrentUser() user: CurrentUserPayload, @Param('flowId') flowId: string) {
-    return this.getFlowDfd.execute({ userId: user.id, flowId });
+    return this.getFlowDfd.execute({ userId: user.id, principal: user, flowId });
   }
 
   @Post('business-flows/:flowId/dfd')
   @ApiOperation({ summary: '第2レベルDFD生成（冪等同期）' })
   async generateByFlow(@CurrentUser() user: CurrentUserPayload, @Param('flowId') flowId: string) {
-    return this.generateFlowDfd.execute({ userId: user.id, flowId });
+    return this.generateFlowDfd.execute({ userId: user.id, principal: user, flowId });
   }
 
   // ========== 第1レベル（プロジェクト） ==========
@@ -237,7 +237,7 @@ export class DfdController {
     @Param('diagramId') diagramId: string,
     @Body() dto: AddNodeDto,
   ) {
-    return this.addNode.execute({ userId: user.id, diagramId, ...dto });
+    return this.addNode.execute({ userId: user.id, principal: user, diagramId, ...dto });
   }
 
   @Patch('dfd-nodes/:id')
@@ -247,14 +247,14 @@ export class DfdController {
     @Param('id') id: string,
     @Body() dto: UpdateNodeDto,
   ) {
-    return this.updateNode.execute({ userId: user.id, id, ...dto });
+    return this.updateNode.execute({ userId: user.id, principal: user, id, ...dto });
   }
 
   @Delete('dfd-nodes/:id')
   @HttpCode(204)
   @ApiOperation({ summary: 'DFDノード削除' })
   async removeNode(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.deleteNode.execute({ userId: user.id, id });
+    await this.deleteNode.execute({ userId: user.id, principal: user, id });
   }
 
   // ========== データフロー ==========
@@ -266,7 +266,7 @@ export class DfdController {
     @Param('diagramId') diagramId: string,
     @Body() dto: AddFlowDto,
   ) {
-    return this.addFlow.execute({ userId: user.id, diagramId, ...dto });
+    return this.addFlow.execute({ userId: user.id, principal: user, diagramId, ...dto });
   }
 
   @Patch('dfd-flows/:id')
@@ -276,14 +276,14 @@ export class DfdController {
     @Param('id') id: string,
     @Body() dto: UpdateFlowDto,
   ) {
-    return this.updateFlow.execute({ userId: user.id, id, ...dto });
+    return this.updateFlow.execute({ userId: user.id, principal: user, id, ...dto });
   }
 
   @Delete('dfd-flows/:id')
   @HttpCode(204)
   @ApiOperation({ summary: 'データフロー削除' })
   async removeFlow(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.deleteFlow.execute({ userId: user.id, id });
+    await this.deleteFlow.execute({ userId: user.id, principal: user, id });
   }
 
   // ========== 位置一括保存 ==========
@@ -296,7 +296,7 @@ export class DfdController {
     @Param('diagramId') diagramId: string,
     @Body() dto: SavePositionsDto,
   ) {
-    await this.savePositions.execute({ userId: user.id, diagramId, positions: dto.positions });
+    await this.savePositions.execute({ userId: user.id, principal: user, diagramId, positions: dto.positions });
   }
 
   // ========== 注釈（付箋・コメント） ==========

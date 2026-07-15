@@ -14,11 +14,12 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { randomUUID } from 'crypto';
 
 export interface CreateNodeChildFlowInput {
   userId: string;
+  principal: AccessPrincipal;
   nodeId: string;
   name?: string;
 }
@@ -111,9 +112,9 @@ export class CreateNodeChildFlowUseCase {
     }
 
     // プロジェクト単位 RBAC: 子フロー作成は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       parentFlow.projectId,
-      input.userId,
       'edit',
     );
 

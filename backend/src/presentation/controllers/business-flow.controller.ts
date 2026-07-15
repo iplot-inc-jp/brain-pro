@@ -1577,6 +1577,7 @@ export class BusinessFlowController {
   ) {
     return this.createNodeChildFlowUseCase.execute({
       userId: user.id,
+      principal: user,
       nodeId,
       name: dto.name,
     });

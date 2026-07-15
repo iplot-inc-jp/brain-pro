@@ -9,7 +9,7 @@ import {
 } from '../../../domain';
 import { DfdNodeKindValue } from '../../../domain/entities/dfd-node.entity';
 import { authorizeDiagram } from './dfd-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DfdNodeOutput, toDfdNodeOutput } from './dfd.output';
 import { DiagramCleanupService } from '../../../infrastructure/knowledge/diagram-cleanup.service';
 
@@ -28,6 +28,7 @@ async function assertDataObjectInProject(
 
 export interface AddDfdNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   diagramId: string;
   kind: DfdNodeKindValue;
   label: string;
@@ -51,7 +52,7 @@ export class AddDfdNodeUseCase {
   ) {}
 
   async execute(input: AddDfdNodeInput): Promise<DfdNodeOutput> {
-    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId, this.projectAccess, 'edit');
+    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.principal, this.projectAccess, 'edit');
     let dataObjectId = input.dataObjectId ?? null;
     if (dataObjectId != null) {
       await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, dataObjectId);
@@ -87,6 +88,7 @@ export class AddDfdNodeUseCase {
 
 export interface UpdateDfdNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   label?: string;
   number?: string | null;
@@ -110,7 +112,7 @@ export class UpdateDfdNodeUseCase {
   async execute(input: UpdateDfdNodeInput): Promise<DfdNodeOutput> {
     const node = await this.repo.findNodeById(input.id);
     if (!node) throw new EntityNotFoundError('DfdNode', input.id);
-    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId, this.projectAccess, 'edit');
+    const diagram = await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.principal, this.projectAccess, 'edit');
     // undefined=変更なし / null=紐づけ解除。文字列のときのみ参照先を検証する
     if (input.dataObjectId != null) {
       await assertDataObjectInProject(this.dataObjectRepo, diagram.projectId, input.dataObjectId);
@@ -176,7 +178,7 @@ export class UpdateDfdNodeUseCase {
   }
 }
 
-export interface DeleteDfdNodeInput { userId: string; id: string; }
+export interface DeleteDfdNodeInput { userId: string; principal: AccessPrincipal; id: string; }
 
 @Injectable()
 export class DeleteDfdNodeUseCase {
@@ -193,7 +195,7 @@ export class DeleteDfdNodeUseCase {
     if (!node) {
       throw new EntityNotFoundError('DfdNode', input.id);
     }
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.userId, this.projectAccess, 'edit');
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, node.diagramId, input.principal, this.projectAccess, 'edit');
     await this.repo.deleteNode(input.id);
     await this.cleanup.cleanupNode('DFD_NODE', input.id);
   }

@@ -6,6 +6,7 @@ import {
 } from '../../../domain';
 import { ErTableRow } from '../../../domain/repositories/data-object.repository';
 import { authorizeProject } from './data-object-authz';
+import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
 import {
   ErGraphOutput,
   FkEdgeOutput,
@@ -14,7 +15,7 @@ import {
   toObjectRelationOutput,
 } from './data-object.output';
 
-export interface GetErGraphInput { userId: string; projectId: string; }
+export interface GetErGraphInput { userId: string; principal: AccessPrincipal; projectId: string; }
 
 /**
  * ER図グラフ取得。
@@ -58,7 +59,7 @@ export class GetErGraphUseCase {
   }
 
   async execute(input: GetErGraphInput): Promise<ErGraphOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
     const [graph, tables] = await Promise.all([
       this.repo.findObjectGraph(input.projectId),
       this.repo.findErTables(input.projectId),

@@ -21,10 +21,12 @@ import {
 } from '../../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../../infrastructure/services/company-key.service';
 import { authorizeProject } from './kpi-authz';
+import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
 import { KpiOutput, toKpiOutput } from './kpi.output';
 
 export interface GenerateKpisInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   category: KpiCategoryValue;
   flowId?: string | null;
@@ -89,7 +91,7 @@ export class GenerateKpisUseCase {
   ) {}
 
   async execute(input: GenerateKpisInput): Promise<KpiOutput[]> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
 
     const count = Math.max(1, Math.min(20, Math.trunc(input.count ?? 5)));
 

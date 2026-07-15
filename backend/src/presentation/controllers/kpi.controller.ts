@@ -128,6 +128,7 @@ export class KpiController {
   ) {
     return this.listKpis.execute({
       userId: user.id,
+      principal: user,
       projectId,
       category: (KPI_CATEGORIES as readonly string[]).includes(category ?? '')
         ? (category as KpiCategoryValue)
@@ -144,7 +145,7 @@ export class KpiController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateKpiDto,
   ) {
-    return this.createKpi.execute({ userId: user.id, projectId, ...dto });
+    return this.createKpi.execute({ userId: user.id, principal: user, projectId, ...dto });
   }
 
   @Patch('kpis/:id')
@@ -154,14 +155,14 @@ export class KpiController {
     @Param('id') id: string,
     @Body() dto: UpdateKpiDto,
   ) {
-    return this.updateKpi.execute({ userId: user.id, id, ...dto });
+    return this.updateKpi.execute({ userId: user.id, principal: user, id, ...dto });
   }
 
   @Delete('kpis/:id')
   @HttpCode(204)
   @ApiOperation({ summary: 'KPI削除' })
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.deleteKpi.execute({ userId: user.id, id });
+    await this.deleteKpi.execute({ userId: user.id, principal: user, id });
   }
 
   @Put('kpis/:id/information-types')
@@ -173,6 +174,7 @@ export class KpiController {
   ) {
     return this.setInformationTypes.execute({
       userId: user.id,
+      principal: user,
       kpiId: id,
       informationTypeIds: dto.informationTypeIds,
     });
@@ -184,7 +186,7 @@ export class KpiController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('flowId') flowId: string,
   ) {
-    return this.getIoSummary.execute({ userId: user.id, flowId });
+    return this.getIoSummary.execute({ userId: user.id, principal: user, flowId });
   }
 
   @Post('projects/:projectId/kpis/generate')
@@ -196,6 +198,7 @@ export class KpiController {
   ) {
     return this.generateKpis.execute({
       userId: user.id,
+      principal: user,
       projectId,
       category: dto.category,
       flowId: dto.flowId ?? null,

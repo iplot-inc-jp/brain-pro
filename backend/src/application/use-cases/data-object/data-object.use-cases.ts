@@ -7,7 +7,7 @@ import {
   DataObject,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DataObjectOutput, toDataObjectOutput } from './data-object.output';
 import { DiagramCleanupService } from '../../../infrastructure/knowledge/diagram-cleanup.service';
 
@@ -27,6 +27,7 @@ async function assertSubProjectInProject(
 
 export interface CreateDataObjectInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   name: string;
   description?: string | null;
@@ -47,7 +48,7 @@ export class CreateDataObjectUseCase {
   ) {}
 
   async execute(input: CreateDataObjectInput): Promise<DataObjectOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'edit');
     // ""（未選択 <select>）は未分類（null）として扱う。FK へ "" を書くと P2003/500
     const subProjectId = input.subProjectId || null;
     await assertSubProjectInProject(this.repo, input.projectId, subProjectId);
@@ -72,6 +73,7 @@ export class CreateDataObjectUseCase {
 
 export interface UpdateDataObjectInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   name?: string;
   description?: string | null;
@@ -92,7 +94,7 @@ export class UpdateDataObjectUseCase {
   async execute(input: UpdateDataObjectInput): Promise<DataObjectOutput> {
     const object = await this.repo.findById(input.id);
     if (!object) throw new EntityNotFoundError('DataObject', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.principal, this.projectAccess, 'edit');
 
     if (input.name !== undefined) object.updateName(input.name);
     if (input.description !== undefined) object.updateDescription(input.description);
@@ -113,6 +115,7 @@ export class UpdateDataObjectUseCase {
 
 export interface UpdateDataObjectSubProjectInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   /** null で未分類へ */
   subProjectId: string | null;
@@ -131,7 +134,7 @@ export class UpdateDataObjectSubProjectUseCase {
   async execute(input: UpdateDataObjectSubProjectInput): Promise<DataObjectOutput> {
     const object = await this.repo.findById(input.id);
     if (!object) throw new EntityNotFoundError('DataObject', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.principal, this.projectAccess, 'edit');
     // ""（未選択 <select>）は未分類（null）へ。FK へ "" を書くと P2003/500
     const subProjectId = input.subProjectId || null;
     await assertSubProjectInProject(this.repo, object.projectId, subProjectId);
@@ -142,7 +145,7 @@ export class UpdateDataObjectSubProjectUseCase {
   }
 }
 
-export interface DeleteDataObjectInput { userId: string; id: string; }
+export interface DeleteDataObjectInput { userId: string; principal: AccessPrincipal; id: string; }
 
 @Injectable()
 export class DeleteDataObjectUseCase {
@@ -157,7 +160,7 @@ export class DeleteDataObjectUseCase {
   async execute(input: DeleteDataObjectInput): Promise<void> {
     const object = await this.repo.findById(input.id);
     if (!object) throw new EntityNotFoundError('DataObject', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, object.projectId, input.principal, this.projectAccess, 'edit');
     await this.repo.delete(input.id);
     await this.cleanup.cleanupNode('DATA_OBJECT', input.id);
   }

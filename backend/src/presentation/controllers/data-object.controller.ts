@@ -39,7 +39,7 @@ import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.se
 import { CurrentUser, CurrentUserPayload } from '../decorators';
 import { ProjectScopedAccess } from '../decorators/project-scoped-access.decorator';
 import { ProjectAccessGuard } from '../guards/project-access.guard';
-import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../infrastructure/services/project-access.service';
 
 const CARDINALITIES = ['ONE_TO_ONE', 'ONE_TO_MANY', 'MANY_TO_MANY'];
 const PATH_STYLES = ['straight', 'bezier'];
@@ -227,7 +227,7 @@ export class DataObjectController {
    */
   private async authorizeAnnotation(
     id: string,
-    userId: string,
+    principal: AccessPrincipal,
     required: 'view' | 'edit' = 'view',
   ) {
     const row = await this.prisma.dataObjectAnnotation.findUnique({ where: { id } });
@@ -236,7 +236,7 @@ export class DataObjectController {
       this.projectRepo,
       this.orgRepo,
       row.projectId,
-      userId,
+      principal,
       this.projectAccess,
       required,
     );
@@ -260,7 +260,7 @@ export class DataObjectController {
   @Get('projects/:projectId/data-objects')
   @ApiOperation({ summary: 'オブジェクト関係性マップ取得（objects＋relations）' })
   async getGraph(@CurrentUser() user: CurrentUserPayload, @Param('projectId') projectId: string) {
-    return this.getObjectGraph.execute({ userId: user.id, projectId });
+    return this.getObjectGraph.execute({ userId: user.id, principal: user, projectId });
   }
 
   @Post('projects/:projectId/data-objects')
@@ -273,6 +273,7 @@ export class DataObjectController {
     // 未選択 <select> が出す "" は「未分類」（null）として扱う（FK へ "" を書くと P2003/500）
     return this.createObject.execute({
       userId: user.id,
+      principal: user,
       projectId,
       ...dto,
       subProjectId: dto.subProjectId || null,
@@ -289,6 +290,7 @@ export class DataObjectController {
     // subProjectId: undefined=変更なし / ""（未選択 <select>）=未分類へ → null に正規化
     return this.updateObject.execute({
       userId: user.id,
+      principal: user,
       id,
       ...dto,
       ...(dto.subProjectId !== undefined
@@ -306,6 +308,7 @@ export class DataObjectController {
   ) {
     return this.updateObjectSubProject.execute({
       userId: user.id,
+      principal: user,
       id,
       // ""（未選択 <select>）/null/undefined はいずれも未分類（null）へ
       subProjectId: dto.subProjectId || null,
@@ -316,7 +319,7 @@ export class DataObjectController {
   @HttpCode(204)
   @ApiOperation({ summary: 'データオブジェクト削除' })
   async remove(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.deleteObject.execute({ userId: user.id, id });
+    await this.deleteObject.execute({ userId: user.id, principal: user, id });
   }
 
   // ========== 関係線 ==========
@@ -328,7 +331,7 @@ export class DataObjectController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateObjectRelationDto,
   ) {
-    return this.createRelation.execute({ userId: user.id, projectId, ...dto });
+    return this.createRelation.execute({ userId: user.id, principal: user, projectId, ...dto });
   }
 
   @Patch('data-object-relations/:id')
@@ -338,14 +341,14 @@ export class DataObjectController {
     @Param('id') id: string,
     @Body() dto: UpdateObjectRelationDto,
   ) {
-    return this.updateRelation.execute({ userId: user.id, id, ...dto });
+    return this.updateRelation.execute({ userId: user.id, principal: user, id, ...dto });
   }
 
   @Delete('data-object-relations/:id')
   @HttpCode(204)
   @ApiOperation({ summary: 'オブジェクト関係線削除' })
   async removeRel(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.deleteRelation.execute({ userId: user.id, id });
+    await this.deleteRelation.execute({ userId: user.id, principal: user, id });
   }
 
   // ========== 位置一括保存（マップ） ==========
@@ -358,7 +361,7 @@ export class DataObjectController {
     @Param('projectId') projectId: string,
     @Body() dto: SavePositionsDto,
   ) {
-    await this.saveObjectPositions.execute({ userId: user.id, projectId, positions: dto.positions });
+    await this.saveObjectPositions.execute({ userId: user.id, principal: user, projectId, positions: dto.positions });
   }
 
   // ========== DFD取り込み ==========
@@ -366,7 +369,7 @@ export class DataObjectController {
   @Post('projects/:projectId/data-objects/import-from-dfd')
   @ApiOperation({ summary: '第1レベルDFDのデータストアからオブジェクトを取り込み（冪等）' })
   async importDfd(@CurrentUser() user: CurrentUserPayload, @Param('projectId') projectId: string) {
-    return this.importFromDfd.execute({ userId: user.id, projectId });
+    return this.importFromDfd.execute({ userId: user.id, principal: user, projectId });
   }
 
   @Post('projects/:projectId/data-objects/import-mermaid')
@@ -379,6 +382,7 @@ export class DataObjectController {
     try {
       return await this.importMermaid.execute({
         userId: user.id,
+        principal: user,
         projectId,
         mermaid: dto.mermaid,
       });
@@ -396,7 +400,7 @@ export class DataObjectController {
   @Get('projects/:projectId/er-graph')
   @ApiOperation({ summary: 'ER図グラフ取得（objects＋tables＋fkEdges＋relations）' })
   async getEr(@CurrentUser() user: CurrentUserPayload, @Param('projectId') projectId: string) {
-    return this.getErGraph.execute({ userId: user.id, projectId });
+    return this.getErGraph.execute({ userId: user.id, principal: user, projectId });
   }
 
   @Put('projects/:projectId/er-positions')
@@ -407,7 +411,7 @@ export class DataObjectController {
     @Param('projectId') projectId: string,
     @Body() dto: SavePositionsDto,
   ) {
-    await this.saveErPositions.execute({ userId: user.id, projectId, positions: dto.positions });
+    await this.saveErPositions.execute({ userId: user.id, principal: user, projectId, positions: dto.positions });
   }
 
   @Put('tables/:tableId/data-object')
@@ -418,7 +422,7 @@ export class DataObjectController {
     @Param('tableId') tableId: string,
     @Body() dto: LinkTableDto,
   ) {
-    await this.linkTable.execute({ userId: user.id, tableId, dataObjectId: dto.dataObjectId ?? null });
+    await this.linkTable.execute({ userId: user.id, principal: user, tableId, dataObjectId: dto.dataObjectId ?? null });
   }
 
   // ========== 付箋/メモ（関係性マップ上の注釈。FlowAnnotation/DfdAnnotation と同型） ==========
@@ -429,7 +433,7 @@ export class DataObjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id);
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user);
     const rows = await this.prisma.dataObjectAnnotation.findMany({
       where: { projectId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
@@ -444,7 +448,7 @@ export class DataObjectController {
     @Param('projectId') projectId: string,
     @Body() dto: CreateAnnotationDto,
   ) {
-    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user.id, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user, this.projectAccess, 'edit');
     // SCOPE の subProjectId は同一プロジェクトの SubProject か検証
     if (dto.subProjectId) {
       await this.assertSubProjectInProject(projectId, dto.subProjectId);
@@ -477,7 +481,7 @@ export class DataObjectController {
     @Param('id') id: string,
     @Body() dto: UpdateAnnotationDto,
   ) {
-    const row = await this.authorizeAnnotation(id, user.id, 'edit');
+    const row = await this.authorizeAnnotation(id, user, 'edit');
     if (dto.subProjectId) {
       await this.assertSubProjectInProject(row.projectId, dto.subProjectId);
     }
@@ -506,7 +510,7 @@ export class DataObjectController {
   @HttpCode(204)
   @ApiOperation({ summary: '付箋/メモ削除' })
   async removeAnnotation(@CurrentUser() user: CurrentUserPayload, @Param('id') id: string) {
-    await this.authorizeAnnotation(id, user.id, 'edit');
+    await this.authorizeAnnotation(id, user, 'edit');
     await this.prisma.dataObjectAnnotation.delete({ where: { id } });
   }
 
@@ -518,7 +522,7 @@ export class DataObjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    const row = await this.authorizeAnnotation(id, user.id, 'edit');
+    const row = await this.authorizeAnnotation(id, user, 'edit');
     if (row.kind !== 'SCOPE' || !row.subProjectId) {
       throw new BadRequestException(
         'この注釈は領域（SubProject）が設定された SCOPE ではありません',

@@ -7,11 +7,12 @@ import {
   DfdFlow,
 } from '../../../domain';
 import { authorizeDiagram } from './dfd-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { DfdFlowOutput, toDfdFlowOutput } from './dfd.output';
 
 export interface AddDfdFlowInput {
   userId: string;
+  principal: AccessPrincipal;
   diagramId: string;
   sourceNodeId: string;
   targetNodeId: string;
@@ -35,7 +36,7 @@ export class AddDfdFlowUseCase {
   ) {}
 
   async execute(input: AddDfdFlowInput): Promise<DfdFlowOutput> {
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.userId, this.projectAccess, 'edit');
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, input.diagramId, input.principal, this.projectAccess, 'edit');
     // 両端ノードが同じ図に属することを確認
     const src = await this.repo.findNodeById(input.sourceNodeId);
     const tgt = await this.repo.findNodeById(input.targetNodeId);
@@ -68,6 +69,7 @@ export class AddDfdFlowUseCase {
 
 export interface UpdateDfdFlowInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   dataItem?: string;
   informationTypeId?: string | null;
@@ -93,7 +95,7 @@ export class UpdateDfdFlowUseCase {
   async execute(input: UpdateDfdFlowInput): Promise<DfdFlowOutput> {
     const flow = await this.repo.findFlowById(input.id);
     if (!flow) throw new EntityNotFoundError('DfdFlow', input.id);
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId, this.projectAccess, 'edit');
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.principal, this.projectAccess, 'edit');
 
     if (input.dataItem !== undefined) flow.updateDataItem(input.dataItem);
     if (input.informationTypeId !== undefined)
@@ -115,7 +117,7 @@ export class UpdateDfdFlowUseCase {
   }
 }
 
-export interface DeleteDfdFlowInput { userId: string; id: string; }
+export interface DeleteDfdFlowInput { userId: string; principal: AccessPrincipal; id: string; }
 
 @Injectable()
 export class DeleteDfdFlowUseCase {
@@ -131,7 +133,7 @@ export class DeleteDfdFlowUseCase {
     if (!flow) {
       throw new EntityNotFoundError('DfdFlow', input.id);
     }
-    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.userId, this.projectAccess, 'edit');
+    await authorizeDiagram(this.repo, this.projectRepo, this.orgRepo, flow.diagramId, input.principal, this.projectAccess, 'edit');
     await this.repo.deleteFlow(input.id);
   }
 }

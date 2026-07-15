@@ -8,9 +8,9 @@ import {
   DfdDiagram,
 } from '../../../domain';
 import { DfdDiagramOutput, toDfdDiagramOutput } from './dfd.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
-export interface GetFlowDfdInput { userId: string; flowId: string; }
+export interface GetFlowDfdInput { userId: string; principal: AccessPrincipal; flowId: string; }
 
 @Injectable()
 export class GetFlowDfdUseCase {
@@ -31,7 +31,7 @@ export class GetFlowDfdUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
     // プロジェクト単位 RBAC: 読取は VIEW 以上
-    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'view');
+    await this.projectAccess.assertPrincipalAccess(input.principal, flow.projectId, 'view');
 
     let graph: DfdGraph | null = await this.repo.findGraphByProjectFlow(
       project.id,

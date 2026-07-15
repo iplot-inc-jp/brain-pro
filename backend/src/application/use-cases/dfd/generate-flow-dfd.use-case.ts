@@ -8,9 +8,9 @@ import {
   DfdDiagram, DfdNode, DfdFlow,
 } from '../../../domain';
 import { DfdDiagramOutput, toDfdDiagramOutput } from './dfd.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
-export interface GenerateFlowDfdInput { userId: string; flowId: string; }
+export interface GenerateFlowDfdInput { userId: string; principal: AccessPrincipal; flowId: string; }
 
 // 業務フローノードのうち FUNCTION 化対象（START/END は除外）
 const FUNCTION_SOURCE_TYPES = new Set([
@@ -36,7 +36,7 @@ export class GenerateFlowDfdUseCase {
       throw new ForbiddenError('You are not a member of this organization');
     }
     // プロジェクト単位 RBAC: 生成は書込（DfdNode/DfdFlow を作成・削除）なので EDIT 必須
-    await this.projectAccess.assertProjectAccess(flow.projectId, input.userId, 'edit');
+    await this.projectAccess.assertPrincipalAccess(input.principal, flow.projectId, 'edit');
 
     // 図 get-or-create
     let graph: DfdGraph | null = await this.repo.findGraphByProjectFlow(

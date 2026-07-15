@@ -14,11 +14,12 @@ import {
 } from '../../../infrastructure/services/claude.service';
 import { CompanyKeyService } from '../../../infrastructure/services/company-key.service';
 import { authorizeProject } from './data-object-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { ObjectGraphOutput, toObjectGraphOutput } from './data-object.output';
 
 export interface ImportMermaidInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   /** Mermaid テキストから取り込む場合に指定（description と排他。どちらか必須） */
   mermaid?: string;
@@ -53,7 +54,7 @@ export class ImportMermaidUseCase {
   ) {}
 
   async execute(input: ImportMermaidInput): Promise<ObjectGraphOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'edit');
 
     const mermaid = input.mermaid?.trim();
     const description = input.description?.trim();

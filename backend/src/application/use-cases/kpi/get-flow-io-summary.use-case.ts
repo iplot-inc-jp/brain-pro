@@ -10,10 +10,12 @@ import {
 } from '../../../domain';
 import { InfoTypeDetail } from '../../../domain/repositories/kpi.repository';
 import { authorizeProject } from './kpi-authz';
+import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
 import { IoSummaryItemOutput, IoSummarySourceOutput } from './kpi.output';
 
 export interface GetFlowIoSummaryInput {
   userId: string;
+  principal: AccessPrincipal;
   flowId: string;
 }
 
@@ -33,7 +35,7 @@ export class GetFlowIoSummaryUseCase {
   async execute(input: GetFlowIoSummaryInput): Promise<IoSummaryItemOutput[]> {
     const flow = await this.repo.findFlowRef(input.flowId);
     if (!flow) throw new EntityNotFoundError('BusinessFlow', input.flowId);
-    await authorizeProject(this.projectRepo, this.orgRepo, flow.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, flow.projectId, input.principal);
 
     const [nodeLinks, edges] = await Promise.all([
       this.repo.findFlowIoNodeLinks(input.flowId),

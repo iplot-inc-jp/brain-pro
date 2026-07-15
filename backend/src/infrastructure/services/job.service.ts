@@ -419,6 +419,7 @@ export class JobService {
         }
         const graph = await this.importMermaid.execute({
           userId,
+          principal: { id: userId },
           projectId,
           mermaid,
           description,
@@ -432,6 +433,7 @@ export class JobService {
         const userId = this.requireString(job.createdById, 'createdById');
         const kpis = await this.generateKpis.execute({
           userId,
+          principal: { id: userId },
           projectId,
           category: this.requireString(payload.category, 'payload.category') as
             | 'BUSINESS'

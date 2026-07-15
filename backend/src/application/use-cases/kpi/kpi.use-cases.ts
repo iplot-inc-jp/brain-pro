@@ -15,7 +15,7 @@ import {
   KpiStatusValue,
 } from '../../../domain';
 import { authorizeProject } from './kpi-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 import { KpiOutput, toKpiOutput } from './kpi.output';
 
 // ============================================================
@@ -74,6 +74,7 @@ function normalizeRefId(value: string | null | undefined): string | null | undef
 
 export interface ListKpisInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   category?: KpiCategoryValue;
   flowId?: string;
@@ -89,7 +90,7 @@ export class ListKpisUseCase {
   ) {}
 
   async execute(input: ListKpisInput): Promise<KpiOutput[]> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
     const rows = await this.repo.findByProject(input.projectId, {
       category: input.category,
       flowId: input.flowId,
@@ -105,6 +106,7 @@ export class ListKpisUseCase {
 
 export interface CreateKpiInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   name: string;
   category?: KpiCategoryValue;
@@ -142,7 +144,7 @@ export class CreateKpiUseCase {
   ) {}
 
   async execute(input: CreateKpiInput): Promise<KpiOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'edit');
 
     // 空文字の参照IDは null（未指定）に正規化してから検証・保存する
     const flowId = normalizeRefId(input.flowId) ?? null;
@@ -201,6 +203,7 @@ export class CreateKpiUseCase {
 
 export interface UpdateKpiInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   name?: string;
   category?: KpiCategoryValue;
@@ -240,7 +243,7 @@ export class UpdateKpiUseCase {
   async execute(input: UpdateKpiInput): Promise<KpiOutput> {
     const kpi = await this.repo.findById(input.id);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.principal, this.projectAccess, 'edit');
 
     // 空文字の参照IDは null（解除）に正規化。undefined は「変更なし」のまま
     const flowId = normalizeRefId(input.flowId);
@@ -303,6 +306,7 @@ export class UpdateKpiUseCase {
 
 export interface DeleteKpiInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -318,7 +322,7 @@ export class DeleteKpiUseCase {
   async execute(input: DeleteKpiInput): Promise<void> {
     const kpi = await this.repo.findById(input.id);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.id);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.principal, this.projectAccess, 'edit');
     await this.repo.delete(input.id);
   }
 }
@@ -329,6 +333,7 @@ export class DeleteKpiUseCase {
 
 export interface SetKpiInformationTypesInput {
   userId: string;
+  principal: AccessPrincipal;
   kpiId: string;
   informationTypeIds: string[];
 }
@@ -345,7 +350,7 @@ export class SetKpiInformationTypesUseCase {
   async execute(input: SetKpiInformationTypesInput): Promise<KpiOutput> {
     const kpi = await this.repo.findById(input.kpiId);
     if (!kpi) throw new EntityNotFoundError('Kpi', input.kpiId);
-    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, kpi.projectId, input.principal, this.projectAccess, 'edit');
 
     // 同一プロジェクト検証（存在しないID / 他プロジェクトの情報種別は拒否）
     const uniqueIds = Array.from(new Set(input.informationTypeIds));

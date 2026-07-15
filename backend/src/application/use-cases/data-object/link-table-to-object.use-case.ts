@@ -6,10 +6,11 @@ import {
   EntityNotFoundError, ValidationError,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface LinkTableToObjectInput {
   userId: string;
+  principal: AccessPrincipal;
   tableId: string;
   /** null で紐づけ解除 */
   dataObjectId: string | null;
@@ -28,7 +29,7 @@ export class LinkTableToObjectUseCase {
   async execute(input: LinkTableToObjectInput): Promise<void> {
     const table = await this.repo.findTableProjectRef(input.tableId);
     if (!table) throw new EntityNotFoundError('Table', input.tableId);
-    await authorizeProject(this.projectRepo, this.orgRepo, table.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, table.projectId, input.principal, this.projectAccess, 'edit');
 
     if (input.dataObjectId !== null) {
       const object = await this.repo.findById(input.dataObjectId);

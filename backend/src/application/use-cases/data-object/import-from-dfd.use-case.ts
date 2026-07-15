@@ -6,9 +6,9 @@ import {
   DataObject,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
-export interface ImportFromDfdInput { userId: string; projectId: string; }
+export interface ImportFromDfdInput { userId: string; principal: AccessPrincipal; projectId: string; }
 
 export interface ImportFromDfdOutput {
   /** 新規作成した DataObject 件数 */
@@ -31,7 +31,7 @@ export class ImportFromDfdUseCase {
   ) {}
 
   async execute(input: ImportFromDfdInput): Promise<ImportFromDfdOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'edit');
 
     const nodes = await this.repo.findL1DataStoreNodes(input.projectId);
     const unlinked = nodes.filter((n) => n.dataObjectId === null);

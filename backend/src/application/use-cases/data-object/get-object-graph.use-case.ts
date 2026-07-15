@@ -5,9 +5,10 @@ import {
   ORGANIZATION_REPOSITORY, OrganizationRepository,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
+import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
 import { ObjectGraphOutput, toObjectGraphOutput } from './data-object.output';
 
-export interface GetObjectGraphInput { userId: string; projectId: string; }
+export interface GetObjectGraphInput { userId: string; principal: AccessPrincipal; projectId: string; }
 
 /** オブジェクト関係性マップ取得（objects: 紐づくtables/dfdNodes含む ＋ relations） */
 @Injectable()
@@ -19,7 +20,7 @@ export class GetObjectGraphUseCase {
   ) {}
 
   async execute(input: GetObjectGraphInput): Promise<ObjectGraphOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
     const graph = await this.repo.findObjectGraph(input.projectId);
     return toObjectGraphOutput(graph);
   }

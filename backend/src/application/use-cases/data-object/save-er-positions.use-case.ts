@@ -5,10 +5,11 @@ import {
   ORGANIZATION_REPOSITORY, OrganizationRepository,
 } from '../../../domain';
 import { authorizeProject } from './data-object-authz';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import { AccessPrincipal, ProjectAccessService } from '../../../infrastructure/services/project-access.service';
 
 export interface SaveErPositionsInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   positions: { id: string; positionX: number; positionY: number }[];
 }
@@ -24,7 +25,7 @@ export class SaveErPositionsUseCase {
   ) {}
 
   async execute(input: SaveErPositionsInput): Promise<void> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.userId, this.projectAccess, 'edit');
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'edit');
     await this.repo.bulkSaveErPositions(input.projectId, input.positions ?? []);
   }
 }

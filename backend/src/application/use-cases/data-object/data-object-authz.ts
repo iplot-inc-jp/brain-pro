@@ -5,6 +5,7 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import {
+  AccessPrincipal,
   ProjectAccessService,
   RequiredAccess,
 } from '../../../infrastructure/services/project-access.service';
@@ -18,16 +19,16 @@ export async function authorizeProject(
   projectRepo: ProjectRepository,
   orgRepo: OrganizationRepository,
   projectId: string,
-  userId: string,
+  principal: AccessPrincipal,
   projectAccess?: ProjectAccessService,
   required: RequiredAccess = 'view',
 ): Promise<void> {
   const project = await projectRepo.findById(projectId);
   if (!project) throw new EntityNotFoundError('Project', projectId);
-  if (!(await orgRepo.isMember(project.organizationId, userId))) {
+  if (!(await orgRepo.isMember(project.organizationId, principal.id))) {
     throw new ForbiddenError('You are not a member of this organization');
   }
   if (projectAccess) {
-    await projectAccess.assertProjectAccess(projectId, userId, required);
+    await projectAccess.assertPrincipalAccess(principal, projectId, required);
   }
 }
