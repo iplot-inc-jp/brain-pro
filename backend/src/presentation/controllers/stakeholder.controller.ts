@@ -362,6 +362,7 @@ export class StakeholderByIdController {
   ): Promise<StakeholderOutput> {
     return this.updateStakeholderUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       name: dto.name,
       affiliation: dto.affiliation,
@@ -495,6 +496,7 @@ export class StakeholderByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteStakeholderUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

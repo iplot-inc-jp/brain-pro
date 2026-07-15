@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteInformationTypeInput {
   userId: string;
+  principal: AccessPrincipal;
   informationTypeId: string;
 }
 
@@ -56,9 +60,9 @@ export class DeleteInformationTypeUseCase {
     }
 
     // プロジェクト単位 RBAC: 情報種別削除は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       informationType.projectId,
-      input.userId,
       'edit',
     );
 

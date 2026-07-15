@@ -184,6 +184,7 @@ export class InterestMatrixRowByIdController {
   ): Promise<InterestMatrixRowOutput> {
     return this.updateInterestMatrixRowUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       phase: dto.phase,
       duration: dto.duration,
@@ -207,6 +208,7 @@ export class InterestMatrixRowByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteInterestMatrixRowUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

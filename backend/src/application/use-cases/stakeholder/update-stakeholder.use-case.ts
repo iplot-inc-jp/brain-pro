@@ -13,10 +13,14 @@ import {
   StakeholderOutput,
   toStakeholderOutput,
 } from './create-stakeholder.use-case';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateStakeholderInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   name?: string;
   affiliation?: string | null;
@@ -77,9 +81,9 @@ export class UpdateStakeholderUseCase {
     }
 
     // 3.5 プロジェクト単位 RBAC: ステークホルダー更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       stakeholder.projectId,
-      input.userId,
       'edit',
     );
 

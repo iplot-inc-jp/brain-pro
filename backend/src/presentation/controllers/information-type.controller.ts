@@ -180,6 +180,7 @@ export class InformationTypeByIdController {
   ): Promise<InformationTypeOutput> {
     return this.updateInformationTypeUseCase.execute({
       userId: user.id,
+      principal: user,
       informationTypeId: id,
       name: dto.name,
       category: dto.category,
@@ -201,6 +202,7 @@ export class InformationTypeByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteInformationTypeUseCase.execute({
       userId: user.id,
+      principal: user,
       informationTypeId: id,
     });
     return { success: true };
