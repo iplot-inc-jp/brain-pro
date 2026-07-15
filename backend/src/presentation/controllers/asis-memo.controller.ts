@@ -173,6 +173,7 @@ export class AsisMemoByIdController {
   ): Promise<AsisMemoOutput> {
     return this.updateAsisMemoUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       topic: dto.topic,
       currentState: dto.currentState,
@@ -195,6 +196,7 @@ export class AsisMemoByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteAsisMemoUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

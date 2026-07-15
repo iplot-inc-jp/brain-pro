@@ -184,6 +184,7 @@ export class TobeVisionByIdController {
   ): Promise<TobeVisionOutput> {
     return this.updateTobeVisionUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       area: dto.area,
       vision: dto.vision,
@@ -207,6 +208,7 @@ export class TobeVisionByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteTobeVisionUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

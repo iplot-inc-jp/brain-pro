@@ -16,10 +16,14 @@ import {
   toTobeVisionOutput,
   assertAsisFlowBelongsToProject,
 } from './create-tobe-vision.use-case';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateTobeVisionInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   area?: string | null;
   vision?: string | null;
@@ -70,9 +74,9 @@ export class UpdateTobeVisionUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       tobeVision.projectId,
-      input.userId,
       'edit',
     );
 

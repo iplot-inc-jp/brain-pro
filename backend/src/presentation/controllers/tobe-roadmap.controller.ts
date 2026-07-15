@@ -206,6 +206,7 @@ export class TobeRoadmapByIdController {
   ): Promise<TobeRoadmapOutput> {
     return this.updateTobeRoadmapUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       phase: dto.phase,
       measure: dto.measure,
@@ -231,6 +232,7 @@ export class TobeRoadmapByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteTobeRoadmapUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

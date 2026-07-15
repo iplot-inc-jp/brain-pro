@@ -9,11 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { AsisMemoOutput, toAsisMemoOutput } from './create-asis-memo.use-case';
 
 export interface UpdateAsisMemoInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   topic?: string | null;
   currentState?: string | null;
@@ -61,9 +65,9 @@ export class UpdateAsisMemoUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       asisMemo.projectId,
-      input.userId,
       'edit',
     );
 
