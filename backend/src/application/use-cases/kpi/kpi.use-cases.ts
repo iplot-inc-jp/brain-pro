@@ -87,10 +87,11 @@ export class ListKpisUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: ListKpisInput): Promise<KpiOutput[]> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'view');
     const rows = await this.repo.findByProject(input.projectId, {
       category: input.category,
       flowId: input.flowId,

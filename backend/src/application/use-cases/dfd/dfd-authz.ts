@@ -14,7 +14,8 @@ import {
 
 /**
  * diagramId をプロジェクトメンバー認可し、図を返す。
- * projectAccess+required を渡すと、プロジェクト単位 RBAC（VIEW/EDIT）も併せて強制する。
+ * projectAccess による プロジェクト単位 RBAC（VIEW/EDIT）を必ず強制する
+ * （scopeOrgId 越境拒否 / sk_ キースコープ含む）。
  * 既存の isMember は多層防御として残す。
  */
 export async function authorizeDiagram(
@@ -23,8 +24,8 @@ export async function authorizeDiagram(
   orgRepo: OrganizationRepository,
   diagramId: string,
   principal: AccessPrincipal,
-  projectAccess?: ProjectAccessService,
-  required: RequiredAccess = 'view',
+  projectAccess: ProjectAccessService,
+  required: RequiredAccess,
 ): Promise<DfdDiagram> {
   const diagram = await repo.findDiagramById(diagramId);
   if (!diagram) throw new EntityNotFoundError('DfdDiagram', diagramId);
@@ -33,8 +34,6 @@ export async function authorizeDiagram(
   if (!(await orgRepo.isMember(project.organizationId, principal.id))) {
     throw new ForbiddenError('You are not a member of this organization');
   }
-  if (projectAccess) {
-    await projectAccess.assertPrincipalAccess(principal, diagram.projectId, required);
-  }
+  await projectAccess.assertPrincipalAccess(principal, diagram.projectId, required);
   return diagram;
 }

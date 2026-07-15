@@ -6,7 +6,10 @@ import {
 } from '../../../domain';
 import { ErTableRow } from '../../../domain/repositories/data-object.repository';
 import { authorizeProject } from './data-object-authz';
-import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 import {
   ErGraphOutput,
   FkEdgeOutput,
@@ -28,6 +31,7 @@ export class GetErGraphUseCase {
     @Inject(DATA_OBJECT_REPOSITORY) private readonly repo: IDataObjectRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   private buildFkEdges(tables: ErTableRow[]): FkEdgeOutput[] {
@@ -59,7 +63,7 @@ export class GetErGraphUseCase {
   }
 
   async execute(input: GetErGraphInput): Promise<ErGraphOutput> {
-    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal);
+    await authorizeProject(this.projectRepo, this.orgRepo, input.projectId, input.principal, this.projectAccess, 'view');
     const [graph, tables] = await Promise.all([
       this.repo.findObjectGraph(input.projectId),
       this.repo.findErTables(input.projectId),

@@ -10,7 +10,10 @@ import {
 } from '../../../domain';
 import { InfoTypeDetail } from '../../../domain/repositories/kpi.repository';
 import { authorizeProject } from './kpi-authz';
-import { AccessPrincipal } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 import { IoSummaryItemOutput, IoSummarySourceOutput } from './kpi.output';
 
 export interface GetFlowIoSummaryInput {
@@ -30,12 +33,20 @@ export class GetFlowIoSummaryUseCase {
     @Inject(KPI_REPOSITORY) private readonly repo: IKpiRepository,
     @Inject(PROJECT_REPOSITORY) private readonly projectRepo: ProjectRepository,
     @Inject(ORGANIZATION_REPOSITORY) private readonly orgRepo: OrganizationRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   async execute(input: GetFlowIoSummaryInput): Promise<IoSummaryItemOutput[]> {
     const flow = await this.repo.findFlowRef(input.flowId);
     if (!flow) throw new EntityNotFoundError('BusinessFlow', input.flowId);
-    await authorizeProject(this.projectRepo, this.orgRepo, flow.projectId, input.principal);
+    await authorizeProject(
+      this.projectRepo,
+      this.orgRepo,
+      flow.projectId,
+      input.principal,
+      this.projectAccess,
+      'view',
+    );
 
     const [nodeLinks, edges] = await Promise.all([
       this.repo.findFlowIoNodeLinks(input.flowId),

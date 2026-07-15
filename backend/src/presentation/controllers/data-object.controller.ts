@@ -433,7 +433,7 @@ export class DataObjectController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user);
+    await authorizeProject(this.projectRepo, this.orgRepo, projectId, user, this.projectAccess, 'view');
     const rows = await this.prisma.dataObjectAnnotation.findMany({
       where: { projectId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
