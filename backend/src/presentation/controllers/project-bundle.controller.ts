@@ -20,6 +20,7 @@ import {
   ProjectBundle,
   ImportMode,
 } from '../../infrastructure/services/project-bundle.service';
+import { ApiKeyRole } from '@prisma/client';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import {
   ORGANIZATION_REPOSITORY,
@@ -141,6 +142,9 @@ export class OrganizationProjectImportController {
     @Param('organizationId') organizationId: string,
     @Body() dto: ImportNewProjectDto,
   ) {
+    // 会社スコープ越境防止（route param :organizationId はガードで強制されない）。
+    // 通常ユーザー（scopeOrgId 無し・apiKey 無し）は素通りで従来どおり isMember に委ねる。
+    this.assertCreateOrgScope(user, organizationId);
     // 組織メンバー（または super-admin）のみ。isMember は super-admin を許可する。
     const isMember = await this.organizationRepository.isMember(
       organizationId,
@@ -215,6 +219,39 @@ export class OrganizationProjectImportController {
     }
 
     return { project: created, import: result };
+  }
+
+  /**
+   * route param :organizationId に対する主体の会社スコープ検査（越境拒否）。
+   * ProjectAccessGuard は projectId 非依存ルートを素通りさせるため、ここで自前強制する
+   * （create-project.use-case.ts の assertCreateOrgScope と同一ポリシー）。
+   */
+  private assertCreateOrgScope(
+    principal: CurrentUserPayload,
+    organizationId: string,
+  ): void {
+    // 管理者発行トークンの会社スコープ: 対象組織が一致必須。
+    if (principal.scopeOrgId && principal.scopeOrgId !== organizationId) {
+      throw new ForbiddenError(
+        'This token cannot access the specified organization',
+      );
+    }
+    // サービスアカウントAPIキー（会社紐付けありの新スコープキーのみ判定。
+    // organizationId 未設定＝移行前の旧キーは発行者権限に委ねるため素通り）。
+    if (principal.apiKeyRole && principal.organizationId) {
+      if (principal.apiKeyRole === ApiKeyRole.COMPANY_ADMIN) {
+        if (principal.organizationId !== organizationId) {
+          throw new ForbiddenError(
+            'This API key cannot create projects in the specified organization',
+          );
+        }
+      } else {
+        // GENERAL_USER: 紐付けプロジェクトのみ操作可のキー。プロジェクト作成は不可。
+        throw new ForbiddenError(
+          'This API key is not permitted to create projects',
+        );
+      }
+    }
   }
 }
 

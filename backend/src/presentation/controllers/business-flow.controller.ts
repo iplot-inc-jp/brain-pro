@@ -1668,6 +1668,7 @@ export class BusinessFlowController {
     @Param('nodeId') nodeId: string,
   ) {
     await this.assertFlowMembership(flowId, user, 'view');
+    await this.assertNodeInFlow(nodeId, flowId);
     const links = await this.prisma.nodeInformationLink.findMany({
       where: { nodeId },
       include: {
@@ -2183,6 +2184,7 @@ export class BusinessFlowController {
     @Param('nodeId') nodeId: string,
   ) {
     await this.assertFlowMembership(flowId, user, 'view');
+    await this.assertNodeInFlow(nodeId, flowId);
     const mappings = await this.crudMappingRepository.findByFlowNodeId(nodeId);
     return mappings.map((m) => ({
       id: m.id,
@@ -2434,6 +2436,15 @@ export class BusinessFlowController {
       throw new EntityNotFoundError('FlowNode', nodeId);
     }
     await this.assertFlowMembership(node.flowId, principal, 'edit');
+  }
+
+  // 認可ヘルパー: nodeId が指定 flow に属することを検証（読取ルートの cross-flow IDOR 防止）。
+  // flow への view 認可は呼び出し側の assertFlowMembership(flowId,'view') で別途行う前提。
+  private async assertNodeInFlow(nodeId: string, flowId: string): Promise<void> {
+    const node = await this.nodeRepository.findById(nodeId);
+    if (!node || node.flowId !== flowId) {
+      throw new EntityNotFoundError('FlowNode', nodeId);
+    }
   }
 
   // 認可ヘルパー: edgeId -> flow -> project の edit 強制（書込ルート用）
