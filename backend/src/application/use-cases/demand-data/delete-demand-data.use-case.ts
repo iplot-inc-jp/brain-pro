@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteDemandDataInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
 }
 
@@ -54,9 +58,9 @@ export class DeleteDemandDataUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       demandData.projectId,
-      input.userId,
       'edit',
     );
 

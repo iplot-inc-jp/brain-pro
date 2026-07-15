@@ -162,6 +162,7 @@ export class DemandDataByIdController {
   ): Promise<DemandDataOutput> {
     return this.updateDemandDataUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       productName: dto.productName,
       period: dto.period,
@@ -183,6 +184,7 @@ export class DemandDataByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteDemandDataUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

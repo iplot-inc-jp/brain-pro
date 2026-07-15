@@ -195,6 +195,7 @@ export class SupplierByIdController {
   ): Promise<SupplierOutput> {
     return this.updateSupplierUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       code: dto.code,
       name: dto.name,
@@ -219,6 +220,7 @@ export class SupplierByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteSupplierUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

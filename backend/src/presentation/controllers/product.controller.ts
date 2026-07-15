@@ -195,6 +195,7 @@ export class ProductByIdController {
   ): Promise<ProductOutput> {
     return this.updateProductUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       code: dto.code,
       name: dto.name,
@@ -219,6 +220,7 @@ export class ProductByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteProductUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

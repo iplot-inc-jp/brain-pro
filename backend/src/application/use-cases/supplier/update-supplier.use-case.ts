@@ -9,11 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  AccessPrincipal,
+  ProjectAccessService,
+} from '../../../infrastructure/services/project-access.service';
 import { SupplierOutput, toSupplierOutput } from './create-supplier.use-case';
 
 export interface UpdateSupplierInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   code?: string | null;
   name?: string | null;
@@ -63,9 +67,9 @@ export class UpdateSupplierUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       supplier.projectId,
-      input.userId,
       'edit',
     );
 
