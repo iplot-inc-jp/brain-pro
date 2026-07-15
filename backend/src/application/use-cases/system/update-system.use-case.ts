@@ -10,11 +10,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { SystemOutput, toSystemOutput } from './system.output';
 
 export interface UpdateSystemInput {
   userId: string;
+  principal: AccessPrincipal;
   systemId: string;
   name?: string;
   kind?: SystemKindValue;
@@ -58,9 +62,9 @@ export class UpdateSystemUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       system.projectId,
-      input.userId,
       'edit',
     );
 

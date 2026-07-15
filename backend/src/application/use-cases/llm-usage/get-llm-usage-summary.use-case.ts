@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { estimateCostUsd } from '../../../infrastructure/services/llm-pricing';
 import type { LlmUsageArea } from '../../../infrastructure/services/llm-usage-recorder.service';
 import type {
@@ -12,6 +15,7 @@ import type {
 export interface GetLlmUsageSummaryInput {
   projectId: string;
   userId: string;
+  principal: AccessPrincipal;
   period: 'month' | 'all';
 }
 
@@ -34,7 +38,11 @@ export class GetLlmUsageSummaryUseCase {
   ) {}
 
   async execute(input: GetLlmUsageSummaryInput): Promise<LlmUsageSummary> {
-    await this.access.assertProjectAccess(input.projectId, input.userId, 'view');
+    await this.access.assertPrincipalAccess(
+      input.principal,
+      input.projectId,
+      'view',
+    );
 
     const from = input.period === 'month' ? startOfCurrentMonth() : null;
 

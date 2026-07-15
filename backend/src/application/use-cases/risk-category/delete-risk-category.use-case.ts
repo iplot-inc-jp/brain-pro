@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteRiskCategoryInput {
   userId: string;
+  principal: AccessPrincipal;
   riskCategoryId: string;
 }
 
@@ -54,9 +58,9 @@ export class DeleteRiskCategoryUseCase {
     }
 
     // プロジェクト単位 RBAC: リスクカテゴリ削除は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       category.projectId,
-      input.userId,
       'edit',
     );
 

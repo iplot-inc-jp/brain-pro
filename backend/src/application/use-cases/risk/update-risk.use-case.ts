@@ -16,12 +16,16 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { RiskOutput, toRiskOutput } from './create-risk.use-case';
 import { assertRiskReferencesInProject } from './assert-risk-references';
 
 export interface UpdateRiskInput {
   userId: string;
+  principal: AccessPrincipal;
   id: string;
   code?: string | null;
   type?: string | null;
@@ -98,9 +102,9 @@ export class UpdateRiskUseCase {
     }
 
     // 3.4 プロジェクト単位 RBAC: リスク更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       risk.projectId,
-      input.userId,
       'edit',
     );
 

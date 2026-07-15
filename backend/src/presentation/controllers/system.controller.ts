@@ -172,6 +172,7 @@ export class SystemByIdController {
   ): Promise<SystemOutput> {
     return this.updateSystemUseCase.execute({
       userId: user.id,
+      principal: user,
       systemId: id,
       name: dto.name,
       kind: dto.kind,
@@ -193,6 +194,7 @@ export class SystemByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteSystemUseCase.execute({
       userId: user.id,
+      principal: user,
       systemId: id,
     });
     return { success: true };

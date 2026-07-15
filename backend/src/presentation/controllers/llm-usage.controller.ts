@@ -25,6 +25,7 @@ export class LlmUsageController {
     return this.getSummary.execute({
       projectId,
       userId: user.id,
+      principal: user,
       period: period === 'all' ? 'all' : 'month',
     });
   }

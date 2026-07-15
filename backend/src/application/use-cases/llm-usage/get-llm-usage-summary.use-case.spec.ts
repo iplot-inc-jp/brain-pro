@@ -6,7 +6,9 @@ function makeDeps(rows: any[]) {
       findMany: jest.fn(async () => rows),
     },
   } as any;
-  const access = { assertProjectAccess: jest.fn(async () => undefined) } as any;
+  const access = {
+    assertPrincipalAccess: jest.fn(async () => undefined),
+  } as any;
   return { prisma, access };
 }
 
@@ -20,9 +22,18 @@ describe('GetLlmUsageSummaryUseCase', () => {
   it('byModel/byArea で集計し、合計と概算コストを返す', async () => {
     const { prisma, access } = makeDeps(ROWS);
     const uc = new GetLlmUsageSummaryUseCase(prisma, access);
-    const r = await uc.execute({ projectId: 'p1', userId: 'u1', period: 'all' });
+    const r = await uc.execute({
+      projectId: 'p1',
+      userId: 'u1',
+      principal: { id: 'u1' },
+      period: 'all',
+    });
 
-    expect(access.assertProjectAccess).toHaveBeenCalledWith('p1', 'u1', 'view');
+    expect(access.assertPrincipalAccess).toHaveBeenCalledWith(
+      { id: 'u1' },
+      'p1',
+      'view',
+    );
     expect(r.totalInputTokens).toBe(3100);
     expect(r.totalOutputTokens).toBe(600);
     expect(r.totalTokens).toBe(3700);
@@ -46,7 +57,12 @@ describe('GetLlmUsageSummaryUseCase', () => {
   it('データ0件でも0集計を返す（month は当月初日）', async () => {
     const { prisma, access } = makeDeps([]);
     const uc = new GetLlmUsageSummaryUseCase(prisma, access);
-    const r = await uc.execute({ projectId: 'p1', userId: 'u1', period: 'month' });
+    const r = await uc.execute({
+      projectId: 'p1',
+      userId: 'u1',
+      principal: { id: 'u1' },
+      period: 'month',
+    });
     expect(r.totalTokens).toBe(0);
     expect(r.byModel).toEqual([]);
     expect(r.byArea).toEqual([]);

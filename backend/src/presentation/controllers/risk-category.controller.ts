@@ -131,6 +131,7 @@ export class RiskCategoryByIdController {
   ): Promise<RiskCategoryOutput> {
     return this.updateRiskCategoryUseCase.execute({
       userId: user.id,
+      principal: user,
       riskCategoryId: id,
       name: dto.name,
       order: dto.order,
@@ -151,6 +152,7 @@ export class RiskCategoryByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteRiskCategoryUseCase.execute({
       userId: user.id,
+      principal: user,
       riskCategoryId: id,
     });
     return { success: true };

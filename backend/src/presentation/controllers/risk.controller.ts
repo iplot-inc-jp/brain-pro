@@ -426,6 +426,7 @@ export class RiskByIdController {
   ): Promise<RiskOutput> {
     return this.updateRiskUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       code: dto.code,
       type: dto.type,
@@ -469,6 +470,7 @@ export class RiskByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteRiskUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

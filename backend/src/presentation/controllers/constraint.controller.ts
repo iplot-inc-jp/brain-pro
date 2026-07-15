@@ -180,6 +180,7 @@ export class ConstraintByIdController {
   ): Promise<ConstraintOutput> {
     return this.updateConstraintUseCase.execute({
       userId: user.id,
+      principal: user,
       constraintId: id,
       title: dto.title,
       description: dto.description,
@@ -202,6 +203,7 @@ export class ConstraintByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteConstraintUseCase.execute({
       userId: user.id,
+      principal: user,
       constraintId: id,
     });
     return { success: true };

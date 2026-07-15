@@ -9,11 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { ConstraintOutput, toConstraintOutput } from './constraint.output';
 
 export interface UpdateConstraintInput {
   userId: string;
+  principal: AccessPrincipal;
   constraintId: string;
   title?: string;
   description?: string | null;
@@ -60,9 +64,9 @@ export class UpdateConstraintUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       constraint.projectId,
-      input.userId,
       'edit',
     );
 
