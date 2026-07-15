@@ -77,6 +77,7 @@ export class TaskCommentController {
   ): Promise<TaskCommentOutput> {
     return this.createTaskCommentUseCase.execute({
       userId: user.id,
+      principal: user,
       taskId,
       body: dto.body,
     });
@@ -104,6 +105,7 @@ export class TaskCommentByIdController {
   ): Promise<TaskCommentOutput> {
     return this.updateTaskCommentUseCase.execute({
       userId: user.id,
+      principal: user,
       commentId: id,
       body: dto.body,
     });
@@ -121,6 +123,7 @@ export class TaskCommentByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteTaskCommentUseCase.execute({
       userId: user.id,
+      principal: user,
       commentId: id,
     });
     return { success: true };

@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface RemoveTaskDependencyInput {
   userId: string;
+  principal: AccessPrincipal;
   dependencyId: string;
 }
 
@@ -59,9 +63,9 @@ export class RemoveTaskDependencyUseCase {
     }
 
     // プロジェクト単位 RBAC: 依存削除は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       successor.projectId,
-      input.userId,
       'edit',
     );
 

@@ -11,10 +11,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteTaskCommentInput {
   userId: string;
+  principal: AccessPrincipal;
   commentId: string;
 }
 
@@ -54,9 +58,9 @@ export class DeleteTaskCommentUseCase {
 
     // プロジェクト単位 RBAC: コメント削除は書込のため edit 強制（VIEW のみのユーザーは
     // 自分のコメントでも削除不可）。
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       task.projectId,
-      input.userId,
       'edit',
     );
 

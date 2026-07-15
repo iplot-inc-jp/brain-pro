@@ -13,7 +13,10 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import {
   mapStatus,
   mapPriority,
@@ -22,6 +25,7 @@ import { parseCsv, wouldFormCycle } from './import-backlog-tasks.use-case';
 
 export interface ImportJiraTasksInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   csv: string;
 }
@@ -66,9 +70,9 @@ export class ImportJiraTasksUseCase {
     );
     if (!isMember)
       throw new ForbiddenError('You are not a member of this organization');
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'edit',
     );
 

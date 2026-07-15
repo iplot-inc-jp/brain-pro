@@ -15,7 +15,10 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 /** リポジトリの戻り値からノード型を導出（IssueNode entity を直接 import せずに型を得る）。 */
 type IssueNodeLike = Awaited<
@@ -27,6 +30,7 @@ const ACTIONABLE_KINDS: IssueNodeKind[] = ['ACTION', 'COUNTERMEASURE', 'OPTION']
 
 export interface GenerateTasksFromIssueTreeInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   issueTreeId: string;
 }
@@ -75,9 +79,9 @@ export class GenerateTasksFromIssueTreeUseCase {
     if (!isMember) {
       throw new ForbiddenError('You do not have access to this project');
     }
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'edit',
     );
 

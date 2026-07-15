@@ -12,10 +12,14 @@ import {
   ForbiddenError,
 } from '../../../domain';
 import { TaskCommentOutput, toTaskCommentOutput } from './task-comment.output';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateTaskCommentInput {
   userId: string;
+  principal: AccessPrincipal;
   commentId: string;
   body: string;
 }
@@ -56,9 +60,9 @@ export class UpdateTaskCommentUseCase {
 
     // プロジェクト単位 RBAC: コメント編集は書込のため edit 強制（VIEW のみのユーザーは
     // 自分のコメントでも編集不可）。
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       task.projectId,
-      input.userId,
       'edit',
     );
 

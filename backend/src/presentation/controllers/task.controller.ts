@@ -562,6 +562,7 @@ export class TaskController {
   ): Promise<TaskOutput> {
     return this.createTaskUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       parentId: dto.parentId,
       title: dto.title,
@@ -613,6 +614,7 @@ export class TaskController {
   ): Promise<{ created: number; skipped: number }> {
     return this.generateTasksFromIssueTreeUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       issueTreeId: dto.issueTreeId,
     });
@@ -638,6 +640,7 @@ export class TaskController {
   ): Promise<ImportBacklogTasksOutput> {
     return this.importBacklogTasksUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       csv: dto.csv,
     });
@@ -663,6 +666,7 @@ export class TaskController {
   ): Promise<ImportJiraTasksOutput> {
     return this.importJiraTasksUseCase.execute({
       userId: user.id,
+      principal: user,
       projectId,
       csv: dto.csv,
     });
@@ -753,6 +757,7 @@ export class TaskByIdController {
   ): Promise<TaskOutput> {
     return this.updateTaskUseCase.execute({
       userId: user.id,
+      principal: user,
       taskId: id,
       parentId: dto.parentId,
       title: dto.title,
@@ -791,7 +796,11 @@ export class TaskByIdController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ): Promise<{ success: boolean }> {
-    await this.deleteTaskUseCase.execute({ userId: user.id, taskId: id });
+    await this.deleteTaskUseCase.execute({
+      userId: user.id,
+      principal: user,
+      taskId: id,
+    });
     return { success: true };
   }
 
@@ -811,6 +820,7 @@ export class TaskByIdController {
   ): Promise<TaskDependencyOutput> {
     return this.addTaskDependencyUseCase.execute({
       userId: user.id,
+      principal: user,
       successorId: id,
       predecessorId: dto.predecessorId,
     });
@@ -828,6 +838,7 @@ export class TaskByIdController {
   ): Promise<{ success: boolean }> {
     await this.removeTaskDependencyUseCase.execute({
       userId: user.id,
+      principal: user,
       dependencyId: depId,
     });
     return { success: true };

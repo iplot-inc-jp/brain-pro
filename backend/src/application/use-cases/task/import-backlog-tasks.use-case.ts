@@ -13,10 +13,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface ImportBacklogTasksInput {
   userId: string;
+  principal: AccessPrincipal;
   projectId: string;
   /** Backlog 課題 CSV のテキスト全体（UTF-8。frontend で SJIS→UTF-8 デコード済みを受ける）。 */
   csv: string;
@@ -79,9 +83,9 @@ export class ImportBacklogTasksUseCase {
     }
 
     // プロジェクト単位 RBAC: 取り込みは書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       input.projectId,
-      input.userId,
       'edit',
     );
 

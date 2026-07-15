@@ -21,11 +21,15 @@ import {
 } from '../../../domain';
 import { TaskOutput, toTaskOutput } from './task.output';
 import { rollupAncestorDates, isSameDate } from './rollup-parent-dates';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { TaskWebhookService } from '../../../infrastructure/services/task-webhook.service';
 
 export interface UpdateTaskInput {
   userId: string;
+  principal: AccessPrincipal;
   taskId: string;
   parentId?: string | null;
   title?: string;
@@ -105,9 +109,9 @@ export class UpdateTaskUseCase {
     }
 
     // プロジェクト単位 RBAC: タスク更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       task.projectId,
-      input.userId,
       'edit',
     );
 

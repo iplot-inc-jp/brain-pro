@@ -23,7 +23,10 @@ function makeDeps(opts?: { existingBySourceKey?: Record<string, any> }) {
     findById: async () => ({ id: 'p1', organizationId: 'o1' }),
   };
   const organizationRepository = { isMember: async () => true };
-  const projectAccess = { assertProjectAccess: async () => {} };
+  const projectAccess = {
+    assertProjectAccess: async () => {},
+    assertPrincipalAccess: async () => {},
+  };
   return {
     taskRepository,
     projectRepository,
@@ -52,6 +55,7 @@ describe('ImportJiraTasksUseCase', () => {
     );
     const out = await uc.execute({
       userId: 'u1',
+      principal: { id: 'u1' },
       projectId: 'p1',
       csv: JIRA_CSV,
     });
@@ -90,6 +94,7 @@ describe('ImportJiraTasksUseCase', () => {
     );
     const out = await uc.execute({
       userId: 'u1',
+      principal: { id: 'u1' },
       projectId: 'p1',
       csv: 'Summary,Issue key\n新件名,PROJ-1',
     });
