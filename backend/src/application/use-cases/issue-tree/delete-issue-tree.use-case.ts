@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteIssueTreeInput {
   userId: string;
+  principal: AccessPrincipal;
   treeId: string;
 }
 
@@ -54,9 +58,9 @@ export class DeleteIssueTreeUseCase {
     }
 
     // 4. プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       tree.projectId,
-      input.userId,
       'edit',
     );
 

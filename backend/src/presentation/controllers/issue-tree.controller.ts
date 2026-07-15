@@ -213,6 +213,7 @@ export class IssueTreeController {
   ): Promise<IssueTreeResponseDto> {
     const result = await this.updateIssueTreeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId: id,
       name: dto.name,
       rootQuestion: dto.rootQuestion,
@@ -239,6 +240,7 @@ export class IssueTreeController {
   ): Promise<void> {
     await this.deleteIssueTreeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId: id,
     });
   }
@@ -262,6 +264,7 @@ export class IssueTreeController {
   ): Promise<IssueNodeResponseDto> {
     const result = await this.addIssueNodeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId,
       parentId: dto.parentId,
       order: dto.order,
@@ -297,6 +300,7 @@ export class IssueTreeController {
   ): Promise<IssueNodeResponseDto> {
     const result = await this.updateIssueNodeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId,
       nodeId,
       label: dto.label,
@@ -332,6 +336,7 @@ export class IssueTreeController {
   ): Promise<void> {
     await this.deleteIssueNodeUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId,
       nodeId,
     });
@@ -353,6 +358,7 @@ export class IssueTreeController {
   ): Promise<IssueNodeResponseDto> {
     const result = await this.setNodeVerificationUseCase.execute({
       userId: user.id,
+      principal: user,
       treeId,
       nodeId,
       verification: dto.verification,

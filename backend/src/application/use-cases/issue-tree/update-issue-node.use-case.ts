@@ -15,10 +15,14 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface UpdateIssueNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   treeId: string;
   nodeId: string;
   label?: string;
@@ -96,9 +100,9 @@ export class UpdateIssueNodeUseCase {
     }
 
     // 4.5 プロジェクト単位 RBAC: ノード更新は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       tree.projectId,
-      input.userId,
       'edit',
     );
 

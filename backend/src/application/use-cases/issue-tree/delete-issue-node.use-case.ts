@@ -12,10 +12,14 @@ import {
   ForbiddenError,
   ValidationError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteIssueNodeInput {
   userId: string;
+  principal: AccessPrincipal;
   treeId: string;
   nodeId: string;
 }
@@ -69,9 +73,9 @@ export class DeleteIssueNodeUseCase {
     }
 
     // 4.5 プロジェクト単位 RBAC: ノード削除は書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       tree.projectId,
-      input.userId,
       'edit',
     );
 
