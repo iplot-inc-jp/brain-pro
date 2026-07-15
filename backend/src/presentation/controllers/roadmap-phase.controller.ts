@@ -130,6 +130,7 @@ export class RoadmapPhaseByIdController {
   ): Promise<RoadmapPhaseOutput> {
     return this.updateRoadmapPhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       roadmapPhaseId: id,
       name: dto.name,
       order: dto.order,
@@ -148,6 +149,7 @@ export class RoadmapPhaseByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteRoadmapPhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       roadmapPhaseId: id,
     });
     return { success: true };

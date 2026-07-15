@@ -250,6 +250,7 @@ export class ReportCalendarByIdController {
   ): Promise<ReportCalendarOutput> {
     return this.updateReportCalendarUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
       stakeholderId: dto.stakeholderId,
       reportTo: dto.reportTo,
@@ -279,6 +280,7 @@ export class ReportCalendarByIdController {
   ): Promise<{ success: boolean }> {
     await this.deleteReportCalendarUseCase.execute({
       userId: user.id,
+      principal: user,
       id,
     });
     return { success: true };

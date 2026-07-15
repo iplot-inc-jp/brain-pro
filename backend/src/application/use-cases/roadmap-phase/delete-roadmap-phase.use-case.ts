@@ -9,10 +9,14 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 
 export interface DeleteRoadmapPhaseInput {
   userId: string;
+  principal: AccessPrincipal;
   roadmapPhaseId: string;
 }
 
@@ -53,9 +57,9 @@ export class DeleteRoadmapPhaseUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       phase.projectId,
-      input.userId,
       'edit',
     );
 

@@ -153,6 +153,7 @@ export class PhaseByIdController {
   ): Promise<PhaseResponseDto> {
     return this.updatePhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       phaseId: id,
       status: dto.status,
       order: dto.order,
@@ -175,6 +176,7 @@ export class PhaseByIdController {
   ): Promise<PhaseResponseDto> {
     return this.transitionPhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       phaseId: id,
       status: dto.status,
     });
@@ -193,6 +195,7 @@ export class PhaseByIdController {
   ): Promise<void> {
     await this.deletePhaseUseCase.execute({
       userId: user.id,
+      principal: user,
       phaseId: id,
     });
   }

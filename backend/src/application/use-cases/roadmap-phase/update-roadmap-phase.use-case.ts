@@ -9,11 +9,15 @@ import {
   EntityNotFoundError,
   ForbiddenError,
 } from '../../../domain';
-import { ProjectAccessService } from '../../../infrastructure/services/project-access.service';
+import {
+  ProjectAccessService,
+  AccessPrincipal,
+} from '../../../infrastructure/services/project-access.service';
 import { RoadmapPhaseOutput, toRoadmapPhaseOutput } from './roadmap-phase.output';
 
 export interface UpdateRoadmapPhaseInput {
   userId: string;
+  principal: AccessPrincipal;
   roadmapPhaseId: string;
   name?: string;
   order?: number;
@@ -57,9 +61,9 @@ export class UpdateRoadmapPhaseUseCase {
     }
 
     // プロジェクト単位 RBAC: 書込のため edit 強制
-    await this.projectAccess.assertProjectAccess(
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
       phase.projectId,
-      input.userId,
       'edit',
     );
 
