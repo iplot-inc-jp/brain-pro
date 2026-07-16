@@ -742,7 +742,14 @@ export class KnowledgeIngestionService {
       .map((page) => `ページ${page.pageNumber}: ${page.summary!.trim()}`)
       .join('\n');
     const contentText = pages
-      .map((page) => page.contentText ?? '')
+      .map((page) => {
+        const heading =
+          page.pageKind === 'PDF_PAGE'
+            ? `## PDFページ ${page.pageNumber}`
+            : `## スライド ${page.pageNumber}`;
+        const body = (page.contentText ?? '').trim();
+        return body ? `${heading}\n\n${body}` : heading;
+      })
       .join('\n\n')
       .trim();
     aggregate.fullText = contentText;

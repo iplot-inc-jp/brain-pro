@@ -620,7 +620,7 @@ describe('KnowledgeIngestionService paged documents', () => {
     expect(fixture.tx.backgroundJob.create).toHaveBeenCalledTimes(1);
   });
 
-  it('merges page results in page order and normalizes them through the existing merge path', async () => {
+  it('merges page results with stable page headings and normalizes them through the existing merge path', async () => {
     const pages = [
       pageRow(1, {
         status: 'SUCCEEDED',
@@ -664,15 +664,18 @@ describe('KnowledgeIngestionService paged documents', () => {
 
     await fixture.service.mergePagedFile('file-1', 'merge-1');
 
+    const expectedContent =
+      '## PDFページ 1\n\n1ページ目\n\n## PDFページ 2\n\n2ページ目';
+
     expect(merge).toHaveBeenCalledWith(
       fixture.file,
       expect.objectContaining({
         summary: 'ページ1: 要約1\nページ2: 要約2',
-        fullText: '1ページ目\n\n2ページ目',
+        fullText: expectedContent,
         tags: ['A', 'B'],
         entities: [{ label: '会社', kind: 'ORG' }],
       }),
-      expect.objectContaining({ contentText: '1ページ目\n\n2ページ目' }),
+      expect.objectContaining({ contentText: expectedContent }),
     );
     expect(fixture.prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({

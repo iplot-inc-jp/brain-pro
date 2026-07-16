@@ -427,6 +427,42 @@ describe('ImportExternalMaterialUseCase direct private flow', () => {
     expect(ctx.blob.createPrivateUpload).not.toHaveBeenCalled();
   });
 
+  it('keeps one import, attachment, batch, file, and billable root when the same key is submitted again', async () => {
+    const ctx = makeUseCase();
+    const first = await prepareAndFinalize(ctx);
+    const verifier = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_FINALIZE_EXTERNAL_MATERIAL',
+    );
+    const batched = await ctx.useCase.verifyAndBatch(first.importId, verifier!.id);
+
+    const repeated = await ctx.useCase.prepare(prepareInput());
+    await ctx.useCase.finalize({
+      userId: 'u1',
+      principal: { id: 'u1' },
+      projectId: 'p1',
+      importId: repeated.importId,
+    });
+
+    expect(repeated).toEqual(
+      expect.objectContaining({
+        importId: first.importId,
+        attachmentId: batched.attachmentId,
+        batchId: batched.batchId,
+        status: 'BATCHED',
+        upload: null,
+      }),
+    );
+    expect(ctx.state.imports.size).toBe(1);
+    expect(ctx.state.attachments.size).toBe(1);
+    expect(ctx.state.batches.size).toBe(1);
+    expect(ctx.state.files.size).toBe(1);
+    expect(
+      [...ctx.state.jobs.values()].filter(
+        (job) => job.type === 'KG_INGEST_FILE',
+      ),
+    ).toHaveLength(1);
+  });
+
   it('polling STORED self-heals the existing verifier without finalize again', async () => {
     const ctx = makeUseCase();
     const prepared = await prepareAndFinalize(ctx);
