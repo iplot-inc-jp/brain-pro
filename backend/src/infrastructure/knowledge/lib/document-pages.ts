@@ -5,6 +5,7 @@ import {
 } from "@xmldom/xmldom";
 import { Inflate, strFromU8 } from "fflate";
 import { PDFDocument } from "pdf-lib";
+import { SaxesParser } from "saxes";
 
 export type DocumentPageParseErrorCode =
   | "INVALID_DOCUMENT"
@@ -17,6 +18,7 @@ export type DocumentPageParseErrorCode =
   | "ZIP_ENTRY_BYTES_EXCEEDED"
   | "ZIP_TOTAL_BYTES_EXCEEDED"
   | "ZIP_COMPRESSION_RATIO_EXCEEDED"
+  | "PPTX_XML_LIMIT_EXCEEDED"
   | "ZIP_INTEGRITY_ERROR"
   | "INVALID_PROCESSING_LIMITS"
   | "UNSAFE_RELATIONSHIP_TARGET";
@@ -40,6 +42,13 @@ export interface DocumentPageProcessingLimits {
   maxZipEntryOutputBytes: number;
   maxZipTotalOutputBytes: number;
   maxZipCompressionRatio: number;
+  maxPptxXmlPartBytes: number;
+  maxPptxXmlTotalBytes: number;
+  maxPptxXmlElements: number;
+  maxPptxXmlDepth: number;
+  maxPptxXmlTextBytes: number;
+  maxPptxXmlAttributes: number;
+  maxPptxXmlAttributeBytes: number;
 }
 
 export const DEFAULT_DOCUMENT_PAGE_LIMITS: Readonly<DocumentPageProcessingLimits> =
@@ -53,6 +62,13 @@ export const DEFAULT_DOCUMENT_PAGE_LIMITS: Readonly<DocumentPageProcessingLimits
     maxZipEntryOutputBytes: 50 * 1024 * 1024,
     maxZipTotalOutputBytes: 200 * 1024 * 1024,
     maxZipCompressionRatio: 200,
+    maxPptxXmlPartBytes: 2 * 1024 * 1024,
+    maxPptxXmlTotalBytes: 16 * 1024 * 1024,
+    maxPptxXmlElements: 50_000,
+    maxPptxXmlDepth: 128,
+    maxPptxXmlTextBytes: 2 * 1024 * 1024,
+    maxPptxXmlAttributes: 100_000,
+    maxPptxXmlAttributeBytes: 2 * 1024 * 1024,
   });
 
 function resolveProcessingLimits(
@@ -171,6 +187,7 @@ export function readPptxSlides(
       throw new DocumentPageParseError("PPTX", "INPUT_BYTES_EXCEEDED");
     }
     const files = extractPptxParts(bytes, limits);
+    preflightPptxXmlParts(files, limits);
     const slidePaths = orderedSlidePaths(files);
     if (slidePaths.length === 0) {
       throw new DocumentPageParseError("PPTX");
@@ -544,6 +561,10 @@ function parseZipArchiveDirectory(
   const entriesByOffset = [...entries.values()].sort(
     (left, right) => left.localHeaderOffset - right.localHeaderOffset,
   );
+  // PPTX preprocessing intentionally accepts only the contiguous ZIP profile
+  // emitted by Office-compatible producers. Executable stubs, archive-extra
+  // records, padding between entries, and central-directory signatures are not
+  // part of the supported document format.
   if (
     (entriesByOffset.length === 0 && centralDirectoryOffset !== 0) ||
     (entriesByOffset.length > 0 && entriesByOffset[0].localHeaderOffset !== 0)
@@ -598,6 +619,17 @@ function extractPptxParts(
       "PPTX",
       "ZIP_EXTRACTED_ENTRY_COUNT_EXCEEDED",
     );
+  }
+  let totalXmlBytes = 0;
+  for (const entry of extractedEntries) {
+    if (!isPptxXmlPart(entry.name)) continue;
+    if (entry.uncompressedSize > limits.maxPptxXmlPartBytes) {
+      throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
+    }
+    totalXmlBytes += entry.uncompressedSize;
+    if (totalXmlBytes > limits.maxPptxXmlTotalBytes) {
+      throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
+    }
   }
   let totalOutputBytes = 0;
 
@@ -695,6 +727,15 @@ function isAllowedPptxPart(path: string): boolean {
     /^ppt\/slides\/slide\d+\.xml$/.test(path) ||
     /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(path) ||
     /^ppt\/media\/[^/]+$/.test(path)
+  );
+}
+
+function isPptxXmlPart(path: string): boolean {
+  return (
+    path === "ppt/presentation.xml" ||
+    path === "ppt/_rels/presentation.xml.rels" ||
+    /^ppt\/slides\/slide\d+\.xml$/.test(path) ||
+    /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/.test(path)
   );
 }
 
@@ -861,6 +902,91 @@ function extractRunTexts(bytes: Uint8Array, partPath: string): string[] {
   return elementsByNamespaceOrLegacy(document, DRAWINGML_NAMESPACE, "t", "a")
     .map((element) => element.textContent?.trim() ?? "")
     .filter(Boolean);
+}
+
+function preflightPptxXmlParts(
+  files: Record<string, Uint8Array>,
+  limits: DocumentPageProcessingLimits,
+): void {
+  for (const [partPath, bytes] of Object.entries(files)) {
+    if (!isPptxXmlPart(partPath)) continue;
+    preflightPptxXml(bytes, partPath, limits);
+  }
+}
+
+function preflightPptxXml(
+  bytes: Uint8Array,
+  partPath: string,
+  limits: DocumentPageProcessingLimits,
+): void {
+  let elementCount = 0;
+  let depth = 0;
+  let textBytes = 0;
+  let attributeCount = 0;
+  let attributeBytes = 0;
+  const xmlLimitExceeded = (): never => {
+    throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
+  };
+  const recordText = (text: string): void => {
+    textBytes += Buffer.byteLength(text, "utf8");
+    if (textBytes > limits.maxPptxXmlTextBytes) xmlLimitExceeded();
+  };
+
+  const parser = new SaxesParser({
+    xmlns: true,
+    fileName: partPath,
+    additionalNamespaces: {
+      a: DRAWINGML_NAMESPACE,
+      p: PRESENTATIONML_NAMESPACE,
+      r: OFFICE_RELATIONSHIP_NAMESPACE,
+    },
+  });
+  parser.on("error", (error) => {
+    throw error;
+  });
+  parser.on("doctype", () => {
+    throw new Error(
+      `DTD and entity declarations are not allowed in ${partPath}`,
+    );
+  });
+  parser.on("opentag", () => {
+    elementCount += 1;
+    depth += 1;
+    if (
+      elementCount > limits.maxPptxXmlElements ||
+      depth > limits.maxPptxXmlDepth
+    ) {
+      xmlLimitExceeded();
+    }
+  });
+  parser.on("closetag", () => {
+    depth -= 1;
+  });
+  parser.on("attribute", (attribute) => {
+    attributeCount += 1;
+    attributeBytes +=
+      Buffer.byteLength(attribute.name, "utf8") +
+      Buffer.byteLength(attribute.value, "utf8");
+    if (
+      attributeCount > limits.maxPptxXmlAttributes ||
+      attributeBytes > limits.maxPptxXmlAttributeBytes
+    ) {
+      xmlLimitExceeded();
+    }
+  });
+  parser.on("text", recordText);
+  parser.on("cdata", recordText);
+
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const inputChunkBytes = 16 * 1024;
+  for (let offset = 0; offset < bytes.byteLength; offset += inputChunkBytes) {
+    const end = Math.min(offset + inputChunkBytes, bytes.byteLength);
+    const text = decoder.decode(bytes.subarray(offset, end), { stream: true });
+    if (text) parser.write(text);
+  }
+  const finalText = decoder.decode();
+  if (finalText) parser.write(finalText);
+  parser.close();
 }
 
 function parseXml(bytes: Uint8Array, partPath: string): XmlDocument {

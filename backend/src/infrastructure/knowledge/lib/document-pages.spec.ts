@@ -602,4 +602,142 @@ describe("readPptxSlides", () => {
       expect.objectContaining({ code: "INVALID_PROCESSING_LIMITS" }),
     );
   });
+
+  it.each([
+    [
+      "単一 XML part bytes",
+      makePptx({
+        "ppt/slides/slide1.xml": "<p:sld><a:t>part bytes</a:t></p:sld>",
+      }),
+      { maxPptxXmlPartBytes: 20 },
+    ],
+    [
+      "XML aggregate bytes",
+      makePptx({
+        "ppt/slides/slide1.xml": "<p:sld><a:t>one</a:t></p:sld>",
+        "ppt/slides/slide2.xml": "<p:sld><a:t>two</a:t></p:sld>",
+      }),
+      { maxPptxXmlPartBytes: 100, maxPptxXmlTotalBytes: 50 },
+    ],
+    [
+      "element count",
+      makePptx({
+        "ppt/slides/slide1.xml": `<p:sld>${"<a:t>x</a:t>".repeat(5)}</p:sld>`,
+      }),
+      { maxPptxXmlElements: 3 },
+    ],
+    [
+      "nesting depth",
+      makePptx({
+        "ppt/slides/slide1.xml":
+          "<p:sld><a:x><a:y><a:t>deep</a:t></a:y></a:x></p:sld>",
+      }),
+      { maxPptxXmlDepth: 3 },
+    ],
+    [
+      "text bytes",
+      makePptx({
+        "ppt/slides/slide1.xml": "<p:sld><a:t>1234567890</a:t></p:sld>",
+      }),
+      { maxPptxXmlTextBytes: 5 },
+    ],
+    [
+      "attribute count",
+      makePptx({
+        "ppt/slides/slide1.xml":
+          '<p:sld one="1" two="2"><a:t>attrs</a:t></p:sld>',
+      }),
+      { maxPptxXmlAttributes: 1 },
+    ],
+    [
+      "attribute bytes",
+      makePptx({
+        "ppt/slides/slide1.xml":
+          '<p:sld attribute="too-long"><a:t>attrs</a:t></p:sld>',
+      }),
+      { maxPptxXmlAttributeBytes: 5 },
+    ],
+  ])("PPTX XML の%s上限を強制する", (_, pptx, limits) => {
+    const readWithXmlLimits = readPptxSlides as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof readPptxSlides>;
+
+    expect(() => readWithXmlLimits(pptx, limits)).toThrow(
+      expect.objectContaining({ code: "PPTX_XML_LIMIT_EXCEEDED" }),
+    );
+  });
+
+  it("大きい media は XML part 上限の対象にしない", () => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml": "<p:sld><a:t>media ok</a:t></p:sld>",
+      "ppt/media/large.png": new Uint8Array(512),
+    });
+    const readWithXmlLimits = readPptxSlides as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof readPptxSlides>;
+
+    expect(
+      readWithXmlLimits(pptx, { maxPptxXmlPartBytes: 100 })[0].sourceText,
+    ).toBe("media ok");
+  });
+
+  it("UTF-8 multibyte 文字を preflight chunk 境界で保持する", () => {
+    const opening = "<p:sld><a:t>";
+    const padding = "x".repeat(16 * 1024 - opening.length - 1);
+    const pptx = makeStreamingPptxEntries(
+      [
+        [
+          "ppt/slides/slide1.xml",
+          strToU8(`${opening}${padding}界</a:t></p:sld>`),
+        ],
+      ],
+      0,
+    );
+
+    expect(readPptxSlides(pptx)[0].sourceText).toBe(`${padding}界`);
+  });
+
+  it("DTD と entity 宣言を DOM 化前に INVALID_DOCUMENT にする", () => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml":
+        '<!DOCTYPE p:sld [<!ENTITY x "expanded">]><p:sld><a:t>&x;</a:t></p:sld>',
+    });
+
+    expect(() => readPptxSlides(pptx)).toThrow(
+      expect.objectContaining({
+        code: "INVALID_DOCUMENT",
+        cause: expect.anything(),
+      }),
+    );
+  });
+
+  it("executable stub 付き ZIP は非対応の strict PPTX profile として拒否する", () => {
+    const source = integrityFixture();
+    const sourceEocdOffset = source.lastIndexOf(
+      Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+    );
+    const sourceCentralOffset = source.readUInt32LE(sourceEocdOffset + 16);
+    const entryCount = source.readUInt16LE(sourceEocdOffset + 10);
+    const stub = Buffer.from("MZ-stub");
+    const pptx = Buffer.concat([stub, source]);
+    const eocdOffset = sourceEocdOffset + stub.byteLength;
+    const centralOffset = sourceCentralOffset + stub.byteLength;
+    pptx.writeUInt32LE(centralOffset, eocdOffset + 16);
+    let entryOffset = centralOffset;
+    for (let index = 0; index < entryCount; index += 1) {
+      pptx.writeUInt32LE(
+        pptx.readUInt32LE(entryOffset + 42) + stub.byteLength,
+        entryOffset + 42,
+      );
+      entryOffset +=
+        46 +
+        pptx.readUInt16LE(entryOffset + 28) +
+        pptx.readUInt16LE(entryOffset + 30) +
+        pptx.readUInt16LE(entryOffset + 32);
+    }
+
+    expectPptxIntegrityError(pptx);
+  });
 });
