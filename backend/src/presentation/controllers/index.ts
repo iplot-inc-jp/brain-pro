@@ -39,3 +39,6 @@ export * from './knowledge.controller';
 export * from './knowledge-settings.controller';
 export * from './rag.controller';
 export * from './invite.controller';
+export * from './ipro-webhook-source.controller';
+export * from './ipro-activity-webhook.controller';
+export * from './ipro-chat-history.controller';

@@ -65,6 +65,7 @@ const METHOD_ACTION: Record<string, string> = {
 /** 記録しないパス（クエリ除去後のパスで判定） */
 const EXCLUDED_PATTERNS: RegExp[] = [
   /^\/api\/auth\//, // 認証系（パスワード等を扱うため一切記録しない）
+  /^\/api\/webhooks\/ipro-db\//, // ipro-db受信は receipt が監査台帳（公開受信の二重記録を避ける）
   /^\/api\/attachments\/[^/]+\/file$/, // 添付ファイル本体のアップロード/ダウンロード
   /^\/api\/projects\/[^/]+\/change-logs(\/|$)/, // ChangeLog 自身（自己記録の無限増殖防止）
 ];

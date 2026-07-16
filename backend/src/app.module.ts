@@ -403,6 +403,9 @@ import {
   FeatureIoSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
+  IproWebhookSourceController,
+  IproActivityWebhookController,
+  IproChatHistoryController,
 } from './presentation';
 import { ChangeLogInterceptor } from './presentation/interceptors/change-log.interceptor';
 import { HealthController } from './presentation/controllers/health.controller';
@@ -485,6 +488,8 @@ import { QStashService } from './infrastructure/services/qstash.service';
 import { JobService } from './infrastructure/services/job.service';
 import { TaskWebhookService } from './infrastructure/services/task-webhook.service';
 import { TrackerImportService } from './infrastructure/services/trackers/tracker-import.service';
+import { IproActivityIngestService } from './infrastructure/services/ipro-activity-ingest.service';
+import { IproChatHistoryService } from './infrastructure/services/ipro-chat-history.service';
 import { WebhookController } from './presentation/controllers/webhook.controller';
 import { TrackerConnectionController } from './presentation/controllers/tracker-connection.controller';
 import { IproBotConnectionController } from './presentation/controllers/ipro-bot-connection.controller';
@@ -671,6 +676,9 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     // 外部トラッカー（Backlog/Jira）移行・同期
     TrackerConnectionController,
     IproBotConnectionController,
+    IproWebhookSourceController,
+    IproActivityWebhookController,
+    IproChatHistoryController,
     // 外部トラッカー Webhook 秘密の管理（admin）
     TrackerWebhookController,
     LlmUsageController,
@@ -1135,6 +1143,8 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     JobService,
     TaskWebhookService,
     TrackerImportService,
+    IproActivityIngestService,
+    IproChatHistoryService,
     // ナレッジグラフ バッチ取り込み（Blob 保管 / 型別抽出 / 1ファイルパイプライン）
     BlobStorageService,
     FileExtractionService,
