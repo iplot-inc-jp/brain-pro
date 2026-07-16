@@ -54,4 +54,3 @@ describe('KnowledgeLibraryController', () => {
     expect(folders.saveCurrentAsTemplate).toHaveBeenCalledWith('p1', '標準構成', 'u1');
   });
 });
-

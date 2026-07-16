@@ -46,4 +46,3 @@ export const BUILT_IN_KNOWLEDGE_FOLDER_TEMPLATES: readonly BuiltInKnowledgeFolde
     ],
   },
 ] as const;
-

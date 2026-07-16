@@ -7,6 +7,7 @@ describe('KnowledgeLibraryService', () => {
     knowledgeDocument: { findMany: jest.fn() },
     knowledgeNode: { findMany: jest.fn() },
     iproActivityDocument: { findMany: jest.fn() },
+    knowledgeFolder: { count: jest.fn() },
     knowledgeFolderItem: { findMany: jest.fn() },
   };
   let service: KnowledgeLibraryService;
@@ -17,6 +18,7 @@ describe('KnowledgeLibraryService', () => {
     prisma.knowledgeDocument.findMany.mockResolvedValue([]);
     prisma.knowledgeNode.findMany.mockResolvedValue([]);
     prisma.iproActivityDocument.findMany.mockResolvedValue([]);
+    prisma.knowledgeFolder.count.mockResolvedValue(1);
     prisma.knowledgeFolderItem.findMany.mockResolvedValue([]);
     service = new KnowledgeLibraryService(prisma as never);
   });
@@ -61,6 +63,9 @@ describe('KnowledgeLibraryService', () => {
       folderIds: ['f1', 'f2'],
       sourceFiles: [{ label: '要件.pdf', url: 'https://blob/requirements.pdf', filename: '要件.pdf', mimeType: null }],
     });
+    expect(result.items.find((item) => item.itemId === 'x1')).toMatchObject({
+      sourcePageUrl: '/dashboard/projects/p1/knowledge/resource-history?item=x1',
+    });
     expect(result.totals.all).toBe(5);
     expect(result.warnings).toEqual([]);
   });
@@ -80,6 +85,13 @@ describe('KnowledgeLibraryService', () => {
 
     const unclassified = await service.search('p1', { itemTypes: ['RAG'], unclassified: true });
     expect(unclassified.items.map((item) => item.itemId)).toEqual(['r2']);
+  });
+
+  it('rejects a folder filter outside the requested project', async () => {
+    prisma.knowledgeFolder.count.mockResolvedValue(0);
+
+    await expect(service.search('p1', { folderId: 'other-project-folder' }))
+      .rejects.toThrow('folder not found in project');
   });
 
   it('passes RAG feature and scope filters to the RAG source only', async () => {

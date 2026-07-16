@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { KnowledgeLibraryItemType, Prisma } from '@prisma/client';
 import { PrismaService } from '../persistence/prisma/prisma.service';
 import {
@@ -33,6 +33,12 @@ export class KnowledgeLibraryService {
   ): Promise<KnowledgeLibrarySearchResult> {
     const q = input.q?.trim() ?? '';
     const limit = this.limit(input.limit);
+    if (input.folderId) {
+      const folderCount = await this.prisma.knowledgeFolder.count({
+        where: { id: input.folderId, projectId },
+      });
+      if (folderCount !== 1) throw new NotFoundException('folder not found in project');
+    }
     const enabled = new Set(input.itemTypes?.length ? input.itemTypes : ALL_TYPES);
     const textFilter = q
       ? {
@@ -167,7 +173,7 @@ export class KnowledgeLibraryService {
               title: row.title || row.roomName || (itemType === 'CHAT' ? 'チャット' : '受信リソース'),
               excerpt: row.content.slice(0, 300),
               occurredAt: row.occurredAt,
-              sourcePageUrl: `/dashboard/projects/${projectId}/knowledge/${itemType === 'CHAT' ? 'chat-history' : 'resources'}?item=${row.id}`,
+              sourcePageUrl: `/dashboard/projects/${projectId}/knowledge/${itemType === 'CHAT' ? 'chat-history' : 'resource-history'}?item=${row.id}`,
               sourceFiles,
               searchableText: `${row.title ?? ''}\n${row.content}`,
             };
