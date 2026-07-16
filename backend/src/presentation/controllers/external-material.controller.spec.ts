@@ -19,6 +19,72 @@ const file = {
 } as Express.Multer.File;
 
 describe('ExternalMaterialController', () => {
+  it('maps prepare metadata and exposes finalize, status, and signed download operations', async () => {
+    const importUseCase = {
+      prepare: jest.fn(async () => ({ importId: 'i1', status: 'PENDING' })),
+      finalize: jest.fn(async () => ({ importId: 'i1', status: 'STORED' })),
+      getStatus: jest.fn(async () => ({ importId: 'i1', status: 'STORED' })),
+      getDownload: jest.fn(async () => ({
+        downloadUrl: 'https://private.example/get',
+        expiresAt: 123,
+      })),
+    };
+    const access = { assertPrincipalAccess: jest.fn(async () => undefined) };
+    const controller = new ExternalMaterialController(
+      importUseCase as any,
+      access as any,
+    );
+    const dto = {
+      idempotencyKey: 'ipro:slack:file:p1',
+      sourcePlatform: 'slack' as const,
+      sourceChannelId: 'C1',
+      sourceMessageId: '123.456',
+      sourceFileId: 'F1',
+      filename: 'deck.pptx',
+      mimeType: file.mimetype,
+      size: 1024,
+      contentSha256: 'a'.repeat(64),
+    };
+
+    await controller.prepare(user, 'p1', dto);
+    await controller.finalize(user, 'p1', 'i1');
+    await controller.status(user, 'p1', 'i1');
+    await controller.download(user, 'p1', 'i1');
+
+    expect(importUseCase.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'service-user',
+        principal: user,
+        projectId: 'p1',
+        file: {
+          filename: 'deck.pptx',
+          mimeType: file.mimetype,
+          size: 1024,
+          contentSha256: 'a'.repeat(64),
+        },
+      }),
+    );
+    expect(importUseCase.finalize).toHaveBeenCalledWith(
+      expect.objectContaining({ importId: 'i1', principal: user }),
+    );
+    expect(importUseCase.getStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ importId: 'i1', principal: user }),
+    );
+    expect(importUseCase.getDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ importId: 'i1', principal: user }),
+    );
+    expect(access.assertPrincipalAccess).toHaveBeenCalledWith(
+      user,
+      'p1',
+      'edit',
+    );
+    expect(access.assertPrincipalAccess).toHaveBeenCalledWith(
+      user,
+      'p1',
+      'view',
+    );
+  });
+
   it('requires edit access for the full API-key principal and maps multipart input', async () => {
     const importUseCase = {
       execute: jest.fn(async () => ({

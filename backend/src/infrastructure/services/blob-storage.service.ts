@@ -24,6 +24,21 @@ export class BlobStorageService {
     return t && t.trim() ? t.trim() : undefined;
   }
 
+  private get privateToken(): string | undefined {
+    const token = process.env.PRIVATE_BLOB_READ_WRITE_TOKEN;
+    return token && token.trim() ? token.trim() : undefined;
+  }
+
+  private requirePrivateToken(): string {
+    const token = this.privateToken;
+    if (!token) {
+      throw new Error(
+        'PRIVATE_BLOB_READ_WRITE_TOKEN is required for private material storage',
+      );
+    }
+    return token;
+  }
+
   private get uploadDir(): string {
     return process.env.UPLOAD_DIR || path.join(process.cwd(), 'uploads');
   }
@@ -38,6 +53,159 @@ export class BlobStorageService {
       .replace(/\.\.+/g, '_')
       .replace(/\s+/g, '_')
       .slice(0, 240);
+  }
+
+  /**
+   * Issue a short-lived, exact-path upload URL for the dedicated private Blob
+   * store. The browser can upload large files without passing them through the
+   * Vercel Function request body.
+   */
+  async createPrivateUpload(
+    pathname: string,
+    contentType: string,
+    maximumSizeInBytes: number,
+    validUntil = Date.now() + 10 * 60 * 1000,
+  ): Promise<{ uploadUrl: string; pathname: string; expiresAt: number }> {
+    const token = this.requirePrivateToken();
+    const normalizedPathname = pathname.replace(/^\/+/, '');
+    const { issueSignedToken, presignUrl } = await import('@vercel/blob');
+    const signedToken = await issueSignedToken({
+      token,
+      pathname: normalizedPathname,
+      operations: ['put'],
+      validUntil,
+      allowedContentTypes: [contentType],
+      maximumSizeInBytes,
+    });
+    const { presignedUrl } = await presignUrl(signedToken, {
+      access: 'private',
+      operation: 'put',
+      pathname: normalizedPathname,
+      allowedContentTypes: [contentType],
+      maximumSizeInBytes,
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+    return {
+      uploadUrl: presignedUrl,
+      pathname: normalizedPathname,
+      expiresAt: signedToken.validUntil,
+    };
+  }
+
+  /** Read metadata directly from the dedicated private Blob store. */
+  async headPrivate(pathname: string) {
+    const { head } = await import('@vercel/blob');
+    return head(pathname.replace(/^\/+/, ''), {
+      token: this.requirePrivateToken(),
+    });
+  }
+
+  /**
+   * Read a private object from origin (never CDN cache) while enforcing the
+   * byte ceiling against the stream itself. Content-Length alone is not trusted.
+   */
+  async readPrivate(
+    pathname: string,
+    maximumSizeInBytes: number,
+  ): Promise<Buffer> {
+    const { get } = await import('@vercel/blob');
+    const result = await get(pathname.replace(/^\/+/, ''), {
+      access: 'private',
+      token: this.requirePrivateToken(),
+      useCache: false,
+    });
+    if (!result || result.statusCode !== 200 || !result.stream) {
+      throw new Error('private blob could not be read');
+    }
+
+    const reader = result.stream.getReader();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        total += value.byteLength;
+        if (total > maximumSizeInBytes) {
+          await reader.cancel('private blob exceeds maximum size');
+          throw new Error(
+            `private blob exceeds maximum size (${maximumSizeInBytes} bytes)`,
+          );
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, total);
+  }
+
+  async deletePrivate(pathname: string): Promise<void> {
+    const { del } = await import('@vercel/blob');
+    await del(pathname.replace(/^\/+/, ''), {
+      token: this.requirePrivateToken(),
+    });
+  }
+
+  async createPrivateDownload(
+    pathname: string,
+    validUntil = Date.now() + 5 * 60 * 1000,
+  ): Promise<{ downloadUrl: string; expiresAt: number }> {
+    const normalizedPathname = pathname.replace(/^\/+/, '');
+    const { issueSignedToken, presignUrl } = await import('@vercel/blob');
+    const signedToken = await issueSignedToken({
+      token: this.requirePrivateToken(),
+      pathname: normalizedPathname,
+      operations: ['get'],
+      validUntil,
+    });
+    const { presignedUrl } = await presignUrl(signedToken, {
+      access: 'private',
+      operation: 'get',
+      pathname: normalizedPathname,
+      validUntil,
+    });
+    return { downloadUrl: presignedUrl, expiresAt: signedToken.validUntil };
+  }
+
+  /** A DB-safe opaque reference; unlike a Blob object URL it exposes no private URL. */
+  privateReference(pathname: string): string {
+    return `private-blob:${pathname.replace(/^\/+/, '')}`;
+  }
+
+  async savePrivate(
+    pathname: string,
+    bytes: Buffer | Uint8Array,
+    contentType?: string,
+  ): Promise<{ reference: string; pathname: string }> {
+    const normalizedPathname = pathname.replace(/^\/+/, '');
+    if (!this.privateToken) {
+      if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+        this.requirePrivateToken();
+      }
+      const saved = await this.save(normalizedPathname, bytes, contentType, {
+        stable: true,
+      });
+      return { reference: saved.url, pathname: normalizedPathname };
+    }
+    const { put } = await import('@vercel/blob');
+    await put(
+      normalizedPathname,
+      Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes),
+      {
+        access: 'private',
+        token: this.privateToken,
+        contentType,
+        addRandomSuffix: false,
+        allowOverwrite: true,
+      },
+    );
+    return {
+      reference: this.privateReference(normalizedPathname),
+      pathname: normalizedPathname,
+    };
   }
 
   /**
@@ -169,6 +337,13 @@ export class BlobStorageService {
       throw new Error('BlobStorageService.read: urlOrKey is empty');
     }
 
+    if (urlOrKey.startsWith('private-blob:')) {
+      return this.readPrivate(
+        urlOrKey.slice('private-blob:'.length),
+        50 * 1024 * 1024,
+      );
+    }
+
     // ディスク（file:// または絶対/相対パス）。UPLOAD_DIR 配下の ingestion/ のみ許可。
     if (urlOrKey.startsWith('file://')) {
       const p = urlOrKey.slice('file://'.length);
@@ -186,7 +361,10 @@ export class BlobStorageService {
     } catch {
       throw new Error(`BlobStorageService.read: invalid URL: ${urlOrKey}`);
     }
-    if (parsed.protocol !== 'https:' || !this.isVercelBlobHost(parsed.hostname)) {
+    if (
+      parsed.protocol !== 'https:' ||
+      !this.isVercelBlobHost(parsed.hostname)
+    ) {
       throw new Error(
         `BlobStorageService.read: URL is not an allowed Vercel Blob host: ${parsed.protocol}//${parsed.hostname}`,
       );

@@ -1,7 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { EntityAlreadyExistsError, ValidationError } from '../../../domain';
+import {
+  validatePdfStructure,
+  validatePptxStructure,
+} from '../../../infrastructure/knowledge/lib/document-pages';
 import { PrismaService } from '../../../infrastructure/persistence/prisma/prisma.service';
 import { BlobStorageService } from '../../../infrastructure/services/blob-storage.service';
 import { JobService } from '../../../infrastructure/services/job.service';
@@ -11,6 +15,7 @@ import {
 } from '../../../infrastructure/services/project-access.service';
 
 export const EXTERNAL_MATERIAL_MAX_FILE_BYTES = 50 * 1024 * 1024;
+export const EXTERNAL_MATERIAL_LEGACY_MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const PDF_MIME = 'application/pdf';
 const PPTX_MIME =
@@ -18,7 +23,7 @@ const PPTX_MIME =
 const MAX_ID_LENGTH = 512;
 const MAX_FILENAME_LENGTH = 255;
 
-export interface ImportExternalMaterialInput {
+interface ExternalSourceInput {
   userId: string;
   principal: AccessPrincipal;
   projectId: string;
@@ -27,6 +32,18 @@ export interface ImportExternalMaterialInput {
   sourceChannelId: string;
   sourceMessageId: string;
   sourceFileId: string;
+}
+
+export interface PrepareExternalMaterialInput extends ExternalSourceInput {
+  file: {
+    filename: string;
+    mimeType: string;
+    size: number;
+    contentSha256: string;
+  };
+}
+
+export interface ImportExternalMaterialInput extends ExternalSourceInput {
   file: {
     filename: string;
     mimeType: string;
@@ -37,22 +54,27 @@ export interface ImportExternalMaterialInput {
 
 export interface ExternalMaterialResponse {
   importId: string;
-  attachmentId: string;
-  batchId: string;
-  status: 'BATCHED';
+  attachmentId: string | null;
+  batchId: string | null;
+  verifierJobId: string | null;
+  rootJobId: string | null;
+  status: 'PENDING' | 'STORED' | 'BATCHED' | 'FAILED';
+  error: string | null;
 }
 
-interface NormalizedInput extends ImportExternalMaterialInput {
-  idempotencyKey: string;
+export interface PrepareExternalMaterialResponse extends ExternalMaterialResponse {
+  upload: {
+    uploadUrl: string;
+    pathname: string;
+    expiresAt: number;
+  } | null;
+}
+
+interface NormalizedPrepareInput extends PrepareExternalMaterialInput {
   sourcePlatform: 'line' | 'slack';
-  sourceChannelId: string;
-  sourceMessageId: string;
-  sourceFileId: string;
-  file: ImportExternalMaterialInput['file'] & {
-    filename: string;
+  file: PrepareExternalMaterialInput['file'] & {
     mimeType: typeof PDF_MIME | typeof PPTX_MIME;
   };
-  contentSha256: string;
 }
 
 interface ImportRow {
@@ -80,67 +102,269 @@ interface ArtifactIds {
   jobId: string;
 }
 
-/**
- * LINE / Slack 原本を共有 Attachment とページ取り込みバッチへ一度だけ登録する。
- *
- * 外部 Blob 書込は DB transaction に含められないため、次の crash-safe な段階へ分ける。
- *  1. unique(projectId,idempotencyKey) 行へ内容 fingerprint を先に固定
- *  2. 決定的 Blob pathname へ保存し、決定的 Attachment ID を保存して STORED
- *  3. Batch / File / root Job を一つの transaction で upsert して BATCHED
- *  4. transaction 済み QUEUED job を開始（publish 失敗時は次の同一リクエストで再開）
- */
 @Injectable()
 export class ImportExternalMaterialUseCase {
   constructor(
     private readonly prisma: PrismaService,
     private readonly blob: BlobStorageService,
     private readonly projectAccess: ProjectAccessService,
+    @Inject(forwardRef(() => JobService))
     private readonly jobs: JobService,
   ) {}
 
-  async execute(
-    rawInput: ImportExternalMaterialInput,
-  ): Promise<ExternalMaterialResponse> {
+  /** Bind the fingerprint before issuing an exact-path private upload URL. */
+  async prepare(
+    rawInput: PrepareExternalMaterialInput,
+  ): Promise<PrepareExternalMaterialResponse> {
     await this.projectAccess.assertPrincipalAccess(
       rawInput.principal,
       rawInput.projectId,
       'edit',
     );
-    const input = this.normalizeAndValidate(rawInput);
-    let importRow = await this.getOrCreateImport(input);
+    const input = this.normalizePrepare(rawInput);
+    let row = await this.getOrCreateImport(input);
+    if (row.status === 'BATCHED' || row.status === 'STORED') {
+      return { ...(await this.toResponse(row)), upload: null };
+    }
+    if (row.status === 'FAILED') {
+      await this.prisma.externalMaterialImport.updateMany({
+        where: { id: row.id, projectId: row.projectId, status: 'FAILED' },
+        data: { status: 'PENDING', error: null },
+      });
+      row = { ...row, status: 'PENDING', error: null };
+    }
+    const upload = await this.blob.createPrivateUpload(
+      this.pathname(row),
+      input.file.mimeType,
+      input.file.size,
+    );
+    return { ...(await this.toResponse(row)), upload };
+  }
 
-    if (!importRow.attachmentId) {
-      try {
-        importRow = await this.storeOriginal(importRow, input);
-      } catch (error) {
-        await this.markFailed(importRow, error);
-        throw error;
-      }
+  /** HEAD only; expensive download/hash/OOXML parsing runs in the durable verifier. */
+  async finalize(input: {
+    userId: string;
+    principal: AccessPrincipal;
+    projectId: string;
+    importId: string;
+  }): Promise<ExternalMaterialResponse> {
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      input.projectId,
+      'edit',
+    );
+    let row = await this.findImport(input.projectId, input.importId);
+    if (row.status === 'BATCHED') {
+      await this.ensureRootRecovery(row);
+      return this.toResponse(row);
+    }
+    if (!row.filename || !row.mimeType || !row.size) {
+      throw new ValidationError('資料メタデータが未登録です');
+    }
+    const metadata = await this.blob.headPrivate(this.pathname(row));
+    if (
+      metadata.pathname !== this.pathname(row) ||
+      metadata.size !== row.size ||
+      metadata.contentType?.toLowerCase() !== row.mimeType.toLowerCase()
+    ) {
+      throw new ValidationError('アップロード済みファイルの情報が一致しません');
     }
 
-    let artifacts: ArtifactIds;
+    const verifierJobId = this.verifierJobId(row.id);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        `external-material:${row.projectId}:${row.id}`,
+      );
+      await tx.externalMaterialImport.updateMany({
+        where: {
+          id: row.id,
+          projectId: row.projectId,
+          status: { in: ['PENDING', 'FAILED', 'STORED'] },
+        },
+        data: { status: 'STORED', error: null },
+      });
+      const job = await tx.backgroundJob.upsert({
+        where: { id: verifierJobId },
+        create: {
+          id: verifierJobId,
+          projectId: row.projectId,
+          parentJobId: null,
+          type: 'KG_FINALIZE_EXTERNAL_MATERIAL',
+          status: 'QUEUED',
+          payload: { importId: row.id },
+          createdById: input.userId,
+          maxAttempts: JobService.MAX_ATTEMPTS,
+        },
+        update: {},
+      });
+      this.assertVerifierJob(job, row);
+    });
+
+    await this.startOrRecoverJob(verifierJobId);
+    row = await this.findImport(input.projectId, input.importId);
+    return this.toResponse(row);
+  }
+
+  async getStatus(input: {
+    principal: AccessPrincipal;
+    projectId: string;
+    importId: string;
+  }): Promise<ExternalMaterialResponse> {
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      input.projectId,
+      'view',
+    );
+    return this.toResponse(
+      await this.findImport(input.projectId, input.importId),
+    );
+  }
+
+  async getDownload(input: {
+    principal: AccessPrincipal;
+    projectId: string;
+    importId: string;
+  }): Promise<{ downloadUrl: string; expiresAt: number }> {
+    await this.projectAccess.assertPrincipalAccess(
+      input.principal,
+      input.projectId,
+      'view',
+    );
+    const row = await this.findImport(input.projectId, input.importId);
+    if (row.status !== 'STORED' && row.status !== 'BATCHED') {
+      throw new ValidationError('資料はまだダウンロードできません');
+    }
+    return this.blob.createPrivateDownload(this.pathname(row));
+  }
+
+  /** Called only by JobService after its atomic QUEUED -> RUNNING claim. */
+  async verifyAndBatch(
+    importId: string,
+    verifierJobId: string,
+  ): Promise<ExternalMaterialResponse> {
+    const row = (await this.prisma.externalMaterialImport.findUnique({
+      where: { id: importId },
+    })) as ImportRow | null;
+    if (!row) throw new Error('External material import was not found');
+    const verifier = await this.prisma.backgroundJob.findUnique({
+      where: { id: verifierJobId },
+    });
+    this.assertVerifierJob(verifier, row);
+    if (row.status === 'BATCHED') {
+      await this.ensureRootRecovery(row);
+      return this.toResponse(row);
+    }
+    if (
+      row.status !== 'STORED' ||
+      !row.filename ||
+      !row.mimeType ||
+      !row.size ||
+      !row.contentSha256
+    ) {
+      throw new Error('External material is not ready for verification');
+    }
+
+    let bytes: Buffer;
     try {
-      artifacts = await this.ensureBatchArtifacts(importRow, input);
+      bytes = await this.blob.readPrivate(
+        this.pathname(row),
+        EXTERNAL_MATERIAL_MAX_FILE_BYTES,
+      );
+      if (bytes.length !== row.size) {
+        throw new ValidationError('ファイルサイズが申告値と一致しません');
+      }
+      const actualHash = createHash('sha256').update(bytes).digest('hex');
+      if (actualHash !== row.contentSha256) {
+        throw new ValidationError('ファイル内容のSHA-256が一致しません');
+      }
+      if (row.mimeType === PDF_MIME) {
+        await validatePdfStructure(bytes);
+      } else if (row.mimeType === PPTX_MIME) {
+        validatePptxStructure(bytes);
+      } else {
+        throw new ValidationError('未対応の資料形式です');
+      }
     } catch (error) {
-      await this.markFailed(importRow, error);
+      try {
+        await this.blob.deletePrivate(this.pathname(row));
+      } catch {
+        // The import remains FAILED even when cleanup itself is unavailable.
+      }
+      await this.markFailed(row, error);
       throw error;
     }
 
-    // BATCHED is committed before transport publish. If publish fails, the same request
-    // finds this exact QUEUED root and starts it; no second billable root can be created.
-    await this.startOrResumeRoot(artifacts, input.projectId);
-
-    return {
-      importId: importRow.id,
-      attachmentId: artifacts.attachmentId,
-      batchId: artifacts.batchId,
-      status: 'BATCHED',
-    };
+    const reference = `private-blob:${this.pathname(row)}`;
+    const artifacts = await this.ensureBatchArtifacts(
+      row,
+      verifier!.createdById ?? null,
+      reference,
+    );
+    await this.startOrResumeRoot(artifacts, row.projectId);
+    return this.toResponse(await this.findImport(row.projectId, row.id));
   }
 
-  private normalizeAndValidate(
-    input: ImportExternalMaterialInput,
-  ): NormalizedInput {
+  /** Deprecated server upload path. Kept only for <=4 MiB local/backcompat clients. */
+  async execute(
+    rawInput: ImportExternalMaterialInput,
+  ): Promise<ExternalMaterialResponse> {
+    if (
+      !Buffer.isBuffer(rawInput.file?.bytes) ||
+      rawInput.file.bytes.length === 0 ||
+      rawInput.file.bytes.length > EXTERNAL_MATERIAL_LEGACY_MAX_FILE_BYTES
+    ) {
+      throw new ValidationError('従来アップロードは4MB以下にしてください');
+    }
+    const contentSha256 = createHash('sha256')
+      .update(rawInput.file.bytes)
+      .digest('hex');
+    await this.projectAccess.assertPrincipalAccess(
+      rawInput.principal,
+      rawInput.projectId,
+      'edit',
+    );
+    const normalized = this.normalizePrepare({
+      ...rawInput,
+      file: { ...rawInput.file, contentSha256 },
+    });
+    let row = await this.getOrCreateImport(normalized);
+    if (row.status === 'BATCHED') {
+      await this.ensureRootRecovery(row);
+      return this.toResponse(row);
+    }
+    if (rawInput.file.bytes.length !== normalized.file.size) {
+      throw new ValidationError(
+        '申告されたファイルサイズと実データが一致しません',
+      );
+    }
+    if (normalized.file.mimeType === PDF_MIME) {
+      await validatePdfStructure(rawInput.file.bytes);
+    } else {
+      validatePptxStructure(rawInput.file.bytes);
+    }
+    const saved = await this.blob.savePrivate(
+      this.pathname(row),
+      rawInput.file.bytes,
+      normalized.file.mimeType,
+    );
+    await this.prisma.externalMaterialImport.updateMany({
+      where: { id: row.id, projectId: row.projectId },
+      data: { status: 'STORED', error: null },
+    });
+    row = { ...row, status: 'STORED', error: null };
+    const artifacts = await this.ensureBatchArtifacts(
+      row,
+      rawInput.userId,
+      saved.reference,
+    );
+    await this.startOrResumeRoot(artifacts, row.projectId);
+    return this.toResponse(await this.findImport(row.projectId, row.id));
+  }
+
+  private normalizePrepare(
+    input: PrepareExternalMaterialInput,
+  ): NormalizedPrepareInput {
     const projectId = this.required(
       input.projectId,
       'projectId',
@@ -172,7 +396,6 @@ export class ImportExternalMaterialUseCase {
         'sourcePlatform は line または slack を指定してください',
       );
     }
-
     const filename = this.required(
       input.file?.filename,
       'filename',
@@ -189,46 +412,30 @@ export class ImportExternalMaterialUseCase {
       ?.split(';', 1)[0]
       ?.trim()
       .toLowerCase();
-    const bytes = input.file?.bytes;
-    const declaredSize = input.file?.size;
-    if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
-      throw new ValidationError('空のファイルは取り込めません');
-    }
+    const size = input.file?.size;
     if (
-      !Number.isSafeInteger(declaredSize) ||
-      declaredSize <= 0 ||
-      declaredSize > EXTERNAL_MATERIAL_MAX_FILE_BYTES ||
-      bytes.length > EXTERNAL_MATERIAL_MAX_FILE_BYTES
+      !Number.isSafeInteger(size) ||
+      size <= 0 ||
+      size > EXTERNAL_MATERIAL_MAX_FILE_BYTES
     ) {
       throw new ValidationError('ファイルサイズは50MB以下にしてください');
     }
-    if (declaredSize !== bytes.length) {
-      throw new ValidationError(
-        '申告されたファイルサイズと実データが一致しません',
-      );
-    }
-
     const isPdf = filename.toLowerCase().endsWith('.pdf');
     const isPptx = filename.toLowerCase().endsWith('.pptx');
-    if (!isPdf && !isPptx) {
+    if (!isPdf && !isPptx)
       throw new ValidationError('PDF または PPTX ファイルだけ取り込めます');
-    }
-    if (isPdf && mimeType !== PDF_MIME) {
-      throw new ValidationError('PDF の MIME タイプが一致しません');
-    }
-    if (isPptx && mimeType !== PPTX_MIME) {
-      throw new ValidationError('PPTX の MIME タイプが一致しません');
-    }
-    if (isPdf && !bytes.subarray(0, 5).equals(Buffer.from('%PDF-'))) {
-      throw new ValidationError('PDF のファイル署名が一致しません');
-    }
     if (
-      isPptx &&
-      !bytes.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
+      (isPdf && mimeType !== PDF_MIME) ||
+      (isPptx && mimeType !== PPTX_MIME)
     ) {
-      throw new ValidationError('PPTX のファイル署名が一致しません');
+      throw new ValidationError('拡張子と MIME タイプが一致しません');
     }
-
+    const contentSha256 = input.file?.contentSha256?.trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/u.test(contentSha256 ?? '')) {
+      throw new ValidationError(
+        'contentSha256 は64桁のSHA-256（hex）で指定してください',
+      );
+    }
     return {
       ...input,
       projectId,
@@ -240,25 +447,24 @@ export class ImportExternalMaterialUseCase {
       file: {
         filename,
         mimeType: mimeType as typeof PDF_MIME | typeof PPTX_MIME,
-        size: declaredSize,
-        bytes,
+        size,
+        contentSha256,
       },
-      contentSha256: createHash('sha256').update(bytes).digest('hex'),
     };
   }
 
   private required(value: unknown, field: string, max: number): string {
-    if (typeof value !== 'string' || !value.trim()) {
+    if (typeof value !== 'string' || !value.trim())
       throw new ValidationError(`${field} は必須です`);
-    }
     const normalized = value.trim();
-    if (normalized.length > max) {
+    if (normalized.length > max)
       throw new ValidationError(`${field} が長すぎます`);
-    }
     return normalized;
   }
 
-  private async getOrCreateImport(input: NormalizedInput): Promise<ImportRow> {
+  private async getOrCreateImport(
+    input: NormalizedPrepareInput,
+  ): Promise<ImportRow> {
     let row = (await this.prisma.externalMaterialImport.upsert({
       where: {
         projectId_idempotencyKey: {
@@ -277,12 +483,10 @@ export class ImportExternalMaterialUseCase {
         filename: input.file.filename,
         mimeType: input.file.mimeType,
         size: input.file.size,
-        contentSha256: input.contentSha256,
+        contentSha256: input.file.contentSha256,
       },
       update: {},
     })) as ImportRow;
-
-    // Rollout-safe legacy binding: only an entirely unbound row can acquire a fingerprint.
     if (
       row.filename === null &&
       row.mimeType === null &&
@@ -302,19 +506,21 @@ export class ImportExternalMaterialUseCase {
           filename: input.file.filename,
           mimeType: input.file.mimeType,
           size: input.file.size,
-          contentSha256: input.contentSha256,
+          contentSha256: input.file.contentSha256,
         },
       });
       row = (await this.prisma.externalMaterialImport.findUnique({
         where: { id: row.id },
       })) as ImportRow;
     }
-
     this.assertSameRequest(row, input);
     return row;
   }
 
-  private assertSameRequest(row: ImportRow, input: NormalizedInput): void {
+  private assertSameRequest(
+    row: ImportRow,
+    input: NormalizedPrepareInput,
+  ): void {
     const matches =
       row.projectId === input.projectId &&
       row.idempotencyKey === input.idempotencyKey &&
@@ -325,37 +531,41 @@ export class ImportExternalMaterialUseCase {
       row.filename === input.file.filename &&
       row.mimeType?.toLowerCase() === input.file.mimeType &&
       row.size === input.file.size &&
-      row.contentSha256 === input.contentSha256;
-    if (!matches) {
-      // The key can contain source identifiers. Keep it out of the HTTP conflict response.
+      row.contentSha256 === input.file.contentSha256;
+    if (!matches)
       throw new EntityAlreadyExistsError(
         'ExternalMaterialImport',
         'idempotencyKey',
         '[redacted]',
       );
-    }
   }
 
-  private async storeOriginal(
+  private async ensureBatchArtifacts(
     row: ImportRow,
-    input: NormalizedInput,
-  ): Promise<ImportRow> {
-    const attachmentId = this.stableId('external_attachment', row.id);
-    const saved = await this.blob.save(
-      `external-materials/${input.projectId}/${row.id}/${this.safeFilename(input.file.filename)}`,
-      input.file.bytes,
-      input.file.mimeType,
-      { stable: true },
-    );
-
-    const stored = await this.prisma.$transaction(async (tx) => {
+    createdById: string | null,
+    reference: string,
+  ): Promise<ArtifactIds> {
+    if (!row.filename || !row.mimeType || !row.size)
+      throw new Error('External material metadata is missing');
+    const filename = row.filename;
+    const mimeType = row.mimeType;
+    const size = row.size;
+    const attachmentId =
+      row.attachmentId ?? this.stableId('external_attachment', row.id);
+    const batchId =
+      row.ingestionBatchId ?? this.stableId('external_batch', row.id);
+    const fileId = this.stableId('external_file', row.id);
+    const jobId = this.stableId('external_root_job', row.id);
+    const platformLabel =
+      row.sourcePlatform.toLowerCase() === 'line' ? 'LINE' : 'Slack';
+    await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        `external-material:${input.projectId}:${row.id}`,
+        `external-material:${row.projectId}:${row.id}`,
       );
       const order = await tx.attachment.count({
         where: {
-          projectId: input.projectId,
+          projectId: row.projectId,
           phaseId: null,
           taskId: null,
           informationTypeId: null,
@@ -366,135 +576,79 @@ export class ImportExternalMaterialUseCase {
         where: { id: attachmentId },
         create: {
           id: attachmentId,
-          projectId: input.projectId,
-          kind: input.file.mimeType === PDF_MIME ? 'PDF' : 'FILE',
-          filename: input.file.filename,
+          projectId: row.projectId,
+          kind: mimeType === PDF_MIME ? 'PDF' : 'FILE',
+          filename,
           displayName: null,
           folder: 'LINE・Slack',
-          mimeType: input.file.mimeType,
-          url: `/api/attachments/${attachmentId}/file`,
-          size: input.file.size,
+          mimeType,
+          url: `/api/projects/${row.projectId}/external-materials/${row.id}/download-url`,
+          size,
           order,
           data: null,
-          blobUrl: saved.url,
+          blobUrl: reference,
         },
         update: {},
       });
       if (
-        attachment.projectId !== input.projectId ||
-        attachment.filename !== input.file.filename ||
-        attachment.mimeType !== input.file.mimeType ||
-        attachment.size !== input.file.size ||
-        attachment.blobUrl !== saved.url
-      ) {
+        attachment.projectId !== row.projectId ||
+        attachment.blobUrl !== reference
+      )
         throw new Error('External material attachment association is invalid');
-      }
-      await tx.externalMaterialImport.updateMany({
-        where: { id: row.id, projectId: input.projectId, attachmentId: null },
-        data: { attachmentId, status: 'STORED', error: null },
-      });
-      return tx.externalMaterialImport.findUnique({ where: { id: row.id } });
-    });
-    if (!stored || stored.projectId !== input.projectId) {
-      throw new Error('External material import disappeared while storing');
-    }
-    if (stored.attachmentId !== attachmentId) {
-      throw new Error(
-        'External material import is already bound to another attachment',
-      );
-    }
-    return stored as ImportRow;
-  }
-
-  private async ensureBatchArtifacts(
-    row: ImportRow,
-    input: NormalizedInput,
-  ): Promise<ArtifactIds> {
-    if (!row.attachmentId) {
-      throw new Error('External material has not been stored');
-    }
-    const attachmentId = row.attachmentId;
-    const batchId =
-      row.ingestionBatchId ?? this.stableId('external_batch', row.id);
-    const fileId = this.stableId('external_file', row.id);
-    const jobId = this.stableId('external_root_job', row.id);
-    const platformLabel = input.sourcePlatform === 'line' ? 'LINE' : 'Slack';
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
-        `external-material:${input.projectId}:${row.id}`,
-      );
-      const attachment = await tx.attachment.findFirst({
-        where: {
-          id: attachmentId,
-          projectId: input.projectId,
-          filename: input.file.filename,
-          mimeType: input.file.mimeType,
-          size: input.file.size,
-        },
-      });
-      if (!attachment) {
-        throw new Error(
-          'External material attachment is outside the project scope',
-        );
-      }
       const batch = await tx.ingestionBatch.upsert({
         where: { id: batchId },
         create: {
           id: batchId,
-          projectId: input.projectId,
-          name: `${platformLabel}資料: ${input.file.filename}`,
+          projectId: row.projectId,
+          name: `${platformLabel}資料: ${filename}`,
           status: 'RUNNING',
           totalFiles: 1,
           succeededFiles: 0,
           failedFiles: 0,
           pendingFiles: 1,
           options: Prisma.JsonNull,
-          createdById: input.userId,
+          createdById,
           startedAt: new Date(),
         },
         update: {},
       });
-      if (batch.projectId !== input.projectId) {
+      if (batch.projectId !== row.projectId)
         throw new Error('External material batch is outside the project scope');
-      }
       const rootJob = await tx.backgroundJob.upsert({
         where: { id: jobId },
         create: {
           id: jobId,
-          projectId: input.projectId,
+          projectId: row.projectId,
           parentJobId: null,
           type: 'KG_INGEST_FILE',
           status: 'QUEUED',
           payload: { fileId },
-          createdById: input.userId,
+          createdById,
           maxAttempts: JobService.MAX_ATTEMPTS,
         },
         update: {},
       });
       const payload = (rootJob.payload ?? {}) as Record<string, unknown>;
       if (
-        rootJob.projectId !== input.projectId ||
+        rootJob.projectId !== row.projectId ||
         rootJob.parentJobId !== null ||
         rootJob.type !== 'KG_INGEST_FILE' ||
         payload.fileId !== fileId
-      ) {
+      )
         throw new Error('External material root job association is invalid');
-      }
       const file = await tx.ingestionFile.upsert({
         where: { id: fileId },
         create: {
           id: fileId,
           batchId,
-          projectId: input.projectId,
+          projectId: row.projectId,
           sourceType: 'ATTACHMENT',
           sourceRef: attachmentId,
-          filename: input.file.filename,
-          displayName: input.file.filename,
-          mimeType: input.file.mimeType,
-          size: input.file.size,
-          blobUrl: attachment.blobUrl,
+          filename,
+          displayName: filename,
+          mimeType,
+          size,
+          blobUrl: reference,
           isArchive: false,
           status: 'PENDING',
           step: '開始待ち',
@@ -505,35 +659,27 @@ export class ImportExternalMaterialUseCase {
         update: {},
       });
       if (
-        file.projectId !== input.projectId ||
+        file.projectId !== row.projectId ||
         file.batchId !== batchId ||
-        file.sourceType !== 'ATTACHMENT' ||
-        file.sourceRef !== attachmentId ||
         file.jobId !== jobId
-      ) {
+      )
         throw new Error(
           'External material ingestion file association is invalid',
         );
-      }
-      const updated = await tx.externalMaterialImport.updateMany({
+      await tx.externalMaterialImport.updateMany({
         where: {
           id: row.id,
-          projectId: input.projectId,
-          attachmentId,
-          ingestionBatchId: row.ingestionBatchId,
+          projectId: row.projectId,
+          status: { in: ['STORED', 'BATCHED'] },
         },
-        data: { ingestionBatchId: batchId, status: 'BATCHED', error: null },
+        data: {
+          attachmentId,
+          ingestionBatchId: batchId,
+          status: 'BATCHED',
+          error: null,
+        },
       });
-      if (updated.count !== 1 && row.ingestionBatchId === null) {
-        const current = await tx.externalMaterialImport.findUnique({
-          where: { id: row.id },
-        });
-        if (current?.ingestionBatchId !== batchId) {
-          throw new Error('External material import is bound to another batch');
-        }
-      }
     });
-
     return { attachmentId, batchId, fileId, jobId };
   }
 
@@ -544,33 +690,106 @@ export class ImportExternalMaterialUseCase {
     const job = await this.prisma.backgroundJob.findUnique({
       where: { id: artifacts.jobId },
     });
-    if (!job || job.projectId !== projectId) {
+    if (!job || job.projectId !== projectId)
       throw new Error(
         'External material root job was not found in the project',
       );
-    }
-    if (job.status === 'QUEUED') {
-      await this.jobs.startReserved(job.id);
-      return;
-    }
-    if (job.status === 'FAILED') {
-      await this.jobs.resumeIngestionParent(
+    if (job.status === 'QUEUED')
+      return void (await this.jobs.startReserved(job.id));
+    if (job.status === 'FAILED')
+      return void (await this.jobs.resumeIngestionParent(
         job.id,
         artifacts.fileId,
         projectId,
-      );
+      ));
+    if (job.status === 'RUNNING') {
+      const recovered = await this.jobs.recoverStaleRunning(job.id);
+      if (!recovered.recoveryTriggered)
+        await this.jobs.resumeIngestionParent(
+          job.id,
+          artifacts.fileId,
+          projectId,
+        );
     }
   }
 
+  private async ensureRootRecovery(row: ImportRow): Promise<void> {
+    if (!row.ingestionBatchId) return;
+    await this.startOrResumeRoot(
+      {
+        attachmentId:
+          row.attachmentId ?? this.stableId('external_attachment', row.id),
+        batchId: row.ingestionBatchId,
+        fileId: this.stableId('external_file', row.id),
+        jobId: this.rootJobId(row.id),
+      },
+      row.projectId,
+    );
+  }
+
+  private async startOrRecoverJob(jobId: string): Promise<void> {
+    const job = await this.prisma.backgroundJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job) throw new Error('External material verifier job was not found');
+    if (job.status === 'QUEUED') await this.jobs.startReserved(job.id);
+    else if (job.status === 'FAILED') await this.jobs.retry(job.id);
+    else if (job.status === 'RUNNING')
+      await this.jobs.recoverStaleRunning(job.id);
+  }
+
+  private assertVerifierJob(job: any, row: ImportRow): void {
+    const payload = (job?.payload ?? {}) as Record<string, unknown>;
+    if (
+      !job ||
+      job.id !== this.verifierJobId(row.id) ||
+      job.projectId !== row.projectId ||
+      job.parentJobId !== null ||
+      job.type !== 'KG_FINALIZE_EXTERNAL_MATERIAL' ||
+      payload.importId !== row.id
+    ) {
+      throw new Error('External material verifier job association is invalid');
+    }
+  }
+
+  private async findImport(
+    projectId: string,
+    importId: string,
+  ): Promise<ImportRow> {
+    const row = (await this.prisma.externalMaterialImport.findUnique({
+      where: { id: importId },
+    })) as ImportRow | null;
+    if (!row || row.projectId !== projectId)
+      throw new ValidationError('外部資料が見つかりません');
+    return row;
+  }
+
+  private async toResponse(row: ImportRow): Promise<ExternalMaterialResponse> {
+    const verifierJobId = this.verifierJobId(row.id);
+    const rootJobId = this.rootJobId(row.id);
+    const [verifier, root] = await Promise.all([
+      this.prisma.backgroundJob.findUnique({ where: { id: verifierJobId } }),
+      this.prisma.backgroundJob.findUnique({ where: { id: rootJobId } }),
+    ]);
+    return {
+      importId: row.id,
+      attachmentId: row.attachmentId,
+      batchId: row.ingestionBatchId,
+      verifierJobId: verifier?.id ?? null,
+      rootJobId: root?.id ?? null,
+      status: row.status,
+      error: row.error,
+    };
+  }
+
   private async markFailed(row: ImportRow, error: unknown): Promise<void> {
-    const message = this.safeError(error);
     await this.prisma.externalMaterialImport.updateMany({
       where: {
         id: row.id,
         projectId: row.projectId,
         status: { in: ['PENDING', 'STORED', 'FAILED'] },
       },
-      data: { status: 'FAILED', error: message },
+      data: { status: 'FAILED', error: this.safeError(error) },
     });
   }
 
@@ -586,6 +805,21 @@ export class ImportExternalMaterialUseCase {
         '[secret redacted]',
       )
       .slice(0, 2000);
+  }
+
+  private pathname(
+    row: Pick<ImportRow, 'projectId' | 'id' | 'filename'>,
+  ): string {
+    if (!row.filename) throw new Error('External material filename is missing');
+    return `external-materials/${row.projectId}/${row.id}/${this.safeFilename(row.filename)}`;
+  }
+
+  private verifierJobId(importId: string): string {
+    return this.stableId('external_verifier_job', importId);
+  }
+
+  private rootJobId(importId: string): string {
+    return this.stableId('external_root_job', importId);
   }
 
   private stableId(kind: string, importId: string): string {

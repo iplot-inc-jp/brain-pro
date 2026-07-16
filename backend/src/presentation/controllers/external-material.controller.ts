@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   Headers,
   HttpCode,
   HttpStatus,
@@ -22,8 +23,18 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsIn, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import {
+  EXTERNAL_MATERIAL_LEGACY_MAX_FILE_BYTES,
   EXTERNAL_MATERIAL_MAX_FILE_BYTES,
   ExternalMaterialResponse,
   ImportExternalMaterialUseCase,
@@ -39,7 +50,7 @@ import { ProjectAccessGuard } from '../guards/project-access.guard';
 // multipart framing adds a small amount to Content-Length. The file itself is still
 // independently hard-limited by Multer and by the use case's measured Buffer length.
 const MAX_MULTIPART_CONTENT_LENGTH =
-  EXTERNAL_MATERIAL_MAX_FILE_BYTES + 1024 * 1024;
+  EXTERNAL_MATERIAL_LEGACY_MAX_FILE_BYTES + 256 * 1024;
 
 export class ImportExternalMaterialDto {
   @ApiProperty({ description: '送信元とiproプロジェクトを含む外部冪等キー' })
@@ -71,6 +82,33 @@ export class ImportExternalMaterialDto {
   sourceFileId!: string;
 }
 
+export class PrepareExternalMaterialDto extends ImportExternalMaterialDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  filename!: string;
+
+  @ApiProperty({
+    enum: [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+  })
+  @IsString()
+  mimeType!: string;
+
+  @ApiProperty({ maximum: EXTERNAL_MATERIAL_MAX_FILE_BYTES })
+  @IsInt()
+  @Min(1)
+  @Max(EXTERNAL_MATERIAL_MAX_FILE_BYTES)
+  size!: number;
+
+  @ApiProperty({ description: '64桁のSHA-256（hex）' })
+  @Matches(/^[a-fA-F0-9]{64}$/u)
+  contentSha256!: string;
+}
+
 @ApiTags('外部資料')
 @ApiBearerAuth()
 @ProjectScopedAccess()
@@ -82,9 +120,87 @@ export class ExternalMaterialController {
     private readonly projectAccess: ProjectAccessService,
   ) {}
 
+  @Post('prepare')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: '資料メタデータを固定しprivate Blob直送URLを発行する',
+  })
+  async prepare(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: PrepareExternalMaterialDto,
+  ) {
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'edit');
+    return this.importExternalMaterial.prepare({
+      userId: user.id,
+      principal: user,
+      projectId,
+      idempotencyKey: dto.idempotencyKey,
+      sourcePlatform: dto.sourcePlatform,
+      sourceChannelId: dto.sourceChannelId,
+      sourceMessageId: dto.sourceMessageId,
+      sourceFileId: dto.sourceFileId,
+      file: {
+        filename: dto.filename,
+        mimeType: dto.mimeType,
+        size: dto.size,
+        contentSha256: dto.contentSha256,
+      },
+    });
+  }
+
+  @Post(':importId/finalize')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'private Blobを確認し、検証ジョブを冪等に開始する' })
+  async finalize(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Param('importId') importId: string,
+  ) {
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'edit');
+    return this.importExternalMaterial.finalize({
+      userId: user.id,
+      principal: user,
+      projectId,
+      importId,
+    });
+  }
+
+  @Get(':importId')
+  @ApiOperation({ summary: '資料登録・検証・バッチ化の状態を取得する' })
+  async status(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Param('importId') importId: string,
+  ) {
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'view');
+    return this.importExternalMaterial.getStatus({
+      principal: user,
+      projectId,
+      importId,
+    });
+  }
+
+  @Get(':importId/download-url')
+  @ApiOperation({
+    summary: 'private資料の短期署名付きダウンロードURLを発行する',
+  })
+  async download(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Param('importId') importId: string,
+  ) {
+    await this.projectAccess.assertPrincipalAccess(user, projectId, 'view');
+    return this.importExternalMaterial.getDownload({
+      principal: user,
+      projectId,
+      importId,
+    });
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'LINE / Slack の PDF・PPTX を冪等に資料登録する' })
+  @ApiOperation({ summary: '【非推奨】4MB以下の資料をサーバ経由で登録する' })
   @ApiParam({ name: 'projectId', description: 'Brain Pro プロジェクトID' })
   @ApiConsumes('multipart/form-data')
   @ApiResponse({
@@ -97,11 +213,11 @@ export class ExternalMaterialController {
   })
   @ApiResponse({ status: 403, description: 'プロジェクト編集権限がありません' })
   @ApiResponse({ status: 409, description: '冪等キーが別の資料へ使用済みです' })
-  @ApiResponse({ status: 413, description: 'ファイルが50MBを超えています' })
+  @ApiResponse({ status: 413, description: 'ファイルが4MBを超えています' })
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
-        fileSize: EXTERNAL_MATERIAL_MAX_FILE_BYTES,
+        fileSize: EXTERNAL_MATERIAL_LEGACY_MAX_FILE_BYTES,
         files: 1,
         fields: 5,
         fieldNameSize: 100,
@@ -129,7 +245,7 @@ export class ExternalMaterialController {
         declaredRequestBytes > MAX_MULTIPART_CONTENT_LENGTH)
     ) {
       throw new PayloadTooLargeException(
-        'アップロードは50MB以下にしてください',
+        '従来アップロードは4MB以下にしてください',
       );
     }
     if (!file) {

@@ -676,6 +676,11 @@ export class AttachmentController {
     if (!row) {
       throw new EntityNotFoundError('Attachment', id);
     }
+    // Chat-imported originals live in a dedicated private Blob store. Never expose
+    // their opaque reference or redirect URL through this legacy public endpoint.
+    if (row.folder === 'LINE・Slack') {
+      throw new NotFoundException('Attachment file not found');
+    }
 
     res.setHeader('Content-Type', row.mimeType || 'application/octet-stream');
     res.setHeader(

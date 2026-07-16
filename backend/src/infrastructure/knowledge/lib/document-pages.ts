@@ -32,6 +32,8 @@ const OFFICE_RELATIONSHIP_NAMESPACE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PACKAGE_RELATIONSHIP_NAMESPACE =
   "http://schemas.openxmlformats.org/package/2006/relationships";
+const CONTENT_TYPES_NAMESPACE =
+  "http://schemas.openxmlformats.org/package/2006/content-types";
 
 export interface DocumentPageProcessingLimits {
   maxInputBytes: number;
@@ -136,6 +138,84 @@ export interface PptxSlide {
   sourcePath: string;
   sourceText: string;
   images: PptxSlideImage[];
+}
+
+/** Finalize 時の軽量検証。ページを copy/save せず構造とページ数だけを確認する。 */
+export async function validatePdfStructure(
+  bytes: Buffer | Uint8Array,
+  limitOverrides: Partial<DocumentPageProcessingLimits> = {},
+): Promise<{ pageCount: number }> {
+  try {
+    const limits = resolveProcessingLimits("PDF", limitOverrides);
+    if (bytes.byteLength > limits.maxInputBytes) {
+      throw new DocumentPageParseError("PDF", "INPUT_BYTES_EXCEEDED");
+    }
+    if (
+      bytes.byteLength < 10 ||
+      !Buffer.from(bytes.subarray(0, 5)).equals(Buffer.from("%PDF-")) ||
+      !Buffer.from(bytes.subarray(Math.max(0, bytes.byteLength - 1024)))
+        .toString("latin1")
+        .includes("%%EOF")
+    ) {
+      throw new DocumentPageParseError("PDF");
+    }
+    const source = await PDFDocument.load(bytes, { updateMetadata: false });
+    const pageCount = source.getPageCount();
+    if (pageCount < 1) throw new DocumentPageParseError("PDF");
+    if (pageCount > limits.maxPdfPages) {
+      throw new DocumentPageParseError("PDF", "PDF_PAGE_COUNT_EXCEEDED");
+    }
+    return { pageCount };
+  } catch (error) {
+    if (error instanceof DocumentPageParseError) throw error;
+    throw new DocumentPageParseError("PDF", "INVALID_DOCUMENT", error);
+  }
+}
+
+/** Finalize 時の軽量 PPTX 検証。media/slide 内容の抽出前に strict ZIP と必須 OOXML を確認する。 */
+export function validatePptxStructure(
+  bytes: Buffer | Uint8Array,
+  limitOverrides: Partial<DocumentPageProcessingLimits> = {},
+): { slideCount: number } {
+  try {
+    const limits = resolveProcessingLimits("PPTX", limitOverrides);
+    if (bytes.byteLength > limits.maxInputBytes) {
+      throw new DocumentPageParseError("PPTX", "INPUT_BYTES_EXCEEDED");
+    }
+    const files = extractPptxParts(bytes, limits);
+    preflightPptxXmlParts(files, limits);
+    const contentTypes = files["[Content_Types].xml"];
+    const presentation = files["ppt/presentation.xml"];
+    const presentationRels = files["ppt/_rels/presentation.xml.rels"];
+    if (!contentTypes || !presentation || !presentationRels) {
+      throw new DocumentPageParseError("PPTX");
+    }
+    const contentTypeDocument = parseXml(
+      contentTypes,
+      "[Content_Types].xml",
+    );
+    const declaresPresentation = elementsByNamespaceOrLegacy(
+      contentTypeDocument,
+      CONTENT_TYPES_NAMESPACE,
+      "Override",
+    ).some(
+      (element) =>
+        element.getAttribute("PartName") === "/ppt/presentation.xml" &&
+        element
+          .getAttribute("ContentType")
+          ?.includes("presentationml.presentation.main+xml") === true,
+    );
+    if (!declaresPresentation) throw new DocumentPageParseError("PPTX");
+    const slideCount = orderedSlidePaths(files).length;
+    if (slideCount < 1) throw new DocumentPageParseError("PPTX");
+    if (slideCount > limits.maxPdfPages) {
+      throw new DocumentPageParseError("PPTX", "PDF_PAGE_COUNT_EXCEEDED");
+    }
+    return { slideCount };
+  } catch (error) {
+    if (error instanceof DocumentPageParseError) throw error;
+    throw new DocumentPageParseError("PPTX", "INVALID_DOCUMENT", error);
+  }
 }
 
 export async function splitPdfPages(
@@ -753,6 +833,7 @@ function extractPptxParts(
 
 function isAllowedPptxPart(path: string): boolean {
   return (
+    path === "[Content_Types].xml" ||
     path === "ppt/presentation.xml" ||
     path === "ppt/_rels/presentation.xml.rels" ||
     /^ppt\/slides\/slide\d+\.xml$/.test(path) ||
@@ -763,6 +844,7 @@ function isAllowedPptxPart(path: string): boolean {
 
 function isPptxXmlPart(path: string): boolean {
   return (
+    path === "[Content_Types].xml" ||
     path === "ppt/presentation.xml" ||
     path === "ppt/_rels/presentation.xml.rels" ||
     /^ppt\/slides\/slide\d+\.xml$/.test(path) ||

@@ -12,6 +12,7 @@ import { ImportMermaidUseCase } from '../../application/use-cases/data-object/im
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
 import { TrackerImportService } from './trackers/tracker-import.service';
 import { KnowledgeIngestionService } from '../knowledge/knowledge-ingestion.service';
+import { ImportExternalMaterialUseCase } from '../../application/use-cases/ingestion/import-external-material.use-case';
 
 /**
  * 非同期バックグラウンドジョブの起票・実行サービス。
@@ -45,6 +46,8 @@ export class JobService {
     // KnowledgeIngestionService ↔ JobService は相互参照（取り込みパイプラインが子ジョブを起票する）。
     @Inject(forwardRef(() => KnowledgeIngestionService))
     private readonly knowledgeIngestion: KnowledgeIngestionService,
+    @Inject(forwardRef(() => ImportExternalMaterialUseCase))
+    private readonly importExternalMaterial: ImportExternalMaterialUseCase,
   ) {}
 
   /**
@@ -798,6 +801,15 @@ export class JobService {
       }
 
       // ===== ナレッジ取り込みジョブ（1ファイル=1ジョブ） =====
+      case 'KG_FINALIZE_EXTERNAL_MATERIAL': {
+        const importId = this.requireString(payload.importId, 'payload.importId');
+        const result = await this.importExternalMaterial.verifyAndBatch(
+          importId,
+          job.id,
+        );
+        return { kind: 'KG_FINALIZE_EXTERNAL_MATERIAL', ...result };
+      }
+
       case 'KG_INGEST_FILE': {
         // FETCH→PREPROCESS→EXTRACT→MERGE。IngestionFile.status を各段で更新する。
         const fileId = this.requireString(payload.fileId, 'payload.fileId');

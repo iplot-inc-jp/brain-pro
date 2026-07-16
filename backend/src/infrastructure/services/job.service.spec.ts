@@ -49,6 +49,12 @@ function makeService() {
     resumePagedFile: jest.fn(async () => false),
     expandArchive: jest.fn(),
   };
+  const importExternalMaterial = {
+    verifyAndBatch: jest.fn(async () => ({
+      importId: 'import-1',
+      status: 'STORED',
+    })),
+  };
   const service = new JobService(
     prisma as never,
     qstash as never,
@@ -59,11 +65,35 @@ function makeService() {
     {} as never,
     {} as never,
     knowledgeIngestion as never,
+    importExternalMaterial as never,
   );
-  return { service, prisma, qstash, knowledgeIngestion };
+  return {
+    service,
+    prisma,
+    qstash,
+    knowledgeIngestion,
+    importExternalMaterial,
+  };
 }
 
 describe('JobService page ingestion jobs', () => {
+  it('dispatches the durable external-material verifier with its claimed job id', async () => {
+    const { service, importExternalMaterial } = makeService();
+
+    await service['dispatch'](
+      jobRow({
+        id: 'verifier-1',
+        type: 'KG_FINALIZE_EXTERNAL_MATERIAL',
+        payload: { importId: 'import-1' },
+      }),
+    );
+
+    expect(importExternalMaterial.verifyAndBatch).toHaveBeenCalledWith(
+      'import-1',
+      'verifier-1',
+    );
+  });
+
   it('persists parentJobId when enqueueing a child page job', async () => {
     const { service, prisma } = makeService();
 

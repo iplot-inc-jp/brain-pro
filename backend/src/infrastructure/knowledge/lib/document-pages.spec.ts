@@ -6,6 +6,8 @@ import {
   DocumentPageParseError,
   readPptxSlides,
   splitPdfPages,
+  validatePdfStructure,
+  validatePptxStructure,
 } from "./document-pages";
 
 function makePptx(files: Record<string, string | Uint8Array>): Buffer {
@@ -193,6 +195,58 @@ describe("splitPdfPages", () => {
       name: "DocumentPageParseError",
       code,
     });
+  });
+});
+
+describe("lightweight document structure validation", () => {
+  it("PDF はページをコピーせず header / EOF / page count を検証する", async () => {
+    const source = await PDFDocument.create();
+    source.addPage();
+    const bytes = await source.save();
+
+    await expect(validatePdfStructure(bytes)).resolves.toEqual({ pageCount: 1 });
+    await expect(
+      validatePdfStructure(Buffer.from("%PDF-1.7 renamed junk %%EOF")),
+    ).rejects.toMatchObject({ name: "DocumentPageParseError" });
+    await expect(
+      validatePdfStructure(bytes.subarray(0, bytes.length - 6)),
+    ).rejects.toMatchObject({ name: "DocumentPageParseError" });
+  });
+
+  it("PPTX は strict ZIP と必須 OOXML parts を bounded に検証する", () => {
+    const valid = makePptx({
+      "[Content_Types].xml": `
+        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+          <Override PartName="/ppt/presentation.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml" />
+        </Types>`,
+      "ppt/presentation.xml": `
+        <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+          <p:sldIdLst><p:sldId id="256" r:id="rId1" /></p:sldIdLst>
+        </p:presentation>`,
+      "ppt/_rels/presentation.xml.rels": `
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml" />
+        </Relationships>`,
+      "ppt/slides/slide1.xml": `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" />`,
+    });
+
+    expect(validatePptxStructure(valid)).toEqual({ slideCount: 1 });
+    expect(() =>
+      validatePptxStructure(
+        makePptx({
+          "file.txt": "renamed zip",
+        }),
+      ),
+    ).toThrow(expect.objectContaining({ name: "DocumentPageParseError" }));
+    expect(() =>
+      validatePptxStructure(
+        makePptx({
+          "ppt/presentation.xml": "<p:presentation />",
+        }),
+      ),
+    ).toThrow(expect.objectContaining({ name: "DocumentPageParseError" }));
   });
 });
 
