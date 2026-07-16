@@ -9,6 +9,7 @@ import { WhoIsOnline } from '@/components/presence/WhoIsOnline'
 import { LiveCursors } from '@/components/presence/LiveCursors'
 import { PresencePageSync } from '@/components/presence/PresencePageSync'
 import { RoomConnectionGuard } from '@/components/presence/RoomConnectionGuard'
+import { RagSummaryAction } from '@/components/rag/RagSummaryAction'
 
 /**
  * プロジェクト配下（/dashboard/projects/[projectId]/...）共通レイアウト。
@@ -32,6 +33,7 @@ export default function ProjectScopedLayout({
     <>
       <ReadOnlyBanner />
       {children}
+      {projectId ? <RagSummaryAction projectId={projectId} pathname={pathname} /> : null}
     </>
   )
 

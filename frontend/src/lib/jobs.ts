@@ -17,7 +17,8 @@ export type JobType =
   | 'AI_MERMAID_OBJECTMAP'
   | 'AI_MERMAID_FLOW'
   | 'AI_KPI'
-  | 'AI_ISSUE_SUGGEST';
+  | 'AI_ISSUE_SUGGEST'
+  | 'AI_RAG_SUMMARIZE';
 
 /**
  * 試行ごとの記録（BackgroundJobAttempt）。
