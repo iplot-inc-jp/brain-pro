@@ -103,6 +103,11 @@ describe('RagPromptService', () => {
     });
     expect(settings.history.map((row: Row) => row.version)).toEqual([3, 2, 1]);
     expect(settings.active.version).toBe(3);
+    expect(db.ragPromptVersion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: { createdBy: { select: { id: true, name: true, email: true } } },
+      }),
+    );
   });
 
   it.each([

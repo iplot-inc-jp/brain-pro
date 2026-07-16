@@ -39,6 +39,7 @@ describe('resolveRagRoute', () => {
 
   it('RAG索引ページ自身ではアクションを表示しない', () => {
     expect(resolveRagRoute(`${project}/rag`, 'p1')).toBeNull()
+    expect(resolveRagRoute(`${project}/rag/settings`, 'p1')).toBeNull()
   })
 })
 

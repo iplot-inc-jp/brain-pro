@@ -59,13 +59,16 @@ export class RagPromptService {
   }
 
   async getSettings(projectId: string, createdById?: string | null) {
-    const active = await this.getActive(projectId, createdById);
+    const ensuredActive = await this.getActive(projectId, createdById);
     const history = await this.prisma.ragPromptVersion.findMany({
       where: { projectId },
       orderBy: { version: 'desc' },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true } },
+      },
     });
     return {
-      active,
+      active: history.find((row) => row.isActive) ?? ensuredActive,
       history,
       defaults: {
         model: DEFAULT_RAG_MODEL,

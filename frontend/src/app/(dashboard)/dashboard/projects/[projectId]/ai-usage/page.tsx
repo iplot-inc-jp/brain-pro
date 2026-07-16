@@ -32,6 +32,7 @@ import {
   AREA_LABEL,
   formatTokens,
   formatUsd,
+  formatPromptVersionLabel,
   type LlmUsageSummary,
 } from '@/lib/llm-usage';
 import {
@@ -221,6 +222,11 @@ export default function AiUsagePage() {
                         {AREA_LABEL[r.area] ?? r.area}
                       </span>
                       <span className="font-mono text-gray-500">{r.model}</span>
+                      {r.promptVersion ? (
+                        <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-cyan-800">
+                          {formatPromptVersionLabel(r.promptVersion)}
+                        </span>
+                      ) : null}
                       <span className="text-gray-500">
                         in {formatTokens(r.inputTokens)} / out{' '}
                         {formatTokens(r.outputTokens)}
