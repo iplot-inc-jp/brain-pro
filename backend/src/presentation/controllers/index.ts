@@ -39,3 +39,4 @@ export * from './knowledge.controller';
 export * from './knowledge-settings.controller';
 export * from './invite.controller';
 export * from './ipro-webhook-source.controller';
+export * from './ipro-activity-webhook.controller';
