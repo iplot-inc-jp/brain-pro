@@ -14,12 +14,15 @@ export interface KnowledgePagePrismaClient {
       KnowledgeDocumentPage,
       'projectId' | 'knowledgeDocumentId'
     > | null>;
-    upsert(
-      args: Prisma.KnowledgeDocumentPageUpsertArgs,
+    create(
+      args: Prisma.KnowledgeDocumentPageCreateArgs,
     ): Promise<KnowledgeDocumentPage>;
     updateMany(
       args: Prisma.KnowledgeDocumentPageUpdateManyArgs,
     ): Promise<Prisma.BatchPayload>;
+    findFirst(
+      args: Prisma.KnowledgeDocumentPageFindFirstArgs,
+    ): Promise<KnowledgeDocumentPage | null>;
     findMany(
       args: Prisma.KnowledgeDocumentPageFindManyArgs,
     ): Promise<KnowledgeDocumentPage[]>;
@@ -93,31 +96,78 @@ export class KnowledgePageRepository {
     });
     if (existing) {
       this.assertPageParent(existing, input);
+      return this.refreshPending(input);
     }
 
-    const saved = await this.prisma.knowledgeDocumentPage.upsert({
+    try {
+      return await this.prisma.knowledgeDocumentPage.create({
+        data: {
+          projectId,
+          ingestionFileId,
+          knowledgeDocumentId,
+          pageNumber,
+          pageKind,
+          sourceText,
+          sourceBlobUrl,
+          status: 'PENDING',
+        },
+      });
+    } catch (error: unknown) {
+      if (!this.isUniqueConstraintError(error)) throw error;
+      return this.refreshPending(input);
+    }
+  }
+
+  private async refreshPending(
+    input: UpsertPendingKnowledgePageInput,
+  ): Promise<KnowledgeDocumentPage> {
+    const where = {
+      ingestionFileId: input.ingestionFileId,
+      pageNumber: input.pageNumber,
+      projectId: input.projectId,
+      knowledgeDocumentId: input.knowledgeDocumentId,
+    };
+    const { count } = await this.prisma.knowledgeDocumentPage.updateMany({
       where,
-      create: {
-        projectId,
-        ingestionFileId,
-        knowledgeDocumentId,
-        pageNumber,
-        pageKind,
-        sourceText,
-        sourceBlobUrl,
-        status: 'PENDING',
-      },
-      update: {
-        pageKind,
-        sourceText,
-        sourceBlobUrl,
+      data: {
+        pageKind: input.pageKind,
+        sourceText: input.sourceText,
+        sourceBlobUrl: input.sourceBlobUrl,
         status: 'PENDING',
         error: null,
         jobId: null,
       },
     });
-    this.assertPageParent(saved, input);
+    if (count !== 1) {
+      throw this.pageNotFound(input);
+    }
+
+    const saved = await this.prisma.knowledgeDocumentPage.findFirst({ where });
+    if (!saved) {
+      throw this.pageNotFound(input);
+    }
     return saved;
+  }
+
+  private isUniqueConstraintError(error: unknown): boolean {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      return error.code === 'P2002';
+    }
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'P2002'
+    );
+  }
+
+  private pageNotFound(
+    input: UpsertPendingKnowledgePageInput,
+  ): KnowledgePageNotFoundError {
+    return new KnowledgePageNotFoundError(
+      `${input.ingestionFileId}:${input.pageNumber}`,
+      input.projectId,
+    );
   }
 
   markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
@@ -200,10 +250,7 @@ export class KnowledgePageRepository {
       page.projectId !== input.projectId ||
       page.knowledgeDocumentId !== input.knowledgeDocumentId
     ) {
-      throw new KnowledgePageNotFoundError(
-        `${input.ingestionFileId}:${input.pageNumber}`,
-        input.projectId,
-      );
+      throw this.pageNotFound(input);
     }
   }
 }
