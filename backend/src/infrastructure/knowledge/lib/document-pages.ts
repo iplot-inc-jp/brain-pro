@@ -4,6 +4,7 @@ import {
   type Element as XmlElement,
 } from "@xmldom/xmldom";
 import { Inflate, strFromU8 } from "fflate";
+import { inflateRawSync } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
 import { SaxesParser } from "saxes";
 
@@ -623,10 +624,12 @@ function extractPptxParts(
   let totalXmlBytes = 0;
   for (const entry of extractedEntries) {
     if (!isPptxXmlPart(entry.name)) continue;
-    if (entry.uncompressedSize > limits.maxPptxXmlPartBytes) {
+    const boundedXmlBytes =
+      entry.compression === 0 ? entry.compressedSize : entry.uncompressedSize;
+    if (boundedXmlBytes > limits.maxPptxXmlPartBytes) {
       throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
     }
-    totalXmlBytes += entry.uncompressedSize;
+    totalXmlBytes += boundedXmlBytes;
     if (totalXmlBytes > limits.maxPptxXmlTotalBytes) {
       throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
     }
@@ -686,16 +689,24 @@ function extractPptxParts(
       const inputChunkBytes = 64 * 1024;
       if (entry.compression === 0) {
         if (entry.compressedSize === 0) onOutput(new Uint8Array(), true);
-        for (
-          let offset = entry.dataOffset;
-          offset < entry.dataEnd;
-          offset += inputChunkBytes
-        ) {
-          const end = Math.min(offset + inputChunkBytes, entry.dataEnd);
-          const chunk = bytes.subarray(offset, end);
-          compressedInputBytes += chunk.byteLength;
-          onOutput(chunk, end === entry.dataEnd);
+        if (entry.compressedSize > 0) {
+          const output = bytes.subarray(entry.dataOffset, entry.dataEnd);
+          compressedInputBytes = output.byteLength;
+          onOutput(output, true);
         }
+      } else if (isXmlEntry) {
+        const remainingXmlBytes =
+          limits.maxPptxXmlTotalBytes - totalXmlOutputBytes;
+        const maxXmlOutputBytes = Math.min(
+          limits.maxPptxXmlPartBytes,
+          remainingXmlBytes,
+        );
+        compressedInputBytes = entry.compressedSize;
+        const output = inflateRawSync(
+          bytes.subarray(entry.dataOffset, entry.dataEnd),
+          { maxOutputLength: maxXmlOutputBytes + 1 },
+        );
+        onOutput(output, true);
       } else {
         const inflate = new Inflate(onOutput);
         for (
@@ -711,6 +722,16 @@ function extractPptxParts(
       }
     } catch (error) {
       if (error instanceof DocumentPageParseError) throw error;
+      if (
+        isXmlEntry &&
+        entry.compression === 8 &&
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ERR_BUFFER_TOO_LARGE"
+      ) {
+        throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
+      }
       return zipIntegrityError("ZIP entry decompression failed", error);
     }
 

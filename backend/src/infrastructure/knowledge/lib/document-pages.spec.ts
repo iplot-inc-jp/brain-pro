@@ -1,5 +1,6 @@
 import { strToU8, Zip, ZipDeflate, zipSync } from "fflate";
 import { PDFDocument } from "pdf-lib";
+import * as zlib from "node:zlib";
 import {
   DEFAULT_DOCUMENT_PAGE_LIMITS,
   DocumentPageParseError,
@@ -714,6 +715,32 @@ describe("readPptxSlides", () => {
     expect(() => readWithXmlLimits(pptx, limits)).toThrow(
       expect.objectContaining({ code: "PPTX_XML_LIMIT_EXCEEDED" }),
     );
+  });
+
+  it("高圧縮 XML は native hard output cap で巨大出力を生成前に拒否する", () => {
+    const path = "ppt/slides/slide1.xml";
+    const pptx = mutateDeclaredUncompressedSize(
+      makePptx({ [path]: Buffer.alloc(20 * 1024 * 1024, 0x78) }),
+      path,
+      20,
+    );
+    const nativeInflate = jest.spyOn(zlib, "inflateRawSync");
+    const readWithXmlLimits = readPptxSlides as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof readPptxSlides>;
+
+    try {
+      expect(() =>
+        readWithXmlLimits(pptx, { maxPptxXmlPartBytes: 100 }),
+      ).toThrow(expect.objectContaining({ code: "PPTX_XML_LIMIT_EXCEEDED" }));
+      expect(nativeInflate).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.objectContaining({ maxOutputLength: 101 }),
+      );
+    } finally {
+      nativeInflate.mockRestore();
+    }
   });
 
   it("大きい media は XML part 上限の対象にしない", () => {
