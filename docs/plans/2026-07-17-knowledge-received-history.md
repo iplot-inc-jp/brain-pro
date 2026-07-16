@@ -273,4 +273,3 @@ Expected: clean intended changes only.
 **Step 4: Finish the branch**
 
 Use @requesting-code-review, @verification-before-completion, and @finishing-a-development-branch. Respect the current session rule that forbids subagents unless the user explicitly requests delegation; apply the code-review checklist directly if delegation remains unavailable.
-
