@@ -506,6 +506,7 @@ import { BlobStorageService } from './infrastructure/services/blob-storage.servi
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
 import { KnowledgePageRepository } from './infrastructure/knowledge/knowledge-page.repository';
+import { KnowledgeFolderService } from './infrastructure/knowledge-library/knowledge-folder.service';
 import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
@@ -1151,6 +1152,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     ExcelTaskImportService,
     KnowledgeIngestionService,
     KnowledgePageRepository,
+    KnowledgeFolderService,
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,
