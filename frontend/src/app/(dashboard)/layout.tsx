@@ -36,7 +36,6 @@ import {
   Map as MapIcon,
   ShieldAlert,
   FileSpreadsheet,
-  Landmark,
   History,
   ArrowLeftRight,
   Server,
@@ -45,8 +44,6 @@ import {
   Boxes,
   Table2,
   TableProperties,
-  Brain,
-  FileStack,
   BarChart3,
   Goal,
   Gauge,
@@ -55,13 +52,16 @@ import {
   Image as ImageIcon,
   Search,
   Loader2,
-  DatabaseZap,
   SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { CompanySwitcher } from '@/components/company/CompanySwitcher'
 import { meetingDocumentApi, type GoogleTabs } from '@/lib/meeting-documents'
+import {
+  buildKnowledgeNavigation,
+  type ProjectNavigationItem,
+} from '@/lib/knowledge-navigation'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
@@ -615,6 +615,7 @@ function collapsedLabel(name: string): string {
 
 // 縮小時のグループ小見出し（2〜3文字程度）
 const COLLAPSED_GROUP_LABELS: Record<string, string> = {
+  'ナレッジ': '知識',
   '共通マスタ': 'マスタ',
   '現状把握': '現状',
   '現状システム把握': '現シス',
@@ -666,8 +667,7 @@ function CollapsedGroupDivider({ label }: { label: string }) {
 // ====== ナビ項目（ページ内タブを子に持てる）======
 
 // 子（ページ内タブ）。href は親の href + ?tab=<tab>。
-type NavChild = { name: string; tab: string }
-type NavItem = { name: string; href: string; icon: LucideIcon; children?: NavChild[] }
+type NavItem = ProjectNavigationItem
 
 // 展開サイドバーのナビ項目。
 // - children を持たない場合は従来どおり単純な Link。
@@ -1166,27 +1166,10 @@ export default function DashboardLayout({
   const projectGroups = useMemo(() => {
     if (!projectId) return []
     const base = `/dashboard/projects/${projectId}`
+    const knowledgeNavigation = buildKnowledgeNavigation(projectId)
     return [
-      {
-        label: '背景・目的',
-        items: [
-          { name: '背景・目的', href: `${base}/background`, icon: Landmark },
-          { name: 'ナレッジ取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
-          { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
-          {
-            name: 'ナレッジ一覧編集',
-            href: `${base}/knowledge/list`,
-            icon: ListTodo,
-            children: [
-              { name: 'ノード', tab: 'nodes' },
-              { name: '文書', tab: 'documents' },
-              { name: '関係', tab: 'relations' },
-            ],
-          },
-          { name: 'ナレッジ設定', href: `${base}/knowledge/settings`, icon: Settings },
-          { name: 'RAG索引', href: `${base}/rag`, icon: DatabaseZap },
-        ],
-      },
+      knowledgeNavigation.background,
+      knowledgeNavigation.knowledge,
       {
         label: '共通マスタ',
         items: [
