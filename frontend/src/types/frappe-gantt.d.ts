@@ -28,11 +28,30 @@ declare module 'frappe-gantt' {
     | 'Half Day'
     | 'Day'
     | 'Week'
+    | 'Two Weeks'
     | 'Month'
     | 'Year';
 
+  export interface FrappeViewModeDefinition {
+    name: FrappeViewMode;
+    step: string;
+    padding?: string | [string, string];
+    column_width?: number;
+    date_format?: string;
+    snap_at?: string;
+    lower_text?:
+      | string
+      | ((date: Date, previous?: Date, language?: string) => string);
+    upper_text?:
+      | string
+      | ((date: Date, previous?: Date, language?: string) => string);
+    thick_line?: (date: Date) => boolean;
+    upper_text_frequency?: number;
+  }
+
   export interface FrappeGanttOptions {
     view_mode?: FrappeViewMode;
+    view_modes?: Array<FrappeViewMode | FrappeViewModeDefinition>;
     language?: string;
     /** 編集を全面無効化（true で読み取り専用）。 */
     readonly?: boolean;
@@ -79,4 +98,3 @@ declare module 'frappe-gantt' {
     update_options(options: FrappeGanttOptions): void;
   }
 }
-

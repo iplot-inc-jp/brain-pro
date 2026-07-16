@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -12,6 +12,12 @@ import { PageHeader } from '@/components/ui/page-header';
 import { HowToPanel } from '@/components/ui/how-to-panel';
 import { ManualButton } from '@/components/ui/manual-dialog';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import {
   Select,
@@ -62,10 +68,16 @@ import {
   mapTasksToFrappe,
   dateToYmd,
 } from '@/components/gantt/frappe-mapping';
+import {
+  GANTT_VIEW_MODES,
+  GANTT_ZOOM_OPTIONS,
+  frappeViewModeForZoom,
+  type GanttZoomMode,
+} from '@/components/gantt/gantt-view-modes';
+import { isGanttTaskDialogOpen } from '@/components/gantt/gantt-dialog-state';
 import type {
   FrappeGanttProps,
 } from '@/components/gantt/FrappeGantt';
-import type { FrappeViewMode } from 'frappe-gantt';
 
 // frappe-gantt は DOM 依存のクライアント専用ライブラリのため、SSR を切って動的読み込み。
 const FrappeGantt = dynamic<FrappeGanttProps>(
@@ -80,21 +92,7 @@ const FrappeGantt = dynamic<FrappeGanttProps>(
   }
 );
 
-type ZoomMode = 'day' | 'week' | 'month';
-
-const VIEW_MODE_MAP: Record<ZoomMode, FrappeViewMode> = {
-  day: 'Day',
-  week: 'Week',
-  month: 'Month',
-};
-
-const ZOOM_OPTIONS: { mode: ZoomMode; label: string; title: string }[] = [
-  { mode: 'day', label: '日', title: '日表示（拡大）' },
-  { mode: 'week', label: '週', title: '週表示' },
-  { mode: 'month', label: '月', title: '月表示（縮小）' },
-];
-
-// 右側の編集サイドバーのフォーム状態（tasks ページの編集ダイアログ FormState の簡易版）。
+// ガント編集モーダルのフォーム状態（tasks ページの編集ダイアログ FormState の簡易版）。
 type SidebarForm = {
   title: string;
   description: string;
@@ -148,7 +146,7 @@ export default function GanttPage() {
   const [me, setMe] = useState<{ name: string | null; avatarUrl: string | null } | null>(null);
   const [areaFilter, setAreaFilter] = useState('');
   const [loading, setLoading] = useState(true);
-  const [zoom, setZoom] = useState<ZoomMode>('day');
+  const [zoom, setZoom] = useState<GanttZoomMode>('day');
 
   // 依存関係パネルで編集対象に選ぶタスク。
   const [depTaskId, setDepTaskId] = useState<string>('');
@@ -164,15 +162,11 @@ export default function GanttPage() {
   // ガントカードの全画面表示トグル（他ページの全画面と同じ作法）。
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // バークリックで開く右側の編集サイドバー（ページ遷移はしない）。
+  // バーまたはツリー行のクリックで開く編集モーダル（ページ遷移はしない）。
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sidebarForm, setSidebarForm] = useState<SidebarForm>(emptySidebarForm);
   const [sidebarSaving, setSidebarSaving] = useState(false);
   const [sidebarError, setSidebarError] = useState<string | null>(null);
-  // バックドロップの即閉じ（バーをダブルクリックした 2 打目で閉じる等）対策:
-  // 開いた直後 300ms は閉じない＋mousedown がバックドロップ上で始まったときだけ閉じる。
-  const sidebarOpenedAtRef = useRef(0);
-  const backdropMouseDownRef = useRef(false);
 
   // ツリーの開閉状態は localStorage にプロジェクト毎キーで保持する。
   const wbsCollapseStorageKey = `gantt-wbs-collapsed:${projectId}`;
@@ -515,7 +509,7 @@ export default function GanttPage() {
     [fetchAll, canEdit]
   );
 
-  // バークリック（通常モード）: 右側の編集サイドバーを開き、フォームへ現在値を流し込む。
+  // バーまたはツリー行クリック: 編集モーダルを開き、フォームへ現在値を流し込む。
   const openTaskSidebar = useCallback(
     (id: string) => {
       const t = tasks.find((x) => x.id === id);
@@ -536,15 +530,12 @@ export default function GanttPage() {
         subProjectId: t.subProjectId ?? '',
       });
       setSidebarError(null);
-      sidebarOpenedAtRef.current = Date.now();
       setSelectedTaskId(id);
     },
     [tasks]
   );
 
-  const closeSidebar = useCallback(() => setSelectedTaskId(null), []);
-
-  // サイドバーの保存。成功後はタスク一覧を再取得してガントに反映し、サイドバーは開いたまま。
+  // モーダルの保存。成功後はタスク一覧を再取得してガントに反映し、モーダルは開いたまま。
   const handleSidebarSave = useCallback(async () => {
     if (!canEdit) return;
     if (!selectedTaskId) return;
@@ -584,7 +575,7 @@ export default function GanttPage() {
     }
   }, [selectedTaskId, sidebarForm, fetchAll, canEdit]);
 
-  // サイドバーで編集中のタスク（再取得後も tasks から引き直す）。消えていたら閉じる扱い。
+  // モーダルで編集中のタスク（再取得後も tasks から引き直す）。消えていたら閉じる扱い。
   const selectedTask = useMemo(
     () => tasks.find((t) => t.id === selectedTaskId) ?? null,
     [tasks, selectedTaskId]
@@ -659,7 +650,7 @@ export default function GanttPage() {
   );
 
   // ESC で全画面を解除（入力欄フォーカス中は無視）。他ページの全画面と同じ作法。
-  // 編集サイドバーが開いている間は、ESC はまずサイドバーを閉じる（下の effect）に譲る。
+  // 編集モーダルが開いている間は、EscをRadix Dialogへ譲る。
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -682,29 +673,6 @@ export default function GanttPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isFullscreen, selectedTaskId]);
-
-  // ESC で編集サイドバーを閉じる（入力欄フォーカス中は無視）。
-  useEffect(() => {
-    if (!selectedTaskId) return;
-    const onKey = (e: KeyboardEvent) => {
-      // Radix Select の Esc（ドロップダウンを閉じる）とは衝突させない。
-      if (e.defaultPrevented) return;
-      if (e.key !== 'Escape') return;
-      const t = e.target as HTMLElement | null;
-      const tag = t?.tagName;
-      if (
-        tag === 'INPUT' ||
-        tag === 'TEXTAREA' ||
-        tag === 'SELECT' ||
-        t?.isContentEditable
-      ) {
-        return;
-      }
-      setSelectedTaskId(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selectedTaskId]);
 
   // ---------------------------------------------------------------------
   // 依存関係パネル -> バックエンド
@@ -792,7 +760,7 @@ export default function GanttPage() {
           </span>
         }
         description="バーをドラッグで移動・端を掴んでリサイズ・進捗ハンドルで進捗を編集できます（変更は即保存）。バー右端の丸ハンドルをドラッグして相手のバーで離すと依存（矢印）が引け、矢印クリックで削除できます。左のタスクツリーで階層の展開/折りたたみもできます。"
-        help="左のタスクツリーと右のタイムラインで構成されます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1) バー右端に表示される丸い接続ハンドルをドラッグし、先行→後続の向きで相手のバーの上で離すと矢印（依存）が引ける、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。バークリックやツリーの行クリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
+        help="左のタスクツリーと右のタイムラインで構成されます。バーは開始日〜期限、塗りは進捗です。バーをドラッグすると開始日・期限が、端のハンドルで期間が、進捗ハンドルで進捗が更新され、すべて自動でサーバに保存されます。マウスでの依存編集は、(1) バー右端に表示される丸い接続ハンドルをドラッグし、先行→後続の向きで相手のバーの上で離すと矢印（依存）が引ける、(2) 矢印をクリックすると確認のうえ依存を削除、で行えます。バークリックやツリーの行クリックで中央に編集モーダルが開きます（コメント・添付は「詳細ページへ」リンクから）。親子関係（親タスク）は下のパネルのセレクトで変更できます。"
         backHref={`/dashboard/projects/${projectId}/tasks`}
         backLabel="タスク管理に戻る"
         actions={
@@ -804,10 +772,10 @@ export default function GanttPage() {
                 'バー上の進捗ハンドル（バー右端の小さなつまみ）をドラッグすると進捗％が更新されます。',
                 'バー右端の丸い接続ハンドルをドラッグし、後続タスクのバーの上で離すと依存（矢印）が引けます（ESC で中断）。',
                 '依存の矢印をクリックすると、確認のうえその依存を削除できます。',
-                '左のタスクツリーで親タスクの展開/折りたたみができ、折りたたんだ子孫はガントからも隠れます（行クリックで編集サイドバー）。',
+                '左のタスクツリーで親タスクの展開/折りたたみができ、折りたたんだ子孫はガントからも隠れます（行クリックで編集モーダル）。',
                 '親子関係は下のパネルの「親タスク」セレクトで変更できます（依存の追加・削除も同パネルで可能）。',
-                'バー本体のクリックで右側に編集サイドバーが開きます（コメント・添付は「詳細ページへ」リンクから）。',
-                '右上の「日 / 週 / 月」で目盛りの粒度を切り替えられます。',
+                'バー本体のクリックで中央に編集モーダルが開きます（コメント・添付は「詳細ページへ」リンクから）。',
+                'ガント上部の「日 / 1週 / 2週 / 1か月」で横軸の粒度を切り替えられます。全画面表示中も操作できます。',
               ]}
             />
             <ManualButton feature="tasks-gantt" />
@@ -878,23 +846,6 @@ export default function GanttPage() {
                 </select>
               </div>
             )}
-            <div className="flex items-center rounded-md border border-gray-300 bg-white p-0.5">
-              {ZOOM_OPTIONS.map((opt) => (
-                <button
-                  key={opt.mode}
-                  type="button"
-                  onClick={() => setZoom(opt.mode)}
-                  className={`flex items-center gap-1 rounded px-2.5 py-1 text-sm transition-colors ${
-                    zoom === opt.mode
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-600 hover:bg-gray-100'
-                  }`}
-                  title={opt.title}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
           </>
         }
       />
@@ -930,21 +881,43 @@ export default function GanttPage() {
                 : 'relative border-gray-200 bg-white'
             }
           >
-            {/* 全画面トグル（右上オーバーレイ）。 */}
-            <button
-              type="button"
-              onClick={() => setIsFullscreen((v) => !v)}
-              className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-              title={isFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
-              aria-pressed={isFullscreen}
-            >
-              {isFullscreen ? (
-                <Minimize2 className="h-4 w-4" />
-              ) : (
-                <Maximize2 className="h-4 w-4" />
-              )}
-              {isFullscreen ? '縮小' : '全画面'}
-            </button>
+            <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-slate-50 px-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-500">横軸</span>
+                <div className="flex items-center rounded border border-gray-300 bg-white p-0.5">
+                  {GANTT_ZOOM_OPTIONS.map((option) => (
+                    <button
+                      key={option.mode}
+                      type="button"
+                      onClick={() => setZoom(option.mode)}
+                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                        zoom === option.mode
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                      title={option.title}
+                      aria-pressed={zoom === option.mode}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsFullscreen((value) => !value)}
+                className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                title={isFullscreen ? '全画面を解除（Esc）' : '全画面表示'}
+                aria-pressed={isFullscreen}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+                {isFullscreen ? '縮小' : '全画面'}
+              </button>
+            </div>
 
             {/*
               左: WBS タスクツリーパネル（折りたたみ可） / 右: frappe-gantt。
@@ -1114,7 +1087,8 @@ export default function GanttPage() {
               >
                 <FrappeGantt
                   tasks={visibleFrappeTasks}
-                  viewMode={VIEW_MODE_MAP[zoom]}
+                  viewMode={frappeViewModeForZoom(zoom)}
+                  viewModes={GANTT_VIEW_MODES}
                   onDateChange={handleDateChange}
                   onProgressChange={handleProgressChange}
                   onClick={openTaskSidebar}
@@ -1269,46 +1243,22 @@ export default function GanttPage() {
         </>
       )}
 
-      {/*
-        右側のタスク編集サイドバー（バークリックで開く）。
-        全画面コンテナが fixed inset-0 z-50 なので、サイドバーは z-[55]/z-[60] で
-        その上に重ね、全画面中でも使えるようにする（Select のドロップダウンは z-[70]）。
-        背景クリック / ✕ / Esc で閉じる。
-      */}
-      {selectedTask && (
-        <>
-          {/*
-            背景クリックで閉じる薄いオーバーレイ。
-            - mousedown がオーバーレイ上で始まったクリックだけを閉じる対象にする
-              （サイドバー内で押してドラッグし外で離した等では閉じない）。
-            - バーをダブルクリックしたときの 2 打目が開いた直後のオーバーレイに
-              落ちて即閉じしないよう、開後 300ms のクリックは無視する。
-          */}
-          <div
-            className="fixed inset-0 z-[55] bg-black/20"
-            onMouseDown={() => {
-              backdropMouseDownRef.current = true;
-            }}
-            onClick={() => {
-              const started = backdropMouseDownRef.current;
-              backdropMouseDownRef.current = false;
-              if (!started) return;
-              if (Date.now() - sidebarOpenedAtRef.current < 300) return;
-              closeSidebar();
-            }}
-            aria-hidden="true"
-          />
-          <aside
-            className="fixed inset-y-0 right-0 z-[60] flex w-96 max-w-[90vw] flex-col border-l border-gray-200 bg-white shadow-xl"
-            role="dialog"
-            aria-label="タスクを編集"
-          >
-            {/* ヘッダ: タイトル・詳細ページへのリンク・閉じる */}
-            <div className="flex items-start justify-between gap-2 border-b border-gray-200 px-4 py-3">
+      <Dialog
+        open={isGanttTaskDialogOpen(selectedTaskId)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTaskId(null);
+        }}
+      >
+        {selectedTask ? (
+          <DialogContent className="z-[70] flex max-h-[90vh] max-w-2xl flex-col gap-0 overflow-hidden border-gray-200 bg-white p-0">
+            <DialogDescription className="sr-only">
+              ガント上で選択したタスクの内容を編集します。
+            </DialogDescription>
+            <div className="flex items-start justify-between gap-2 border-b border-gray-200 px-5 py-4 pr-12">
               <div className="min-w-0">
-                <h2 className="truncate text-base font-semibold text-gray-800">
+                <DialogTitle className="truncate text-base font-semibold text-gray-800">
                   {selectedTask.title}
-                </h2>
+                </DialogTitle>
                 <Link
                   href={`/dashboard/projects/${projectId}/tasks/${selectedTask.id}`}
                   className="mt-0.5 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
@@ -1317,15 +1267,6 @@ export default function GanttPage() {
                   詳細ページへ（コメント・添付はこちら）
                 </Link>
               </div>
-              <button
-                type="button"
-                onClick={closeSidebar}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                title="閉じる（Esc）"
-                aria-label="閉じる"
-              >
-                <X className="h-4 w-4" />
-              </button>
             </div>
 
             {/* 編集フォーム */}
@@ -1569,26 +1510,31 @@ export default function GanttPage() {
               </div>
             </div>
 
-            {/* フッタ: 保存（成功後も開いたまま、ガントへ即反映） */}
-            <div className="border-t border-gray-200 px-4 py-3">
+            <div className="border-t border-gray-200 px-5 py-3">
               {sidebarError && (
                 <p className="mb-2 text-sm text-red-600">{sidebarError}</p>
               )}
-              <Button
-                type="button"
-                onClick={handleSidebarSave}
-                disabled={sidebarSaving}
-                className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700"
-              >
-                {sidebarSaving && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                保存
-              </Button>
+              {canEdit ? (
+                <Button
+                  type="button"
+                  onClick={handleSidebarSave}
+                  disabled={sidebarSaving}
+                  className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700"
+                >
+                  {sidebarSaving && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
+                  保存
+                </Button>
+              ) : (
+                <p className="text-center text-xs text-gray-400">
+                  閲覧権限では編集内容を保存できません
+                </p>
+              )}
             </div>
-          </aside>
-        </>
-      )}
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

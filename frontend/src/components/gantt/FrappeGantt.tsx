@@ -22,6 +22,7 @@ import { useEffect, useRef } from 'react';
 import Gantt, {
   type FrappeTask,
   type FrappeViewMode,
+  type FrappeViewModeDefinition,
 } from './vendor/index';
 // frappe-gantt の package.json exports は CSS サブパスを公開しないため、
 // dist/frappe-gantt.css をローカルにベンダリングして読み込む（MIT）。
@@ -34,6 +35,7 @@ export type { FrappeTask, FrappeViewMode };
 export interface FrappeGanttProps {
   tasks: FrappeTask[];
   viewMode: FrappeViewMode;
+  viewModes?: readonly (FrappeViewMode | FrappeViewModeDefinition)[];
   /** バー本体ドラッグ／端リサイズ確定時。start/end はその日 0:00 / 終了日。 */
   onDateChange: (id: string, start: Date, end: Date) => void;
   /** 進捗ハンドル操作時（0..100）。 */
@@ -49,6 +51,7 @@ export interface FrappeGanttProps {
 export default function FrappeGantt({
   tasks,
   viewMode,
+  viewModes,
   onDateChange,
   onProgressChange,
   onClick,
@@ -88,6 +91,7 @@ export default function FrappeGantt({
 
     const gantt = new Gantt(el, initial, {
       view_mode: viewMode,
+      view_modes: viewModes ? [...viewModes] : undefined,
       language: 'ja',
       bar_height: 22,
       padding: 14,
