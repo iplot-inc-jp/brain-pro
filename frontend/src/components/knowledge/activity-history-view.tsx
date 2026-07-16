@@ -256,6 +256,7 @@ export function ActivityHistoryView({
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [retryCursor, setRetryCursor] = useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
   const [selected, setSelected] = useState<ActivityHistoryItem | null>(null)
   const [context, setContext] = useState<ActivityChatContext | null>(null)
@@ -265,7 +266,8 @@ export function ActivityHistoryView({
   const load = useCallback(async (cursor?: string) => {
     const append = Boolean(cursor)
     append ? setLoadingMore(true) : setLoading(true)
-    if (!append) setError(null)
+    setError(null)
+    setRetryCursor(null)
     try {
       const page = await iproActivityApi.search(projectId, kind, filters, cursor)
       setItems((current) => append ? [...current, ...page.items] : page.items)
@@ -281,6 +283,7 @@ export function ActivityHistoryView({
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '受信履歴を取得できませんでした。'
       setError(message)
+      setRetryCursor(cursor ?? null)
     } finally {
       setLoading(false)
       setLoadingMore(false)
@@ -532,7 +535,23 @@ export function ActivityHistoryView({
                     </button>
                   )
                 })}
-                {nextCursor && (
+                {error && (
+                  <div className="border-t border-rose-200 bg-rose-50/60 px-4 py-4 text-center">
+                    <p className="text-sm text-rose-800">{error}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 bg-white"
+                      disabled={loadingMore}
+                      onClick={() => void load(retryCursor ?? undefined)}
+                    >
+                      {loadingMore && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                      {retryCursor ? '追加を再試行' : '再読み込み'}
+                    </Button>
+                  </div>
+                )}
+                {nextCursor && !error && (
                   <div className="px-4 py-4 text-center">
                     <Button
                       type="button"

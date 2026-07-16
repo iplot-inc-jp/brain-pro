@@ -40,7 +40,7 @@ function item(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   mocks.search.mockResolvedValue({ items: [], nextCursor: null })
   mocks.facets.mockResolvedValue({ sources: [], platforms: [], rooms: [], authors: [] })
   mocks.context.mockResolvedValue({ selected: { id: 'message-1', content: '選択発言' }, before: [], after: [] })
@@ -124,6 +124,21 @@ describe('ActivityHistoryView', () => {
     expect(await screen.findByText('次の受信')).toBeInTheDocument()
     expect(screen.getByText('最初の受信')).toBeInTheDocument()
     expect(mocks.search.mock.calls[1][3]).toBe('next-1')
+  })
+
+  it('keeps current results and offers a retry when cursor loading fails', async () => {
+    mocks.search
+      .mockResolvedValueOnce({ items: [item({ id: 'first', content: '保持する受信' })], nextCursor: 'next-1' })
+      .mockRejectedValueOnce(new Error('続きの受信履歴を取得できませんでした。'))
+      .mockResolvedValueOnce({ items: [item({ id: 'second', content: '再試行後の受信' })], nextCursor: null })
+
+    render(<ActivityHistoryView projectId="project-1" kind="chat" />)
+    expect(await screen.findByText('保持する受信')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    expect(await screen.findByText('続きの受信履歴を取得できませんでした。')).toBeInTheDocument()
+    expect(screen.getByText('保持する受信')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '追加を再試行' }))
+    expect(await screen.findByText('再試行後の受信')).toBeInTheDocument()
   })
 
   it('shows actionable empty and error states', async () => {
