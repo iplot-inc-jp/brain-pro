@@ -8,6 +8,12 @@ import { PrismaService } from '../persistence/prisma/prisma.service';
 
 export interface KnowledgePagePrismaClient {
   knowledgeDocumentPage: {
+    findUnique(
+      args: Prisma.KnowledgeDocumentPageFindUniqueArgs,
+    ): Promise<Pick<
+      KnowledgeDocumentPage,
+      'projectId' | 'knowledgeDocumentId'
+    > | null>;
     upsert(
       args: Prisma.KnowledgeDocumentPageUpsertArgs,
     ): Promise<KnowledgeDocumentPage>;
@@ -66,7 +72,9 @@ export class KnowledgePageRepository {
     private readonly prisma: KnowledgePagePrismaClient,
   ) {}
 
-  upsertPending(input: UpsertPendingKnowledgePageInput) {
+  async upsertPending(
+    input: UpsertPendingKnowledgePageInput,
+  ): Promise<KnowledgeDocumentPage> {
     const {
       projectId,
       ingestionFileId,
@@ -76,11 +84,19 @@ export class KnowledgePageRepository {
       sourceText,
       sourceBlobUrl,
     } = input;
+    const where = {
+      ingestionFileId_pageNumber: { ingestionFileId, pageNumber },
+    };
+    const existing = await this.prisma.knowledgeDocumentPage.findUnique({
+      where,
+      select: { projectId: true, knowledgeDocumentId: true },
+    });
+    if (existing) {
+      this.assertPageParent(existing, input);
+    }
 
-    return this.prisma.knowledgeDocumentPage.upsert({
-      where: {
-        ingestionFileId_pageNumber: { ingestionFileId, pageNumber },
-      },
+    const saved = await this.prisma.knowledgeDocumentPage.upsert({
+      where,
       create: {
         projectId,
         ingestionFileId,
@@ -92,8 +108,6 @@ export class KnowledgePageRepository {
         status: 'PENDING',
       },
       update: {
-        projectId,
-        knowledgeDocumentId,
         pageKind,
         sourceText,
         sourceBlobUrl,
@@ -102,6 +116,8 @@ export class KnowledgePageRepository {
         jobId: null,
       },
     });
+    this.assertPageParent(saved, input);
+    return saved;
   }
 
   markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
@@ -170,6 +186,24 @@ export class KnowledgePageRepository {
     });
     if (count !== 1) {
       throw new KnowledgePageNotFoundError(id, projectId);
+    }
+  }
+
+  private assertPageParent(
+    page: Pick<
+      KnowledgeDocumentPage,
+      'projectId' | 'knowledgeDocumentId'
+    >,
+    input: UpsertPendingKnowledgePageInput,
+  ): void {
+    if (
+      page.projectId !== input.projectId ||
+      page.knowledgeDocumentId !== input.knowledgeDocumentId
+    ) {
+      throw new KnowledgePageNotFoundError(
+        `${input.ingestionFileId}:${input.pageNumber}`,
+        input.projectId,
+      );
     }
   }
 }

@@ -24,7 +24,14 @@ const pageRow: KnowledgeDocumentPage = {
   updatedAt: new Date('2026-07-16T00:00:00.000Z'),
 };
 
+type PageParent = Pick<
+  KnowledgeDocumentPage,
+  'projectId' | 'knowledgeDocumentId'
+>;
+
 interface MockOptions {
+  existingPage?: PageParent | null;
+  upsertResult?: KnowledgeDocumentPage;
   updateCount?: number;
   totalCount?: number;
   remainingCount?: number;
@@ -32,6 +39,8 @@ interface MockOptions {
 }
 
 function makePrisma({
+  existingPage = null,
+  upsertResult = pageRow,
   updateCount = 1,
   totalCount = 1,
   remainingCount = 0,
@@ -39,10 +48,14 @@ function makePrisma({
 }: MockOptions = {}) {
   return {
     knowledgeDocumentPage: {
+      findUnique: jest.fn<
+        Promise<PageParent | null>,
+        [Prisma.KnowledgeDocumentPageFindUniqueArgs]
+      >(async () => existingPage),
       upsert: jest.fn<
         Promise<KnowledgeDocumentPage>,
         [Prisma.KnowledgeDocumentPageUpsertArgs]
-      >(async () => pageRow),
+      >(async () => upsertResult),
       updateMany: jest.fn<
         Promise<Prisma.BatchPayload>,
         [Prisma.KnowledgeDocumentPageUpdateManyArgs]
@@ -78,6 +91,15 @@ describe('KnowledgePageRepository', () => {
       }),
     ).resolves.toEqual(pageRow);
 
+    expect(prisma.knowledgeDocumentPage.findUnique).toHaveBeenCalledWith({
+      where: {
+        ingestionFileId_pageNumber: {
+          ingestionFileId: 'f1',
+          pageNumber: 2,
+        },
+      },
+      select: { projectId: true, knowledgeDocumentId: true },
+    });
     expect(prisma.knowledgeDocumentPage.upsert).toHaveBeenCalledTimes(1);
     const args = prisma.knowledgeDocumentPage.upsert.mock.calls[0][0];
     expect(args.where).toEqual({
@@ -97,8 +119,6 @@ describe('KnowledgePageRepository', () => {
       status: 'PENDING',
     });
     expect(args.update).toEqual({
-      projectId: 'p1',
-      knowledgeDocumentId: 'd1',
       pageKind: 'PDF_PAGE',
       sourceText: null,
       sourceBlobUrl: 'blob://page-2',
@@ -110,6 +130,95 @@ describe('KnowledgePageRepository', () => {
     expect(args.update).not.toHaveProperty('contentText');
     expect(args.update).not.toHaveProperty('summary');
     expect(args.update).not.toHaveProperty('extractionResult');
+    expect(args.update).not.toHaveProperty('projectId');
+    expect(args.update).not.toHaveProperty('knowledgeDocumentId');
+  });
+
+  it('refreshes an existing same-project page without changing its tenant or document parent', async () => {
+    const prisma = makePrisma({
+      existingPage: { projectId: 'p1', knowledgeDocumentId: 'd1' },
+    });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.upsertPending({
+        projectId: 'p1',
+        ingestionFileId: 'f1',
+        knowledgeDocumentId: 'd1',
+        pageNumber: 2,
+        pageKind: 'PDF_PAGE',
+        sourceText: 'refreshed source',
+        sourceBlobUrl: 'blob://refreshed-page-2',
+      }),
+    ).resolves.toEqual(pageRow);
+
+    const update = prisma.knowledgeDocumentPage.upsert.mock.calls[0][0].update;
+    expect(update).toEqual({
+      pageKind: 'PDF_PAGE',
+      sourceText: 'refreshed source',
+      sourceBlobUrl: 'blob://refreshed-page-2',
+      status: 'PENDING',
+      error: null,
+      jobId: null,
+    });
+    expect(update).not.toHaveProperty('projectId');
+    expect(update).not.toHaveProperty('knowledgeDocumentId');
+  });
+
+  it.each([
+    [
+      'another project',
+      { projectId: 'p2', knowledgeDocumentId: 'd2' },
+    ],
+    [
+      'another document parent',
+      { projectId: 'p1', knowledgeDocumentId: 'other-document' },
+    ],
+  ])(
+    'rejects an existing composite page owned by %s without mutation',
+    async (_reason, existingPage) => {
+      const prisma = makePrisma({ existingPage });
+      const repo = new KnowledgePageRepository(prisma);
+
+      await expect(
+        repo.upsertPending({
+          projectId: 'p1',
+          ingestionFileId: 'f1',
+          knowledgeDocumentId: 'd1',
+          pageNumber: 2,
+          pageKind: 'PDF_PAGE',
+          sourceText: null,
+          sourceBlobUrl: 'blob://page-2',
+        }),
+      ).rejects.toThrow(
+        'Knowledge page f1:2 was not found in project p1',
+      );
+      expect(prisma.knowledgeDocumentPage.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not return a row from another project if a composite conflict races the preflight', async () => {
+    const prisma = makePrisma({
+      existingPage: null,
+      upsertResult: {
+        ...pageRow,
+        projectId: 'p2',
+        knowledgeDocumentId: 'd2',
+      },
+    });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.upsertPending({
+        projectId: 'p1',
+        ingestionFileId: 'f1',
+        knowledgeDocumentId: 'd1',
+        pageNumber: 2,
+        pageKind: 'PDF_PAGE',
+        sourceText: null,
+        sourceBlobUrl: 'blob://page-2',
+      }),
+    ).rejects.toThrow('Knowledge page f1:2 was not found in project p1');
   });
 
   it('scopes processing state and direct child job updates by project', async () => {
