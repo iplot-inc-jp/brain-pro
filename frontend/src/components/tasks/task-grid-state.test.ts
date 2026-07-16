@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { TASK_GRID_COLUMNS, isTextOverflowing } from './task-grid-state'
+import {
+  TASK_GRID_COLUMNS,
+  isTextOverflowing,
+  taskGridAriaSort,
+} from './task-grid-state'
 
 describe('isTextOverflowing', () => {
   it('横幅を超えた文字だけを省略扱いにする', () => {
@@ -34,5 +38,11 @@ describe('TASK_GRID_COLUMNS', () => {
       id: 'actions',
       enableResizing: false,
     })
+  })
+
+  it('選択中の列だけソート方向を読み上げる', () => {
+    expect(taskGridAriaSort('title', 'title', 'asc')).toBe('ascending')
+    expect(taskGridAriaSort('title', 'title', 'desc')).toBe('descending')
+    expect(taskGridAriaSort('status', 'title', 'asc')).toBeUndefined()
   })
 })

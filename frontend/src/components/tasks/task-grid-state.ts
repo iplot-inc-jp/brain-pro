@@ -37,3 +37,12 @@ export const TASK_GRID_COLUMNS: readonly TaskGridColumnSpec[] = [
 export function isTextOverflowing(element: Pick<HTMLElement, 'clientWidth' | 'scrollWidth'>): boolean {
   return element.scrollWidth > element.clientWidth
 }
+
+export function taskGridAriaSort(
+  columnId: string,
+  sortKey: string | null,
+  sortDir: 'asc' | 'desc',
+): 'ascending' | 'descending' | undefined {
+  if (columnId !== sortKey) return undefined
+  return sortDir === 'asc' ? 'ascending' : 'descending'
+}

@@ -34,6 +34,16 @@ import { ExcelAiImportDialog } from '@/components/excel-ai-import-dialog';
 import { ImportSourceDialog, type ImportSource } from '@/components/import-source-dialog';
 import { useReadOnly } from '@/components/read-only-context';
 import { FeatureSectionIo } from '@/components/io/FeatureSectionIo';
+import { OverflowTooltipText } from '@/components/tasks/OverflowTooltipText';
+import {
+  TASK_GRID_COLUMNS,
+  taskGridAriaSort,
+} from '@/components/tasks/task-grid-state';
+import {
+  getCoreRowModel,
+  useReactTable,
+  type ColumnDef,
+} from '@tanstack/react-table';
 import {
   DragDropContext,
   Droppable,
@@ -137,6 +147,26 @@ const emptyForm: FormState = {
 };
 
 const NONE = '__none__'; // Select は空文字を value にできないためのプレースホルダ
+
+const taskGridColumnDefs: ColumnDef<TaskTreeNode>[] = TASK_GRID_COLUMNS.map(
+  (column) => ({
+    id: column.id,
+    header: column.label,
+    size: column.size,
+    minSize: column.minSize,
+    maxSize: column.maxSize,
+    enableResizing: column.enableResizing,
+  }),
+);
+
+const sortableTaskGridColumns = new Set<TaskSortKey>([
+  'status',
+  'priority',
+  'title',
+  'assignee',
+  'dueDate',
+  'progress',
+]);
 
 export default function TasksPage() {
   const params = useParams();
@@ -375,6 +405,13 @@ export default function TasksPage() {
       orderedNodes.filter((n) => visibleIds === null || visibleIds.has(n.id)),
     [orderedNodes, visibleIds]
   );
+
+  const taskGrid = useReactTable({
+    data: rows,
+    columns: taskGridColumnDefs,
+    getCoreRowModel: getCoreRowModel(),
+    columnResizeMode: 'onChange',
+  });
 
   // ボード用：表示中タスク（フィルタ後）を状態ごとにグルーピング。
   // サブタスクも含めフラットに、それぞれの状態カラムへ並べる。
@@ -862,52 +899,86 @@ export default function TasksPage() {
         />
       ) : (
         <Card className="bg-white border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs font-medium text-gray-500">
-                  {(
-                    [
-                      { key: 'status', label: '状態', cls: 'w-[120px]' },
-                      { key: 'priority', label: '種別/優先', cls: 'w-[90px]' },
-                      { key: 'title', label: 'タイトル', cls: '' },
-                      { key: 'assignee', label: '担当', cls: 'w-[150px]' },
-                      { key: 'dueDate', label: '期限', cls: 'w-[110px]' },
-                      { key: 'progress', label: '進捗', cls: 'w-[140px]' },
-                    ] as { key: TaskSortKey; label: string; cls: string }[]
-                  ).map((col) => (
-                    <th key={col.key} className={`px-3 py-2 ${col.cls}`}>
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(col.key)}
-                        className="inline-flex items-center gap-1 hover:text-gray-800"
-                        title={
-                          sortKey === col.key
-                            ? sortDir === 'asc'
-                              ? '降順に切り替え'
-                              : 'ソート解除（手動順に戻す）'
-                            : `${col.label}で昇順ソート`
-                        }
-                      >
-                        {col.label}
-                        {sortKey === col.key ? (
-                          sortDir === 'asc' ? (
-                            <ArrowUp className="h-3 w-3 text-blue-600" />
+          <div className="max-w-full overflow-x-auto">
+            <table
+              className="table-fixed text-sm"
+              style={{ width: taskGrid.getTotalSize() }}
+            >
+              <thead className="sticky top-0 z-10">
+                {taskGrid.getHeaderGroups().map((headerGroup) => (
+                  <tr
+                    key={headerGroup.id}
+                    className="border-b border-gray-200 bg-slate-50 text-left text-xs font-medium text-gray-500"
+                  >
+                    {headerGroup.headers.map((header) => {
+                      const columnId = header.column.id;
+                      const key = columnId as TaskSortKey;
+                      const sortable = sortableTaskGridColumns.has(key);
+                      const label = String(header.column.columnDef.header ?? '');
+                      return (
+                        <th
+                          key={header.id}
+                          className="group/header relative h-9 border-r border-gray-200 px-3 last:border-r-0"
+                          style={{ width: header.getSize() }}
+                          aria-sort={
+                            sortable
+                              ? taskGridAriaSort(key, sortKey, sortDir)
+                              : undefined
+                          }
+                        >
+                          {sortable ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(key)}
+                              className="inline-flex max-w-full items-center gap-1 hover:text-gray-800"
+                              title={
+                                sortKey === key
+                                  ? sortDir === 'asc'
+                                    ? '降順に切り替え'
+                                    : 'ソート解除（手動順に戻す）'
+                                  : `${label}で昇順ソート`
+                              }
+                            >
+                              <span className="truncate">{label}</span>
+                              {sortKey === key ? (
+                                sortDir === 'asc' ? (
+                                  <ArrowUp className="h-3 w-3 shrink-0 text-blue-600" />
+                                ) : (
+                                  <ArrowDown className="h-3 w-3 shrink-0 text-blue-600" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 shrink-0 opacity-40" />
+                              )}
+                            </button>
                           ) : (
-                            <ArrowDown className="h-3 w-3 text-blue-600" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 opacity-40" />
-                        )}
-                      </button>
-                    </th>
-                  ))}
-                  <th className="px-3 py-2 w-[90px]">種別</th>
-                  <th className="px-3 py-2 w-[140px]">エピック</th>
-                  <th className="px-3 py-2 w-[60px] text-right">SP</th>
-                  <th className="px-3 py-2 w-[120px]">スプリント</th>
-                  <th className="px-3 py-2 w-[100px] text-right">操作</th>
-                </tr>
+                            <span
+                              className={
+                                columnId === 'storyPoints' || columnId === 'actions'
+                                  ? 'block text-right'
+                                  : ''
+                              }
+                            >
+                              {label}
+                            </span>
+                          )}
+                          {header.column.getCanResize() ? (
+                            <button
+                              type="button"
+                              aria-label={`${label}列の幅を変更`}
+                              title="ドラッグで列幅変更・ダブルクリックで初期幅に戻す"
+                              onMouseDown={header.getResizeHandler()}
+                              onTouchStart={header.getResizeHandler()}
+                              onDoubleClick={() => header.column.resetSize()}
+                              className={`absolute -right-1 top-0 z-10 h-full w-2 cursor-col-resize touch-none select-none after:absolute after:left-1/2 after:top-1 after:h-7 after:w-px after:bg-gray-300 hover:after:bg-blue-500 ${
+                                header.column.getIsResizing() ? 'after:bg-blue-600' : ''
+                              }`}
+                            />
+                          ) : null}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                ))}
               </thead>
               <tbody>
                 {rows.length === 0 ? (
@@ -930,15 +1001,29 @@ export default function TasksPage() {
                         ? roleNameById.get(node.assigneeRoleId)
                         : '') ||
                       '';
+                    const predecessorTitles = (
+                      depsBySuccessor.get(node.id) ?? []
+                    ).map(
+                      (dependency) =>
+                        taskTitleById.get(dependency.predecessorId) ?? '?',
+                    );
+                    const originNode = node.issueNodeId
+                      ? issueNodeById.get(node.issueNodeId)
+                      : undefined;
+                    const originLabel =
+                      originNode?.label ?? node.issueNodeLabel ?? null;
+                    const originKind =
+                      originNode?.kind ?? node.issueNodeKind ?? null;
                     return (
                       <tr
                         key={node.id}
-                        className="group border-b border-gray-100 hover:bg-gray-50"
+                        className="group h-11 border-b border-gray-100 hover:bg-blue-50/40"
                       >
                         {/* 状態（インライン変更） */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           <Select
                             value={node.status}
+                            disabled={!canEdit}
                             onValueChange={(v) =>
                               handleInlineStatus(node, v as TaskStatus)
                             }
@@ -964,7 +1049,7 @@ export default function TasksPage() {
                         </td>
 
                         {/* 種別/優先度 */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           <span
                             className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs ${priority.color}`}
                           >
@@ -973,63 +1058,69 @@ export default function TasksPage() {
                         </td>
 
                         {/* タイトル（WBS番号＋インデント） */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           <div
-                            className="flex items-start gap-2"
-                            style={{ paddingLeft: depth * 18 }}
+                            className="flex min-w-0 items-center gap-1.5"
+                            style={{ paddingLeft: Math.min(depth, 6) * 14 }}
                           >
-                            <span className="mt-0.5 font-mono text-[11px] text-gray-400 tabular-nums">
+                            <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400">
                               {wbs.get(node.id)}
                             </span>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                {node.milestone && (
-                                  <Flag className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                                )}
-                                <Link
-                                  href={`./tasks/${node.id}`}
-                                  className="font-medium text-gray-900 hover:text-blue-600 hover:underline"
-                                >
+                            {node.milestone ? (
+                              <Flag className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                            ) : null}
+                            <Link
+                              href={`./tasks/${node.id}`}
+                              className="min-w-0 flex-1 font-medium text-gray-900 hover:text-blue-600 hover:underline"
+                            >
+                              <OverflowTooltipText text={node.title}>
                                   {node.title}
+                              </OverflowTooltipText>
+                            </Link>
+                            {node.category ? (
+                              <span className="max-w-24 shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                                <OverflowTooltipText text={node.category}>
+                                  {node.category}
+                                </OverflowTooltipText>
+                              </span>
+                            ) : null}
+                            {predecessorTitles.length > 0 ? (
+                              <span
+                                className="shrink-0 text-[10px] text-gray-400"
+                                title={`先行: ${predecessorTitles.join(', ')}`}
+                              >
+                                先行{predecessorTitles.length}
+                              </span>
+                            ) : null}
+                            {node.issueNodeId && originLabel && originKind ? (
+                              originNode?.treeId ? (
+                                <Link
+                                  href={`/dashboard/projects/${projectId}/issue-trees/${originNode.treeId}`}
+                                  className="shrink-0 text-gray-400 hover:text-blue-600"
+                                  title={`由来: ${issueNodeKindMeta(originKind).label} ${originLabel}`}
+                                >
+                                  <GitBranch className="h-3.5 w-3.5" />
                                 </Link>
-                                {node.category && (
-                                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
-                                    {node.category}
-                                  </span>
-                                )}
-                              </div>
-                              {(depsBySuccessor.get(node.id)?.length ?? 0) >
-                                0 && (
-                                <div className="mt-0.5 text-[11px] text-gray-400">
-                                  先行:{' '}
-                                  {(depsBySuccessor.get(node.id) ?? [])
-                                    .map(
-                                      (d) =>
-                                        taskTitleById.get(d.predecessorId) ??
-                                        '?'
-                                    )
-                                    .join(', ')}
-                                </div>
-                              )}
-                              <IssueOrigin
-                                projectId={projectId}
-                                task={node}
-                                nodeRef={
-                                  node.issueNodeId
-                                    ? issueNodeById.get(node.issueNodeId)
-                                    : undefined
-                                }
-                              />
-                            </div>
+                              ) : (
+                                <span
+                                  className="shrink-0 text-gray-400"
+                                  title={`由来: ${issueNodeKindMeta(originKind).label} ${originLabel}`}
+                                >
+                                  <GitBranch className="h-3.5 w-3.5" />
+                                </span>
+                              )
+                            ) : null}
                           </div>
                         </td>
 
                         {/* 担当 */}
-                        <td className="px-3 py-2 align-top text-gray-700">
+                        <td className="overflow-hidden px-3 py-1 align-middle text-gray-700">
                           {assignee ? (
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="flex min-w-0 items-center gap-1.5">
                               <UserAvatar name={assignee} size={18} />
-                              <span className="truncate">{assignee}</span>
+                              <OverflowTooltipText text={assignee}>
+                                {assignee}
+                              </OverflowTooltipText>
                             </span>
                           ) : (
                             <span className="text-gray-300">未割当</span>
@@ -1037,12 +1128,12 @@ export default function TasksPage() {
                         </td>
 
                         {/* 期限 */}
-                        <td className="px-3 py-2 align-top text-gray-600 tabular-nums">
+                        <td className="overflow-hidden px-3 py-1 align-middle text-gray-600 tabular-nums">
                           {node.dueDate ? node.dueDate.slice(0, 10) : '-'}
                         </td>
 
                         {/* 進捗 */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           <div className="flex items-center gap-2">
                             <div className="h-1.5 flex-1 rounded-full bg-gray-100">
                               <div
@@ -1059,7 +1150,7 @@ export default function TasksPage() {
                         </td>
 
                         {/* 種別（issueType バッジ） */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           {(() => {
                             const it = taskIssueTypeOf(node);
                             const meta = taskIssueTypeMeta(it);
@@ -1074,21 +1165,20 @@ export default function TasksPage() {
                         </td>
 
                         {/* エピック名 */}
-                        <td className="px-3 py-2 align-top text-gray-600">
+                        <td className="overflow-hidden px-3 py-1 align-middle text-gray-600">
                           {node.epicId && epicTitleById.get(node.epicId) ? (
-                            <span
-                              className="block max-w-[140px] truncate"
-                              title={epicTitleById.get(node.epicId)}
+                            <OverflowTooltipText
+                              text={epicTitleById.get(node.epicId) ?? ''}
                             >
                               {epicTitleById.get(node.epicId)}
-                            </span>
+                            </OverflowTooltipText>
                           ) : (
                             <span className="text-gray-300">-</span>
                           )}
                         </td>
 
                         {/* SP（ストーリーポイント） */}
-                        <td className="px-3 py-2 align-top text-right text-gray-600 tabular-nums">
+                        <td className="overflow-hidden px-3 py-1 text-right align-middle text-gray-600 tabular-nums">
                           {node.storyPoints != null ? (
                             formatSp(node.storyPoints)
                           ) : (
@@ -1097,10 +1187,12 @@ export default function TasksPage() {
                         </td>
 
                         {/* スプリント */}
-                        <td className="px-3 py-2 align-top">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
                           {node.sprint ? (
-                            <span className="inline-block max-w-[120px] truncate rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] text-indigo-600 border border-indigo-200">
-                              {node.sprint}
+                            <span className="block rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] text-indigo-600">
+                              <OverflowTooltipText text={node.sprint}>
+                                {node.sprint}
+                              </OverflowTooltipText>
                             </span>
                           ) : (
                             <span className="text-gray-300">-</span>
@@ -1108,8 +1200,8 @@ export default function TasksPage() {
                         </td>
 
                         {/* 操作 */}
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <td className="overflow-hidden px-3 py-1 align-middle">
+                          <div className="flex justify-end gap-1 transition-opacity group-hover:opacity-100 sm:opacity-0">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1612,54 +1704,6 @@ export default function TasksPage() {
 function clampProgress(n: number): number {
   if (Number.isNaN(n)) return 0;
   return Math.max(0, Math.min(100, Math.round(n)));
-}
-
-/**
- * タスクの「由来」表示。紐付いた課題ノードのラベルと種別チップ
- * （調査=amber / 打ち手=blue）を出し、課題ツリーへリンクする。
- * nodeRef（列挙 API 由来・treeId を持つ）があればそれを優先し、
- * 無ければ TaskOutput の issueNodeLabel/issueNodeKind にフォールバックする。
- */
-function IssueOrigin({
-  projectId,
-  task,
-  nodeRef,
-}: {
-  projectId: string;
-  task: Task;
-  nodeRef?: IssueNodeRef;
-}) {
-  const label = nodeRef?.label ?? task.issueNodeLabel ?? null;
-  const kind = nodeRef?.kind ?? task.issueNodeKind ?? null;
-  if (!task.issueNodeId || !label || !kind) return null;
-  const meta = issueNodeKindMeta(kind);
-  const treeId = nodeRef?.treeId ?? null;
-  const inner = (
-    <span className="inline-flex items-center gap-1">
-      <GitBranch className="h-3 w-3 text-gray-400" />
-      <span
-        className={`inline-flex items-center rounded border px-1 py-px text-[10px] ${meta.chip}`}
-      >
-        {meta.label}
-      </span>
-      <span className="truncate">{label}</span>
-    </span>
-  );
-  return (
-    <div className="mt-0.5 text-[11px] text-gray-500">
-      <span className="text-gray-400">由来: </span>
-      {treeId ? (
-        <Link
-          href={`/dashboard/projects/${projectId}/issue-trees/${treeId}`}
-          className="hover:text-blue-600 hover:underline"
-        >
-          {inner}
-        </Link>
-      ) : (
-        inner
-      )}
-    </div>
-  );
 }
 
 function Field({
