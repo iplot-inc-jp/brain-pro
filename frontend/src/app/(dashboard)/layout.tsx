@@ -53,6 +53,8 @@ import {
   Search,
   Loader2,
   SlidersHorizontal,
+  Star,
+  Kanban,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect, useRef } from 'react'
@@ -62,6 +64,13 @@ import {
   buildKnowledgeNavigation,
   type ProjectNavigationItem,
 } from '@/lib/knowledge-navigation'
+import {
+  SidebarFavoritesContext,
+  useSidebarFavorites,
+  useSidebarFavoritesState,
+  visibleFavorites,
+  type SidebarFavorite,
+} from '@/lib/sidebar-favorites'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
@@ -235,7 +244,7 @@ function FlowLeaf({
     <div>
       <div
         className={cn(
-          'flex items-center gap-1 pr-1 rounded-md transition-colors',
+          'flex items-center gap-1 pr-1 rounded-md transition-colors group',
           'text-muted-foreground hover:text-foreground hover:bg-secondary',
           isActive && 'text-primary font-medium bg-primary/10'
         )}
@@ -249,6 +258,7 @@ function FlowLeaf({
           <GitBranch className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
           <span className="truncate">{flow.name}</span>
         </Link>
+        <FavoriteStar item={{ href, name: flow.name, kind: 'flow' }} />
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -589,6 +599,133 @@ function FlowTree({
   )
 }
 
+// ====== サイドメニューお気に入り（ユーザー単位） ======
+
+// お気に入り行が指す先の最新情報（名前・アイコン）。href で引く。
+type FavoriteTarget = { name: string; icon: LucideIcon }
+
+// kind ごとのフォールバックアイコン（対象がナビ定義・取得済み一覧から引けないとき用）。
+function favoriteFallbackIcon(kind: SidebarFavorite['kind']): LucideIcon {
+  if (kind === 'flow') return GitBranch
+  return FileText
+}
+
+// 各行に出す星トグル。行側に `group` クラスを付けると、未登録時はホバーでのみ表示される。
+function FavoriteStar({ item }: { item: SidebarFavorite }) {
+  const { isFavorite, toggleFavorite, loaded } = useSidebarFavorites()
+  if (!loaded) return null
+  const active = isFavorite(item.href)
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        toggleFavorite(item)
+      }}
+      title={active ? 'お気に入りから外す' : 'お気に入りに追加'}
+      aria-pressed={active}
+      className={cn(
+        'p-0.5 rounded flex-shrink-0 transition-colors',
+        active
+          ? 'text-amber-400 hover:text-amber-500'
+          : 'text-muted-foreground/60 hover:text-amber-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+      )}
+    >
+      <Star className={cn('h-3.5 w-3.5', active && 'fill-current')} />
+    </button>
+  )
+}
+
+// お気に入りセクション（展開サイドバー最上部）。
+// 開いているプロジェクトのお気に入り＋プロジェクト非依存項目だけを表示する。
+function FavoritesSection({
+  projectId,
+  targetsByHref,
+  isFavActive,
+  onNavigate,
+}: {
+  projectId: string | null
+  targetsByHref: Map<string, FavoriteTarget>
+  isFavActive: (href: string) => boolean
+  onNavigate: () => void
+}) {
+  const { favorites, loaded } = useSidebarFavorites()
+  const visible = visibleFavorites(favorites, projectId)
+  if (!loaded || visible.length === 0) return null
+
+  return (
+    <div className="pb-2 mb-1 border-b border-border/60 space-y-0.5">
+      <div className="flex items-center gap-1.5 px-3 pb-1 text-[11px] font-semibold tracking-wide text-gray-400">
+        <Star className="h-3.5 w-3.5 text-amber-400 fill-current" />
+        お気に入り
+      </div>
+      {visible.map((f) => {
+        const target = targetsByHref.get(f.href)
+        const Icon = target?.icon ?? favoriteFallbackIcon(f.kind)
+        const name = target?.name ?? f.name
+        return (
+          <div
+            key={f.href}
+            className={cn('sidebar-link group pr-1.5', isFavActive(f.href) && 'active')}
+          >
+            <Link
+              href={f.href}
+              onClick={onNavigate}
+              title={name}
+              className="flex items-center gap-3 flex-1 min-w-0"
+            >
+              <Icon className="h-5 w-5 flex-shrink-0" />
+              <span className="text-sm truncate">{name}</span>
+            </Link>
+            <FavoriteStar item={f} />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// 縮小表示のお気に入り（最上部にアイコンで並べ、下を線で区切る）。
+function CollapsedFavorites({
+  projectId,
+  targetsByHref,
+  isFavActive,
+  onNavigate,
+}: {
+  projectId: string | null
+  targetsByHref: Map<string, FavoriteTarget>
+  isFavActive: (href: string) => boolean
+  onNavigate: () => void
+}) {
+  const { favorites, loaded } = useSidebarFavorites()
+  const visible = visibleFavorites(favorites, projectId)
+  if (!loaded || visible.length === 0) return null
+
+  return (
+    <div>
+      <div className="space-y-0.5">
+        {visible.map((f) => {
+          const target = targetsByHref.get(f.href)
+          return (
+            <CollapsedNavLink
+              key={f.href}
+              item={{
+                name: target?.name ?? f.name,
+                href: f.href,
+                icon: target?.icon ?? favoriteFallbackIcon(f.kind),
+              }}
+              isActive={isFavActive(f.href)}
+              onNavigate={onNavigate}
+            />
+          )
+        })}
+      </div>
+      <div className="h-px bg-border my-1.5" />
+    </div>
+  )
+}
+
 // ====== 縮小（アイコンのみ）サイドバー用ヘルパー ======
 
 // 縮小時にアイコン下へ表示する短縮ラベル（全名は title 属性で補完）
@@ -695,15 +832,19 @@ function ProjectNavItem({
 
   if (!hasChildren) {
     return (
-      <Link
-        href={item.href}
-        onClick={onNavigate}
-        className={cn('sidebar-link ml-2', isActive && 'active')}
-      >
-        <item.icon className="h-5 w-5 flex-shrink-0" />
-        <span className="text-sm">{item.name}</span>
-        {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
-      </Link>
+      <div className={cn('sidebar-link ml-2 pr-1.5 group', isActive && 'active')}>
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          title={item.name}
+          className="flex items-center gap-3 flex-1 min-w-0"
+        >
+          <item.icon className="h-5 w-5 flex-shrink-0" />
+          <span className="text-sm truncate">{item.name}</span>
+        </Link>
+        <FavoriteStar item={{ href: item.href, name: item.name, kind: 'page' }} />
+        {isActive && <ChevronRight className="h-4 w-4 text-primary" />}
+      </div>
     )
   }
 
@@ -714,7 +855,7 @@ function ProjectNavItem({
   return (
     <div>
       {/* 親行: ページ名はリンク（既定タブへ）、右端シェブロンで子（タブ）の開閉 */}
-      <div className={cn('sidebar-link ml-2 pr-1.5', isActive && 'active')}>
+      <div className={cn('sidebar-link ml-2 pr-1.5 group', isActive && 'active')}>
         <Link
           href={item.href}
           onClick={onNavigate}
@@ -724,6 +865,7 @@ function ProjectNavItem({
           <item.icon className="h-5 w-5 flex-shrink-0" />
           <span className="text-sm truncate">{item.name}</span>
         </Link>
+        <FavoriteStar item={{ href: item.href, name: item.name, kind: 'page' }} />
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -946,7 +1088,7 @@ function MeetingDocLeaf({
     <div>
       <div
         className={cn(
-          'flex items-center gap-1 rounded-md pr-1 transition-colors',
+          'flex items-center gap-1 rounded-md pr-1 transition-colors group',
           'text-muted-foreground hover:bg-secondary hover:text-foreground',
           isActive && 'bg-primary/10 font-medium text-primary',
         )}
@@ -969,6 +1111,13 @@ function MeetingDocLeaf({
           )}
           <span className="truncate">{doc.title || '無題のドキュメント'}</span>
         </Link>
+        <FavoriteStar
+          item={{
+            href: `${base}?doc=${doc.id}`,
+            name: doc.title || '無題のドキュメント',
+            kind: 'meetingDoc',
+          }}
+        />
         {showChevron && (
           <button
             onClick={() => setOpen((v) => !v)}
@@ -1141,6 +1290,8 @@ export default function DashboardLayout({
   const { subProjects, flows } = useFlowTree(projectId)
   const { meetings: mtgDocsMeetings, docs: mtgDocs } = useMeetingDocsTree(projectId)
   const { isSuperAdmin } = useCurrentUser()
+  // お気に入り（ユーザー単位・UserSetting.settings に保存）。context で各行の星へ配る。
+  const favoritesState = useSidebarFavoritesState()
 
   // プロジェクト非依存のトップナビ（フラット）
   // ガイド（全体マニュアル）はプロジェクトに依存しない汎用マニュアルなので、
@@ -1247,6 +1398,7 @@ export default function DashboardLayout({
           },
           { name: 'リスクマネジメント', href: `${base}/risk-management`, icon: ShieldAlert },
           { name: 'タスク管理', href: `${base}/tasks`, icon: ListTodo },
+          { name: '看板', href: `${base}/tasks?view=board`, icon: Kanban },
           { name: 'アジャイル', href: `${base}/tasks/agile`, icon: Layers },
           { name: 'WBS/ガント', href: `${base}/tasks/gantt`, icon: GanttChartSquare },
           { name: '変更履歴', href: `${base}/history`, icon: History },
@@ -1285,16 +1437,59 @@ export default function DashboardLayout({
     const pathMatches =
       pathname === base || (base !== '/dashboard' && pathname.startsWith(base + '/'))
     if (!query) return pathMatches
-    // kind クエリ付きはパス一致 + kind 一致で判定
+    // クエリ付き（?kind= / ?view= 等）はパス一致 + href 側の全クエリ一致で判定
     if (pathname !== base) return false
-    const kind = new URLSearchParams(query).get('kind')
-    return searchParams.get('kind') === kind
+    let matches = true
+    new URLSearchParams(query).forEach((v, k) => {
+      if (searchParams.get(k) !== v) matches = false
+    })
+    return matches
   }
 
+  // お気に入り行のアクティブ判定（?doc= 等の任意クエリ付き href に対応）。
+  const isFavActive = (href: string) => {
+    const [base, query] = href.split('?')
+    if (!query) return isLinkActive(href)
+    if (pathname !== base) return false
+    let matches = true
+    new URLSearchParams(query).forEach((v, k) => {
+      if (searchParams.get(k) !== v) matches = false
+    })
+    return matches
+  }
+
+  // お気に入り行の表示用に、現在把握している遷移先（ナビ項目・フロー・会議ドキュメント）を
+  // href で引けるようにしておく。登録後に対象の名前が変わっても最新名・アイコンで表示するため。
+  const favoriteTargetsByHref = useMemo(() => {
+    const map = new Map<string, { name: string; icon: LucideIcon }>()
+    for (const item of baseNav) map.set(item.href, { name: item.name, icon: item.icon })
+    for (const item of accountNav) map.set(item.href, { name: item.name, icon: item.icon })
+    for (const group of projectGroups) {
+      for (const item of group.items) map.set(item.href, { name: item.name, icon: item.icon })
+    }
+    if (projectId) {
+      for (const f of flows) {
+        map.set(`/dashboard/projects/${projectId}/flows/${f.id}`, {
+          name: f.name,
+          icon: GitBranch,
+        })
+      }
+      const docBase = `/dashboard/projects/${projectId}/meeting-documents`
+      for (const d of mtgDocs) {
+        map.set(`${docBase}?doc=${d.id}`, {
+          name: d.title || '無題のドキュメント',
+          icon: FileText,
+        })
+      }
+    }
+    return map
+  }, [baseNav, accountNav, projectGroups, projectId, flows, mtgDocs])
+
   return (
+    <SidebarFavoritesContext.Provider value={favoritesState}>
     <div className="min-h-screen bg-background">
-      {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-sm border-b border-border px-4 py-3">
+      {/* Mobile header（safe-area: ノッチ分を上に足す） */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-card/95 backdrop-blur-sm border-b border-border px-4 pb-3 pt-[calc(0.75rem+var(--safe-top))]">
         <div className="flex items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
@@ -1315,6 +1510,8 @@ export default function DashboardLayout({
       <aside
         className={cn(
           'fixed inset-y-0 left-0 z-50 bg-card border-r border-border transform transition-all duration-200 ease-in-out',
+          // safe-area: ドロワー内の先頭・末尾がノッチ／ホームバーに隠れないようにする
+          'pt-[var(--safe-top)] pb-[var(--safe-bottom)]',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0',
           sidebarCollapsed ? 'lg:w-20' : 'lg:w-64',
@@ -1349,20 +1546,34 @@ export default function DashboardLayout({
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+            {/* お気に入り（ユーザー単位・最上部）。開いているプロジェクト＋共通項目のみ */}
+            <FavoritesSection
+              projectId={projectId}
+              targetsByHref={favoriteTargetsByHref}
+              isFavActive={isFavActive}
+              onNavigate={() => setSidebarOpen(false)}
+            />
+
             {/* プロジェクト非依存のトップナビ（フラット・ガイド含む） */}
             {baseNav.map((item) => {
               const isActive = isLinkActive(item.href)
               return (
-                <Link
+                <div
                   key={item.name}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
-                  className={cn('sidebar-link', isActive && 'active')}
+                  className={cn('sidebar-link group pr-1.5', isActive && 'active')}
                 >
-                  <item.icon className="h-5 w-5 flex-shrink-0" />
-                  <span className="text-sm">{item.name}</span>
-                  {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
-                </Link>
+                  <Link
+                    href={item.href}
+                    onClick={() => setSidebarOpen(false)}
+                    title={item.name}
+                    className="flex items-center gap-3 flex-1 min-w-0"
+                  >
+                    <item.icon className="h-5 w-5 flex-shrink-0" />
+                    <span className="text-sm truncate">{item.name}</span>
+                  </Link>
+                  <FavoriteStar item={{ href: item.href, name: item.name, kind: 'page' }} />
+                  {isActive && <ChevronRight className="h-4 w-4 text-primary" />}
+                </div>
               )
             })}
 
@@ -1427,16 +1638,22 @@ export default function DashboardLayout({
               {accountNav.map((item) => {
                 const isActive = isLinkActive(item.href)
                 return (
-                  <Link
+                  <div
                     key={item.name}
-                    href={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={cn('sidebar-link', isActive && 'active')}
+                    className={cn('sidebar-link group pr-1.5', isActive && 'active')}
                   >
-                    <item.icon className="h-5 w-5 flex-shrink-0" />
-                    <span className="text-sm">{item.name}</span>
-                    {isActive && <ChevronRight className="h-4 w-4 ml-auto text-primary" />}
-                  </Link>
+                    <Link
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      title={item.name}
+                      className="flex items-center gap-3 flex-1 min-w-0"
+                    >
+                      <item.icon className="h-5 w-5 flex-shrink-0" />
+                      <span className="text-sm truncate">{item.name}</span>
+                    </Link>
+                    <FavoriteStar item={{ href: item.href, name: item.name, kind: 'page' }} />
+                    {isActive && <ChevronRight className="h-4 w-4 text-primary" />}
+                  </div>
                 )
               })}
             </div>
@@ -1493,6 +1710,14 @@ export default function DashboardLayout({
 
             {/* アイコン列（アイコン＋その下に名前） */}
             <nav className="px-1.5 py-2 space-y-0.5">
+              {/* お気に入り（最上部） */}
+              <CollapsedFavorites
+                projectId={projectId}
+                targetsByHref={favoriteTargetsByHref}
+                isFavActive={isFavActive}
+                onNavigate={() => setSidebarOpen(false)}
+              />
+
               {/* プロジェクト非依存のトップナビ（ガイド含む） */}
               {baseNav.map((item) => (
                 <CollapsedNavLink
@@ -1561,13 +1786,14 @@ export default function DashboardLayout({
         />
       )}
 
-      {/* Main content */}
+      {/* Main content（モバイルはヘッダー高 3.5rem + ノッチ分だけ下げる） */}
       <main className={cn(
-        "min-h-screen pt-14 lg:pt-0 transition-all duration-200",
+        "min-h-screen pt-[calc(3.5rem+var(--safe-top))] lg:pt-0 transition-all duration-200",
         sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
       )}>
-        <div className="p-5 sm:p-6 lg:p-8">{children}</div>
+        <div className="p-5 sm:p-6 lg:p-8 pb-[calc(1.25rem+var(--safe-bottom))]">{children}</div>
       </main>
     </div>
+    </SidebarFavoritesContext.Provider>
   )
 }

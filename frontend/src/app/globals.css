@@ -48,6 +48,20 @@
   }
 }
 
+/* iPhone ノッチ・ホームバー等の safe-area インセット。
+   viewport-fit=cover（app/layout.tsx の viewport）と併用し、
+   固定ヘッダー・サイドバー・最下部ボタンの余白計算に var(--safe-*) で使う。 */
+:root {
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+}
+@supports (top: env(safe-area-inset-top)) {
+  :root {
+    --safe-top: env(safe-area-inset-top);
+    --safe-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

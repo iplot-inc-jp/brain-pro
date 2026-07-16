@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { Toaster } from '@/components/ui/toaster'
@@ -10,6 +10,24 @@ export const metadata: Metadata = {
   ),
   title: 'Brain Pro',
   description: 'プロジェクトの“脳”を、人とAIで共有するプロジェクト管理システム',
+  applicationName: 'Brain Pro',
+  // iPhone「ホーム画面に追加」用（スタンドアロン起動・ホーム画面名・ステータスバー）
+  appleWebApp: {
+    capable: true,
+    title: 'Brain Pro',
+    statusBarStyle: 'default',
+  },
+  icons: {
+    apple: '/apple-touch-icon.png',
+  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  // ノッチ・ホームバー領域まで描画し、safe-area inset（globals.css の --safe-*）で余白を取る
+  viewportFit: 'cover',
+  themeColor: '#ffffff',
 }
 
 export default function RootLayout({

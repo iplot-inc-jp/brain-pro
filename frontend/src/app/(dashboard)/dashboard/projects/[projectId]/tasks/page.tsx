@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -180,8 +185,18 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // 表示モード（一覧 / ボード）
-  const [view, setView] = useState<'list' | 'board'>('list');
+  // 表示モード（一覧 / ボード）。?view=board で深リンク可能
+  // （サイドメニューの「看板」はこのクエリ付きで遷移してくる）。
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view: 'list' | 'board' =
+    searchParams.get('view') === 'board' ? 'board' : 'list';
+  const setView = (v: 'list' | 'board') => {
+    router.replace(v === 'board' ? `${pathname}?view=board` : pathname, {
+      scroll: false,
+    });
+  };
 
   // フィルタ
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -697,7 +712,7 @@ export default function TasksPage() {
                 '親タスクを選ぶとサブタスクとして WBS 番号（例 1.2.3）付きでインデント表示されます。',
                 '先行タスクを指定すると依存関係が登録され、ガント／WBS 画面に反映されます。',
                 '各行の状態バッジから直接ステータスを変更でき、鉛筆で編集・ゴミ箱で削除できます。',
-                '上部の「一覧／ボード」で表示を切り替えられます。ボードではカードを別の列にドラッグして状態を変更できます。',
+                '上部の「一覧／ボード」またはサイドメニューの「看板」で表示を切り替えられます。ボードではカードを別の列にドラッグして状態を変更できます（スマホではカード下の状態セレクトで変更）。',
                 '上部のフィルタ（状態・担当・マイルストーン・カテゴリ・種別・スプリント・キーワード）で絞り込めます。',
               ]}
             />
@@ -896,6 +911,7 @@ export default function TasksPage() {
           wbs={wbs}
           roleNameById={roleNameById}
           onDragEnd={handleBoardDragEnd}
+          onStatusChange={handleInlineStatus}
         />
       ) : (
         <Card className="bg-white border-gray-200 overflow-hidden">
@@ -1764,11 +1780,13 @@ function KanbanBoard({
   wbs,
   roleNameById,
   onDragEnd,
+  onStatusChange,
 }: {
   tasksByStatus: Record<TaskStatus, TaskTreeNode[]>;
   wbs: Map<string, string>;
   roleNameById: Map<string, string>;
   onDragEnd: (result: DropResult) => void;
+  onStatusChange: (task: TaskTreeNode, status: TaskStatus) => void;
 }) {
   return (
     <DragDropContext onDragEnd={onDragEnd}>
@@ -1815,6 +1833,7 @@ function KanbanBoard({
                         index={index}
                         wbsNo={wbs.get(node.id)}
                         roleNameById={roleNameById}
+                        onStatusChange={onStatusChange}
                       />
                     ))}
                     {provided.placeholder}
@@ -1834,11 +1853,13 @@ function KanbanCard({
   index,
   wbsNo,
   roleNameById,
+  onStatusChange,
 }: {
   node: TaskTreeNode;
   index: number;
   wbsNo?: string;
   roleNameById: Map<string, string>;
+  onStatusChange: (task: TaskTreeNode, status: TaskStatus) => void;
 }) {
   const { canEdit } = useReadOnly();
   const priority = taskPriorityLabels[node.priority];
@@ -1944,6 +1965,25 @@ function KanbanCard({
               {progress}%
             </span>
           </div>
+
+          {/* モバイル用：状態を直接変更（カラムが縦積みになる幅ではドラッグより確実） */}
+          {canEdit && (
+            <select
+              value={node.status}
+              onChange={(e) =>
+                onStatusChange(node, e.target.value as TaskStatus)
+              }
+              onClick={(e) => e.stopPropagation()}
+              aria-label="状態を変更"
+              className="mt-2 w-full rounded border border-gray-200 bg-gray-50 px-1.5 py-1 text-[11px] text-gray-600 sm:hidden"
+            >
+              {TASK_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {taskStatusLabels[s].label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       )}
     </Draggable>
