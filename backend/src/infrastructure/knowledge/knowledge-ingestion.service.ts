@@ -665,21 +665,21 @@ export class KnowledgeIngestionService {
         where: { id: stableMergeJobId },
       });
       if (existingMerge?.status === 'QUEUED') {
-        await this.jobService.startReserved(existingMerge.id);
-        recoveryTriggered = true;
+        const started = await this.jobService.startReserved(existingMerge.id);
+        recoveryTriggered = ['QUEUED', 'RUNNING'].includes(started.status);
       } else if (existingMerge?.status === 'FAILED') {
-        await this.jobService.retry(existingMerge.id);
-        recoveryTriggered = true;
+        const retried = await this.jobService.retry(existingMerge.id);
+        recoveryTriggered = ['QUEUED', 'RUNNING'].includes(retried.status);
       } else if (existingMerge?.status === 'RUNNING') {
         const recovered = await this.jobService.recoverStaleRunning(
           existingMerge.id,
         );
-        recoveryTriggered = recovered.recoveryTriggered === true;
+        recoveryTriggered = ['QUEUED', 'RUNNING'].includes(recovered.status);
       } else if (existingMerge?.status === 'SUCCEEDED') {
         await this.setParentState(parentJobId, file.projectId, 'SUCCEEDED', 100);
       } else if (!existingMerge) {
         const batch = await this.batchRepository.findById(file.batchId);
-        await this.jobService.enqueue(
+        const enqueued = await this.jobService.enqueue(
           'KG_MERGE_INGEST_FILE',
           { fileId: file.id },
           {
@@ -689,7 +689,7 @@ export class KnowledgeIngestionService {
             dedupeId: stableMergeJobId,
           },
         );
-        recoveryTriggered = true;
+        recoveryTriggered = ['QUEUED', 'RUNNING'].includes(enqueued.status);
       }
     }
     return recoveryTriggered;

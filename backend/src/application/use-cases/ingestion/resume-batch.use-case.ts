@@ -92,7 +92,6 @@ export class ResumeBatchUseCase {
         continue;
       }
       if (!this.isResumable(file, now)) continue;
-      didResume = true;
       file.requeue();
       await this.fileRepository.save(file);
       if (this.isPaged(file) && file.jobId) {
@@ -101,7 +100,13 @@ export class ResumeBatchUseCase {
           file.id,
           file.projectId,
         );
-        if (resumed) continue;
+        if (resumed) {
+          didResume ||=
+            resumed.recoveryTriggered === true ||
+            resumed.status === 'QUEUED' ||
+            resumed.status === 'RUNNING';
+          continue;
+        }
       }
       const type = file.isArchive ? 'KG_EXPAND_ARCHIVE' : 'KG_INGEST_FILE';
       const job = await this.jobService.enqueue(
@@ -109,6 +114,7 @@ export class ResumeBatchUseCase {
         { fileId: file.id },
         { projectId: batch.projectId, createdById: input.userId },
       );
+      didResume ||= job.status === 'QUEUED' || job.status === 'RUNNING';
       // inline完了状態を古いrequeued entityのfull saveで巻き戻さない。
       await this.fileRepository.setJobId(file.id, job.id);
       file.setJobId(job.id);
