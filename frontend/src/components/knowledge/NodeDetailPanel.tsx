@@ -172,6 +172,9 @@ export function NodeDetailPanel({
   const [retryingPageId, setRetryingPageId] = useState<string | null>(null)
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set())
   const activeDocumentId = useRef<string | null>(selectedDocument?.id ?? null)
+  const documentGeneration = useRef(0)
+  const pageRequest = useRef<AbortController | null>(null)
+  const retryRequest = useRef<AbortController | null>(null)
   activeDocumentId.current = selectedDocument?.id ?? null
 
   useEffect(() => {
@@ -199,55 +202,84 @@ export function NodeDetailPanel({
     }
   }, [selectedNode])
 
-  const loadPages = async (documentId: string, cancelled?: () => boolean) => {
+  const isActiveDocument = (documentId: string, generation: number) =>
+    activeDocumentId.current === documentId &&
+    documentGeneration.current === generation
+
+  const loadPages = async (
+    documentId: string,
+    generation: number,
+    signal: AbortSignal,
+  ) => {
+    if (!isActiveDocument(documentId, generation)) return
     setPagesLoading(true)
     setPagesError(null)
     try {
-      const result = await getKnowledgeDocumentPages(documentId)
-      if (!cancelled?.() && activeDocumentId.current === documentId) {
+      const result = await getKnowledgeDocumentPages(documentId, { signal })
+      if (!signal.aborted && isActiveDocument(documentId, generation)) {
         setPages(result)
       }
     } catch (e) {
-      if (!cancelled?.() && activeDocumentId.current === documentId) {
+      if (!signal.aborted && isActiveDocument(documentId, generation)) {
         setPagesError(
           e instanceof Error ? e.message : 'ページ抽出結果の取得に失敗しました',
         )
-        setPages([])
       }
     } finally {
-      if (!cancelled?.() && activeDocumentId.current === documentId) {
+      if (!signal.aborted && isActiveDocument(documentId, generation)) {
         setPagesLoading(false)
       }
     }
   }
 
   useEffect(() => {
+    const generation = ++documentGeneration.current
+    pageRequest.current?.abort()
+    retryRequest.current?.abort()
+    setPages([])
+    setPagesError(null)
+    setPagesLoading(false)
+    setRetryingPageId(null)
+    setExpandedPages(new Set())
     if (!selectedDocument) {
-      setPages([])
-      setPagesError(null)
       return
     }
-    let cancelled = false
-    setExpandedPages(new Set())
-    void loadPages(selectedDocument.id, () => cancelled)
+    const controller = new AbortController()
+    pageRequest.current = controller
+    void loadPages(selectedDocument.id, generation, controller.signal)
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [selectedDocument?.id])
 
   const retryPage = async (page: KnowledgeDocumentPage) => {
-    if (!selectedDocument || page.status !== 'FAILED') return
+    if (!selectedDocument || page.status !== 'FAILED' || !page.retryable) return
+    const documentId = selectedDocument.id
+    const generation = documentGeneration.current
+    retryRequest.current?.abort()
+    const controller = new AbortController()
+    retryRequest.current = controller
     setRetryingPageId(page.id)
     setPagesError(null)
     try {
-      await retryKnowledgeDocumentPage(page.id)
-      await loadPages(selectedDocument.id)
+      await retryKnowledgeDocumentPage(page.id, { signal: controller.signal })
+      if (controller.signal.aborted || !isActiveDocument(documentId, generation)) {
+        return
+      }
+      pageRequest.current?.abort()
+      const reloadController = new AbortController()
+      pageRequest.current = reloadController
+      await loadPages(documentId, generation, reloadController.signal)
     } catch (e) {
-      setPagesError(
-        e instanceof Error ? e.message : 'ページの再試行に失敗しました',
-      )
+      if (!controller.signal.aborted && isActiveDocument(documentId, generation)) {
+        setPagesError(
+          e instanceof Error ? e.message : 'ページの再試行に失敗しました',
+        )
+      }
     } finally {
-      setRetryingPageId(null)
+      if (isActiveDocument(documentId, generation)) {
+        setRetryingPageId(null)
+      }
     }
   }
 
@@ -302,13 +334,16 @@ export function NodeDetailPanel({
         </Section>
 
         <Section title="ページごとの抽出内容">
+          {pagesError && (
+            <p role="alert" className="text-xs text-destructive">
+              {pagesError}
+            </p>
+          )}
           {pagesLoading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               読み込み中…
             </div>
-          ) : pagesError ? (
-            <p className="text-xs text-destructive">{pagesError}</p>
           ) : pages.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               ページ単位の抽出結果はありません。
@@ -361,22 +396,28 @@ export function NodeDetailPanel({
                             <span>{page.error}</span>
                           </p>
                         )}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs"
-                          disabled={retryingPageId === page.id}
-                          onClick={() => void retryPage(page)}
-                          aria-label={`${label}を再試行`}
-                        >
-                          {retryingPageId === page.id ? (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          ) : (
-                            <RotateCw className="mr-1 h-3 w-3" />
-                          )}
-                          再試行
-                        </Button>
+                        {page.retryable ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            disabled={retryingPageId === page.id}
+                            onClick={() => void retryPage(page)}
+                            aria-label={`${selectedDocument.title} ${label}を再試行`}
+                          >
+                            {retryingPageId === page.id ? (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            ) : (
+                              <RotateCw className="mr-1 h-3 w-3" />
+                            )}
+                            再試行
+                          </Button>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            自動再試行中、または現在は再試行できません。
+                          </p>
+                        )}
                       </div>
                     ) : text ? (
                       <div className="mt-2">

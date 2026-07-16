@@ -297,6 +297,7 @@ export interface KnowledgeDocumentPage {
   summary: string | null;
   contentText: string | null;
   error: string | null;
+  retryable: boolean;
 }
 
 /** グラフ全体（nodes + edges + documents）。backend KnowledgeGraphOutput と一致。 */
@@ -404,10 +405,11 @@ async function ok<T>(res: Response, errMsg: string): Promise<T> {
 
 export async function getKnowledgeDocumentPages(
   documentId: string,
+  options?: { signal?: AbortSignal },
 ): Promise<KnowledgeDocumentPage[]> {
   const res = await fetch(
     `${API_URL}/api/knowledge-documents/${documentId}/pages`,
-    { headers: headers() },
+    { headers: headers(), signal: options?.signal },
   );
   return ok<KnowledgeDocumentPage[]>(
     res,
@@ -415,10 +417,13 @@ export async function getKnowledgeDocumentPages(
   );
 }
 
-export async function retryKnowledgeDocumentPage(pageId: string) {
+export async function retryKnowledgeDocumentPage(
+  pageId: string,
+  options?: { signal?: AbortSignal },
+) {
   const res = await fetch(
     `${API_URL}/api/knowledge-document-pages/${pageId}/retry`,
-    { method: 'POST', headers: headers() },
+    { method: 'POST', headers: headers(), signal: options?.signal },
   );
   return ok<{ id: string; status: string }>(
     res,

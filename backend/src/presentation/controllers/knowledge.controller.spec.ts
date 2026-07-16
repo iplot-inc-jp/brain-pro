@@ -10,6 +10,7 @@ describe('KnowledgeDocumentController page extraction endpoints', () => {
   function fixture(options?: {
     document?: { id: string; projectId: string } | null;
     page?: Record<string, unknown> | null;
+    pages?: Array<Record<string, unknown>>;
   }) {
     const document =
       options && 'document' in options
@@ -47,17 +48,25 @@ describe('KnowledgeDocumentController page extraction endpoints', () => {
         findUnique: jest.fn(async () => document),
       },
       knowledgeDocumentPage: {
-        findMany: jest.fn(async () => [
-          {
-            id: 'page-1',
-            pageNumber: 1,
-            pageKind: 'PDF_PAGE',
-            status: 'SUCCEEDED',
-            summary: '1ページ目',
-            contentText: '本文',
-            error: null,
-          },
-        ]),
+        findMany: jest.fn(async () =>
+          options?.pages ?? [
+            {
+              id: 'page-1',
+              pageNumber: 1,
+              pageKind: 'PDF_PAGE',
+              status: 'SUCCEEDED',
+              summary: '1ページ目',
+              contentText: '本文',
+              error: null,
+              job: {
+                status: 'SUCCEEDED',
+                type: 'KG_INGEST_PAGE',
+                parentJobId: 'root-1',
+                projectId: 'project-1',
+              },
+            },
+          ],
+        ),
         findUnique: jest.fn(async () => page),
       },
     };
@@ -102,9 +111,60 @@ describe('KnowledgeDocumentController page extraction endpoints', () => {
         summary: true,
         contentText: true,
         error: true,
+        job: {
+          select: {
+            status: true,
+            type: true,
+            parentJobId: true,
+            projectId: true,
+          },
+        },
       },
     });
     expect(result[0]).not.toHaveProperty('extractionResult');
+    expect(result[0]).not.toHaveProperty('job');
+    expect(result[0]).toEqual(expect.objectContaining({ retryable: false }));
+  });
+
+  it('marks only a terminal failed child page as retryable', async () => {
+    const { controller } = fixture({
+      pages: [
+        {
+          id: 'page-failed',
+          pageNumber: 1,
+          pageKind: 'PDF_PAGE',
+          status: 'FAILED',
+          summary: null,
+          contentText: null,
+          error: '失敗',
+          job: {
+            status: 'FAILED',
+            type: 'KG_INGEST_PAGE',
+            parentJobId: 'root-1',
+            projectId: 'project-1',
+          },
+        },
+        {
+          id: 'page-auto-retry',
+          pageNumber: 2,
+          pageKind: 'PDF_PAGE',
+          status: 'FAILED',
+          summary: null,
+          contentText: null,
+          error: '一時失敗',
+          job: {
+            status: 'QUEUED',
+            type: 'KG_INGEST_PAGE',
+            parentJobId: 'root-1',
+            projectId: 'project-1',
+          },
+        },
+      ],
+    });
+
+    const result = await controller.pages(user, 'doc-1');
+
+    expect(result.map((item) => item.retryable)).toEqual([true, false]);
   });
 
   it('does not query pages when the document is outside the caller project access', async () => {
@@ -180,6 +240,23 @@ describe('KnowledgeDocumentController page extraction endpoints', () => {
 
     await expect(pageController.retry(user, 'page-2')).rejects.toBeInstanceOf(
       BadRequestException,
+    );
+    expect(jobs.retry).not.toHaveBeenCalled();
+  });
+
+  it('rejects page retry when project access belongs to another project', async () => {
+    const { pageController, projectAccess, jobs } = fixture();
+    projectAccess.assertPrincipalAccess.mockRejectedValueOnce(
+      new Error('cross-project denied'),
+    );
+
+    await expect(pageController.retry(user, 'page-2')).rejects.toThrow(
+      'cross-project denied',
+    );
+    expect(projectAccess.assertPrincipalAccess).toHaveBeenCalledWith(
+      user,
+      'project-1',
+      'edit',
     );
     expect(jobs.retry).not.toHaveBeenCalled();
   });

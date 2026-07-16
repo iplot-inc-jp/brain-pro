@@ -90,6 +90,12 @@ export interface KnowledgePagesForBatchInput {
   batchId: string;
 }
 
+export interface KnowledgePageBatchProgressRow {
+  ingestionFileId: string;
+  pageNumber: number;
+  status: KnowledgeDocumentPage['status'];
+}
+
 export class KnowledgePageNotFoundError extends Error {
   constructor(id: string, projectId: string) {
     super(`Knowledge page ${id} was not found in project ${projectId}`);
@@ -269,8 +275,10 @@ export class KnowledgePageRepository {
     });
   }
 
-  listForBatch(input: KnowledgePagesForBatchInput) {
-    return this.prisma.knowledgeDocumentPage.findMany({
+  async listForBatch(
+    input: KnowledgePagesForBatchInput,
+  ): Promise<KnowledgePageBatchProgressRow[]> {
+    const rows = await this.prisma.knowledgeDocumentPage.findMany({
       where: {
         projectId: input.projectId,
         ingestionFile: {
@@ -279,7 +287,17 @@ export class KnowledgePageRepository {
         },
       },
       orderBy: [{ ingestionFileId: 'asc' }, { pageNumber: 'asc' }],
+      select: {
+        ingestionFileId: true,
+        pageNumber: true,
+        status: true,
+      },
     });
+    return rows.map(({ ingestionFileId, pageNumber, status }) => ({
+      ingestionFileId,
+      pageNumber,
+      status,
+    }));
   }
 
   async allSucceeded(input: KnowledgePagesForFileInput): Promise<boolean> {

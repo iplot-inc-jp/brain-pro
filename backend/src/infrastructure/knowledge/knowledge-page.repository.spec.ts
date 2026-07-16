@@ -562,13 +562,20 @@ describe('KnowledgePageRepository', () => {
 
     await expect(
       repo.listForBatch({ projectId: 'p1', batchId: 'batch-1' }),
-    ).resolves.toEqual([pageRow]);
+    ).resolves.toEqual([
+      { ingestionFileId: 'f1', pageNumber: 2, status: 'PENDING' },
+    ]);
     expect(prisma.knowledgeDocumentPage.findMany).toHaveBeenCalledWith({
       where: {
         projectId: 'p1',
         ingestionFile: { batchId: 'batch-1', projectId: 'p1' },
       },
       orderBy: [{ ingestionFileId: 'asc' }, { pageNumber: 'asc' }],
+      select: {
+        ingestionFileId: true,
+        pageNumber: true,
+        status: true,
+      },
     });
   });
 

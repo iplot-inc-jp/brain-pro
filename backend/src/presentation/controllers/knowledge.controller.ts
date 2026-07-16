@@ -308,7 +308,7 @@ export class KnowledgeDocumentController {
       document.projectId,
       'view',
     );
-    return this.prisma.knowledgeDocumentPage.findMany({
+    const pages = await this.prisma.knowledgeDocumentPage.findMany({
       where: { projectId: document.projectId, knowledgeDocumentId: id },
       orderBy: { pageNumber: 'asc' },
       select: {
@@ -319,8 +319,25 @@ export class KnowledgeDocumentController {
         summary: true,
         contentText: true,
         error: true,
+        job: {
+          select: {
+            status: true,
+            type: true,
+            parentJobId: true,
+            projectId: true,
+          },
+        },
       },
     });
+    return pages.map(({ job, ...page }) => ({
+      ...page,
+      retryable:
+        page.status === 'FAILED' &&
+        job?.status === 'FAILED' &&
+        job.type === 'KG_INGEST_PAGE' &&
+        job.projectId === document.projectId &&
+        job.parentJobId !== null,
+    }));
   }
 
   @Patch(':id/position')

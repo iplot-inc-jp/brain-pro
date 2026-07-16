@@ -67,6 +67,82 @@ class RunJobDto {
   jobId: string;
 }
 
+type JobListRow = Pick<
+  BackgroundJob,
+  | 'id'
+  | 'type'
+  | 'status'
+  | 'error'
+  | 'progress'
+  | 'attempts'
+  | 'maxAttempts'
+  | 'createdAt'
+  | 'finishedAt'
+> & {
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: string;
+    status: string;
+    error: string | null;
+  } | null;
+  children?: JobListRow[];
+};
+
+interface JobListItem
+  extends Omit<JobListRow, 'children' | 'knowledgePage' | 'error'> {
+  error: string | null;
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: string;
+    status: string;
+    error: string | null;
+  } | null;
+  children?: JobListItem[];
+}
+
+function safeJobListError(value: string | null): string | null {
+  if (!value) return null;
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? '';
+  const safe = firstLine
+    .replace(/https?:\/\/\S+/giu, '[url]')
+    .replace(/(?:[A-Za-z]:\\|\/)\S+/gu, '[path]')
+    .replace(/\b(?:sk|key)[-_][A-Za-z0-9_-]{12,}\b/giu, '[secret]')
+    .trim();
+  return safe.slice(0, 300) || '処理に失敗しました';
+}
+
+function toJobListItem(row: JobListRow): JobListItem {
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    error: safeJobListError(row.error),
+    progress: row.progress,
+    attempts: row.attempts,
+    maxAttempts: row.maxAttempts,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
+    ...(row.knowledgePage !== undefined
+      ? {
+          knowledgePage: row.knowledgePage
+            ? {
+                id: row.knowledgePage.id,
+                pageNumber: row.knowledgePage.pageNumber,
+                pageKind: row.knowledgePage.pageKind,
+                status: row.knowledgePage.status,
+                error: safeJobListError(row.knowledgePage.error),
+              }
+            : null,
+        }
+      : {}),
+    ...(row.children
+      ? { children: row.children.map((child) => toJobListItem(child)) }
+      : {}),
+  };
+}
+
 /**
  * QStash ワーカー（push 受信）エンドポイント。
  *
@@ -183,10 +259,28 @@ export class ProjectJobController {
       where: { projectId, parentJobId: null },
       orderBy: { createdAt: 'desc' },
       take: this.parseLimit(limit),
-      include: {
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        error: true,
+        progress: true,
+        attempts: true,
+        maxAttempts: true,
+        createdAt: true,
+        finishedAt: true,
         children: {
           orderBy: { createdAt: 'asc' },
-          include: {
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            error: true,
+            progress: true,
+            attempts: true,
+            maxAttempts: true,
+            createdAt: true,
+            finishedAt: true,
             knowledgePage: {
               select: {
                 id: true,
@@ -200,15 +294,19 @@ export class ProjectJobController {
         },
       },
     });
-    return roots.map((root) => ({
-      ...root,
-      children: [...root.children].sort((a, b) => {
-        const pageA = a.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
-        const pageB = b.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
-        if (pageA !== pageB) return pageA - pageB;
-        return a.createdAt.getTime() - b.createdAt.getTime();
+    return roots.map((root) =>
+      toJobListItem({
+        ...root,
+        children: [...root.children].sort((a, b) => {
+          const pageA =
+            a.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+          const pageB =
+            b.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+          if (pageA !== pageB) return pageA - pageB;
+          return a.createdAt.getTime() - b.createdAt.getTime();
+        }),
       }),
-    }));
+    );
   }
 
   @Post('jobs/:id/resume')

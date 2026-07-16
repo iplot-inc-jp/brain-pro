@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react';
+import { Fragment, useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
 import {
   Loader2,
   RefreshCw,
@@ -17,7 +17,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
-import { listJobs, resumeJob, type Job, type JobStatus } from '@/lib/jobs';
+import { listJobs, resumeJob, type JobListItem, type JobStatus } from '@/lib/jobs';
 import { retryKnowledgeDocumentPage } from '@/lib/knowledge';
 
 // ---- ステータスバッジのメタ（integrations の SyncRun テーブルと同系統の見た目） ----
@@ -63,7 +63,7 @@ function dateSortValue(value: string | null): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-const JOB_SORT_ACCESSORS: Record<string, (job: Job) => string | number | null | undefined> = {
+const JOB_SORT_ACCESSORS: Record<string, (job: JobListItem) => string | number | null | undefined> = {
   status: (job) => (statusMeta[job.status] ?? statusMeta.QUEUED).label,
   type: (job) => typeLabel(job.type),
   progress: (job) => job.progress,
@@ -80,7 +80,7 @@ export interface BackgroundJobsPanelHandle {
   refresh: () => void;
 }
 
-function StatusBadge({ job }: { job: Job }) {
+function StatusBadge({ job }: { job: JobListItem }) {
   const sm = statusMeta[job.status] ?? statusMeta.QUEUED;
   return (
     <span
@@ -100,10 +100,10 @@ function JobsTable({
   onResume,
   onRetryPage,
 }: {
-  jobs: Job[];
+  jobs: JobListItem[];
   busyId: string | null;
-  onResume: (job: Job) => void;
-  onRetryPage: (job: Job) => void;
+  onResume: (job: JobListItem) => void;
+  onRetryPage: (job: JobListItem) => void;
 }) {
   const { sorted, sortKey, sortDir, toggleSort } = useTableSort(jobs, JOB_SORT_ACCESSORS);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -191,8 +191,8 @@ function JobsTable({
                       {children.length > 0 && (
                         <button
                           type="button"
-                          className="rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-                          aria-label={`${typeLabel(job.type)}の子ジョブを${isOpen ? '非表示' : '表示'}`}
+                          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                          aria-label={`${typeLabel(job.type)} ${job.id} の子ジョブを${isOpen ? '非表示' : '表示'}`}
                           aria-expanded={isOpen}
                           aria-controls={`job-children-${job.id}`}
                           onClick={() =>
@@ -239,7 +239,7 @@ function JobsTable({
                           size="sm"
                           className="h-7 px-2 text-xs"
                           disabled={busyId !== null}
-                          aria-label="未完了ページを再開"
+                          aria-label={`${typeLabel(job.type)} ${job.id} の未完了ページを再開`}
                           onClick={() => onResume(job)}
                         >
                           {busyId === job.id ? (
@@ -333,43 +333,115 @@ interface BackgroundJobsPanelProps {
  */
 export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, BackgroundJobsPanelProps>(
   function BackgroundJobsPanel({ projectId, limit = 20 }, ref) {
-    const [jobs, setJobs] = useState<Job[]>([]);
+    const [jobs, setJobs] = useState<JobListItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [busyId, setBusyId] = useState<string | null>(null);
+    const activeProjectId = useRef(projectId);
+    const fetchGeneration = useRef(0);
+    const fetchRequest = useRef<AbortController | null>(null);
+    const actionGeneration = useRef(0);
+    const actionRequest = useRef<AbortController | null>(null);
 
     const fetchJobs = useCallback(
-      async (withSpinner: boolean) => {
-        if (withSpinner) setLoading(true);
-        setError(null);
+      async (targetProjectId: string, withSpinner: boolean) => {
+        const generation = ++fetchGeneration.current;
+        fetchRequest.current?.abort();
+        const controller = new AbortController();
+        fetchRequest.current = controller;
+        if (activeProjectId.current === targetProjectId) {
+          if (withSpinner) setLoading(true);
+          setError(null);
+        }
         try {
-          const data = await listJobs(projectId, limit);
-          setJobs(Array.isArray(data) ? data : []);
+          const data = await listJobs(targetProjectId, limit, {
+            signal: controller.signal,
+          });
+          if (
+            !controller.signal.aborted &&
+            generation === fetchGeneration.current &&
+            activeProjectId.current === targetProjectId
+          ) {
+            setJobs(Array.isArray(data) ? data : []);
+          }
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'ジョブ一覧の取得に失敗しました');
+          if (
+            !controller.signal.aborted &&
+            generation === fetchGeneration.current &&
+            activeProjectId.current === targetProjectId
+          ) {
+            setError(err instanceof Error ? err.message : 'ジョブ一覧の取得に失敗しました');
+          }
         } finally {
-          if (withSpinner) setLoading(false);
+          if (
+            !controller.signal.aborted &&
+            generation === fetchGeneration.current &&
+            activeProjectId.current === targetProjectId
+          ) {
+            setLoading(false);
+          }
         }
       },
-      [projectId, limit],
+      [limit],
     );
 
     useEffect(() => {
-      void fetchJobs(true);
-    }, [fetchJobs]);
-
-    useImperativeHandle(ref, () => ({ refresh: () => void fetchJobs(false) }), [fetchJobs]);
-
-    const runAction = async (id: string, action: () => Promise<unknown>) => {
-      setBusyId(id);
+      activeProjectId.current = projectId;
+      ++actionGeneration.current;
+      actionRequest.current?.abort();
+      setJobs([]);
       setError(null);
+      setBusyId(null);
+      setLoading(true);
+      void fetchJobs(projectId, true);
+      return () => {
+        fetchRequest.current?.abort();
+        actionRequest.current?.abort();
+      };
+    }, [fetchJobs, projectId]);
+
+    useImperativeHandle(
+      ref,
+      () => ({ refresh: () => void fetchJobs(activeProjectId.current, false) }),
+      [fetchJobs],
+    );
+
+    const runAction = async (
+      id: string,
+      targetProjectId: string,
+      action: (signal: AbortSignal) => Promise<unknown>,
+    ) => {
+      const generation = ++actionGeneration.current;
+      actionRequest.current?.abort();
+      const controller = new AbortController();
+      actionRequest.current = controller;
+      if (activeProjectId.current === targetProjectId) {
+        setBusyId(id);
+        setError(null);
+      }
       try {
-        await action();
-        await fetchJobs(false);
+        await action(controller.signal);
+        if (
+          controller.signal.aborted ||
+          generation !== actionGeneration.current ||
+          activeProjectId.current !== targetProjectId
+        ) return;
+        await fetchJobs(targetProjectId, false);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'ジョブの再開に失敗しました');
+        if (
+          !controller.signal.aborted &&
+          generation === actionGeneration.current &&
+          activeProjectId.current === targetProjectId
+        ) {
+          setError(err instanceof Error ? err.message : 'ジョブの再開に失敗しました');
+        }
       } finally {
-        setBusyId(null);
+        if (
+          generation === actionGeneration.current &&
+          activeProjectId.current === targetProjectId
+        ) {
+          setBusyId(null);
+        }
       }
     };
 
@@ -385,7 +457,7 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void fetchJobs(false)}
+              onClick={() => void fetchJobs(projectId, false)}
               className="border-gray-300 text-gray-700"
               title="一覧を再取得"
             >
@@ -394,17 +466,19 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
             </Button>
           </div>
 
-          {loading ? (
+          {error && (
+            <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <span>{error}</span>
+              <Button variant="outline" size="sm" onClick={() => void fetchJobs(projectId, true)}>
+                再読み込み
+              </Button>
+            </div>
+          )}
+
+          {loading && jobs.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-gray-400">
               <Loader2 className="h-5 w-5 animate-spin mr-2" />
               読み込み中...
-            </div>
-          ) : error ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <span>{error}</span>
-              <Button variant="outline" size="sm" onClick={() => void fetchJobs(true)}>
-                再読み込み
-              </Button>
             </div>
           ) : jobs.length === 0 ? (
             <p className="flex items-center gap-2 py-6 text-sm text-gray-400">
@@ -416,12 +490,16 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
               jobs={jobs}
               busyId={busyId}
               onResume={(job) =>
-                void runAction(job.id, () => resumeJob(projectId, job.id))
+                void runAction(job.id, projectId, (signal) =>
+                  resumeJob(projectId, job.id, { signal }),
+                )
               }
               onRetryPage={(job) => {
                 const pageId = job.knowledgePage?.id;
                 if (pageId) {
-                  void runAction(job.id, () => retryKnowledgeDocumentPage(pageId));
+                  void runAction(job.id, projectId, (signal) =>
+                    retryKnowledgeDocumentPage(pageId, { signal }),
+                  );
                 }
               }}
             />
