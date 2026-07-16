@@ -5,6 +5,7 @@ import {
   GANTT_ZOOM_OPTIONS,
   TWO_WEEKS_VIEW_MODE,
   frappeViewModeForZoom,
+  prioritizeFrappeViewMode,
 } from './gantt-view-modes'
 
 describe('gantt view modes', () => {
@@ -36,5 +37,15 @@ describe('gantt view modes', () => {
       'Month',
     ])
     expect(frappeViewModeForZoom('two-weeks')).toBe('Two Weeks')
+  })
+
+  it('全画面切替による再マウント後も選択中の表示モードを先頭に渡す', () => {
+    expect(prioritizeFrappeViewMode(GANTT_VIEW_MODES, 'Two Weeks')).toEqual([
+      TWO_WEEKS_VIEW_MODE,
+      'Day',
+      'Week',
+      'Month',
+    ])
+    expect(prioritizeFrappeViewMode(GANTT_VIEW_MODES, 'Month')[0]).toBe('Month')
   })
 })

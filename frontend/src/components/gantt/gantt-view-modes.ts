@@ -58,3 +58,18 @@ const FRAPPE_VIEW_MODE_BY_ZOOM: Record<GanttZoomMode, FrappeViewMode> = {
 export function frappeViewModeForZoom(mode: GanttZoomMode): FrappeViewMode {
   return FRAPPE_VIEW_MODE_BY_ZOOM[mode]
 }
+
+export function prioritizeFrappeViewMode(
+  modes: readonly (FrappeViewMode | FrappeViewModeDefinition)[],
+  selected: FrappeViewMode,
+): (FrappeViewMode | FrappeViewModeDefinition)[] {
+  const selectedIndex = modes.findIndex((mode) =>
+    typeof mode === 'string' ? mode === selected : mode.name === selected,
+  )
+  if (selectedIndex <= 0) return [...modes]
+  return [
+    modes[selectedIndex],
+    ...modes.slice(0, selectedIndex),
+    ...modes.slice(selectedIndex + 1),
+  ]
+}

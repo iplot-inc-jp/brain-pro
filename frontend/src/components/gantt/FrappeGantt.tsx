@@ -29,6 +29,7 @@ import Gantt, {
 import './frappe-gantt.vendor.css';
 // 初期スクロール位置（今日 or タスク最早開始日）を決める純粋関数。
 import { computeInitialScroll } from './frappe-scroll';
+import { prioritizeFrappeViewMode } from './gantt-view-modes';
 
 export type { FrappeTask, FrappeViewMode };
 
@@ -89,9 +90,14 @@ export default function FrappeGantt({
     // 正規化など）。React state を汚さないようプレーンコピーを渡す。
     const initial = tasks.map((t) => ({ ...t }));
 
+    const configuredViewModes = viewModes
+      ? prioritizeFrappeViewMode(viewModes, viewMode)
+      : undefined;
     const gantt = new Gantt(el, initial, {
       view_mode: viewMode,
-      view_modes: viewModes ? [...viewModes] : undefined,
+      // Frappeはview_modes指定時に先頭要素を初期モードとして採用する。
+      // 全画面切替などの再マウントでも選択中の粒度を維持するため先頭へ移す。
+      view_modes: configuredViewModes,
       language: 'ja',
       bar_height: 22,
       padding: 14,
