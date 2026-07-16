@@ -98,6 +98,14 @@ AIDATAFLOW_API_KEY=sk_... node index.mjs
 | `api_request` | 任意ルートを直接叩く脱出ハッチ（method / path / query / body）。path は `/projects/...` 形式（`/api` プレフィックス不要） |
 | `whoami` | GET /auth/me。APIキーの疎通・権限確認 |
 
+### RAG索引（tools/rag.mjs）
+
+| ツール | 説明 |
+|---|---|
+| `rag_search` | Claudeで圧縮した全機能の概要・キーワード・別名・想定質問を横断検索し、元ページURLを返す |
+| `rag_generate` | 指定機能の全体概要／コンポーネント概要の生成ジョブを開始する |
+| `rag_status` | 指定機能の索引状態（未生成・最新・要更新）と生成済み全体概要を取得する |
+
 ### 組織・プロジェクト・フェーズ（tools/projects.mjs）
 
 | ツール | エンドポイント |
@@ -327,6 +335,7 @@ mcp/
     ├── data_objects_dfd.mjs   # DFD・データオブジェクト（領域紐付け/注釈/Mermaidインポート含む）
     ├── catalog.mjs            # テーブル/カラム/CRUD
     ├── pm.mjs                 # 憲章/KPI/導入状況/変更履歴
+    ├── rag.mjs                # Claude圧縮RAG索引の生成・状態確認・横断検索
     ├── rbac.mjs               # プロジェクト単位メンバー権限（VIEW/EDIT）・my-access
     └── jobs.mjs               # 非同期AIジョブ（enqueue → ai_job_get ポーリング）
 ```

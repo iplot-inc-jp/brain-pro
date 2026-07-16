@@ -37,6 +37,7 @@ import * as rbac from './tools/rbac.mjs';
 import * as jobs from './tools/jobs.mjs';
 import * as entityJson from './tools/entity_json.mjs';
 import * as knowledge from './tools/knowledge.mjs';
+import * as rag from './tools/rag.mjs';
 import * as meetingDocuments from './tools/meeting_documents.mjs';
 import * as shareLinks from './tools/share_links.mjs';
 
@@ -72,6 +73,7 @@ const modules = [
   jobs,
   entityJson,
   knowledge,
+  rag,
   meetingDocuments,
   shareLinks,
 ];
