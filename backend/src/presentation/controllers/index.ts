@@ -37,4 +37,5 @@ export * from './ingestion.controller';
 export * from './ingestion-file.controller';
 export * from './knowledge.controller';
 export * from './knowledge-settings.controller';
+export * from './rag.controller';
 export * from './invite.controller';

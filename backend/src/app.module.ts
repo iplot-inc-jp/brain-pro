@@ -525,6 +525,9 @@ import { LiveblocksController } from './presentation/controllers/liveblocks.cont
 import { IssueLiveblocksTokenUseCase } from './application/use-cases/liveblocks/issue-liveblocks-token.use-case';
 import { GetAllAccessibleIngestionBatchesUseCase } from './application/use-cases/ingestion/get-all-accessible-ingestion-batches.use-case';
 import { LiveblocksTokenService } from './infrastructure/services/liveblocks-token.service';
+import { RagController } from './presentation/controllers/rag.controller';
+import { RagSourceService } from './infrastructure/rag/rag-source.service';
+import { RagIndexService } from './infrastructure/rag/rag-index.service';
 
 @Module({
   imports: [
@@ -679,6 +682,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     KnowledgeDocumentController,
     KnowledgeRelationController,
     KnowledgeSettingsController,
+    RagController,
     // Google Drive ソースアダプタ（Phase 3）
     DriveController,
     // Liveblocks リアルタイム・プレゼンス
@@ -1129,6 +1133,8 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     ExcelTaskImportService,
     KnowledgeIngestionService,
     KnowledgeDocumentExtractService,
+    RagSourceService,
+    RagIndexService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
     // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）

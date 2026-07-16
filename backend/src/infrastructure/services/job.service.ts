@@ -12,6 +12,8 @@ import { ImportMermaidUseCase } from '../../application/use-cases/data-object/im
 import { GenerateKpisUseCase } from '../../application/use-cases/kpi/generate-kpis.use-case';
 import { TrackerImportService } from './trackers/tracker-import.service';
 import { KnowledgeIngestionService } from '../knowledge/knowledge-ingestion.service';
+import { RagIndexService } from '../rag/rag-index.service';
+import { RAG_FEATURE_TYPES, RagFeatureType } from '../rag/rag.types';
 
 /**
  * 非同期バックグラウンドジョブの起票・実行サービス。
@@ -45,6 +47,7 @@ export class JobService {
     // KnowledgeIngestionService ↔ JobService は相互参照（取り込みパイプラインが子ジョブを起票する）。
     @Inject(forwardRef(() => KnowledgeIngestionService))
     private readonly knowledgeIngestion: KnowledgeIngestionService,
+    private readonly ragIndex: RagIndexService,
   ) {}
 
   /**
@@ -379,6 +382,7 @@ export class JobService {
     'AI_MERMAID_FLOW',
     'AI_KPI',
     'AI_ISSUE_SUGGEST',
+    'AI_RAG_SUMMARIZE',
     // ナレッジ取り込み（1ファイル=1ジョブ）。
     'KG_INGEST_FILE',
     'KG_EXPAND_ARCHIVE',
@@ -447,6 +451,24 @@ export class JobService {
           count: typeof payload.count === 'number' ? payload.count : undefined,
         });
         return { kind: 'KPIS', kpis };
+      }
+
+      case 'AI_RAG_SUMMARIZE': {
+        const projectId = this.requireString(job.projectId, 'projectId');
+        const featureType = this.requireString(payload.featureType, 'payload.featureType');
+        if (!(RAG_FEATURE_TYPES as readonly string[]).includes(featureType)) {
+          throw new Error(`不正なRAG機能種別です: ${featureType}`);
+        }
+        const apiKey = await this.resolveKey(projectId, job.createdById);
+        const result = await this.ragIndex.generate({
+          projectId,
+          featureType: featureType as RagFeatureType,
+          targetId: typeof payload.targetId === 'string' ? payload.targetId : null,
+          userId: job.createdById,
+          apiKey,
+          onProgress: (progress) => this.updateProgress(job.id, progress),
+        });
+        return { kind: 'RAG_INDEX', ...result };
       }
 
       // ===== compute ジョブ（parse 結果を result に返す。永続はクライアント側） =====
