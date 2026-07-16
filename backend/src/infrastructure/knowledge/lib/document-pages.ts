@@ -632,6 +632,7 @@ function extractPptxParts(
     }
   }
   let totalOutputBytes = 0;
+  let totalXmlOutputBytes = 0;
 
   for (const entry of extractedEntries) {
     validateDeclaredZipBounds(
@@ -648,10 +649,19 @@ function extractPptxParts(
     let entryCrc32 = 0xffffffff;
     let compressedInputBytes = 0;
     let reachedFinalOutput = false;
+    const isXmlEntry = isPptxXmlPart(entry.name);
     const onOutput = (chunk: Uint8Array, final: boolean): void => {
       entryOutputBytes += chunk.byteLength;
       totalOutputBytes += chunk.byteLength;
+      if (isXmlEntry) totalXmlOutputBytes += chunk.byteLength;
       entryCrc32 = updateCrc32(entryCrc32, chunk);
+      if (
+        isXmlEntry &&
+        (entryOutputBytes > limits.maxPptxXmlPartBytes ||
+          totalXmlOutputBytes > limits.maxPptxXmlTotalBytes)
+      ) {
+        throw new DocumentPageParseError("PPTX", "PPTX_XML_LIMIT_EXCEEDED");
+      }
       if (entryOutputBytes > limits.maxZipEntryOutputBytes) {
         throw new DocumentPageParseError("PPTX", "ZIP_ENTRY_BYTES_EXCEEDED");
       }

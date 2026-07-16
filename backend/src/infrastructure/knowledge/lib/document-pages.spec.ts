@@ -91,6 +91,19 @@ function compressedDataRange(
   };
 }
 
+function mutateDeclaredUncompressedSize(
+  source: Buffer,
+  path: string,
+  declaredSize: number,
+): Buffer {
+  const archive = Buffer.from(source);
+  const centralOffset = findCentralEntry(archive, path);
+  const localOffset = archive.readUInt32LE(centralOffset + 42);
+  archive.writeUInt32LE(declaredSize, centralOffset + 24);
+  archive.writeUInt32LE(declaredSize, localOffset + 22);
+  return archive;
+}
+
 function expectPptxIntegrityError(bytes: Uint8Array): void {
   expect(() => readPptxSlides(bytes)).toThrow(
     expect.objectContaining({
@@ -658,6 +671,41 @@ describe("readPptxSlides", () => {
       { maxPptxXmlAttributeBytes: 5 },
     ],
   ])("PPTX XML の%s上限を強制する", (_, pptx, limits) => {
+    const readWithXmlLimits = readPptxSlides as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof readPptxSlides>;
+
+    expect(() => readWithXmlLimits(pptx, limits)).toThrow(
+      expect.objectContaining({ code: "PPTX_XML_LIMIT_EXCEEDED" }),
+    );
+  });
+
+  it.each([
+    [
+      "単一 part",
+      mutateDeclaredUncompressedSize(
+        makePptx({
+          "ppt/slides/slide1.xml": `<p:sld><a:t>${"x".repeat(200)}</a:t></p:sld>`,
+        }),
+        "ppt/slides/slide1.xml",
+        20,
+      ),
+      { maxPptxXmlPartBytes: 100 },
+    ],
+    [
+      "aggregate",
+      mutateDeclaredUncompressedSize(
+        makePptx({
+          "ppt/slides/slide1.xml": `<p:sld><a:t>${"x".repeat(80)}</a:t></p:sld>`,
+          "ppt/slides/slide2.xml": `<p:sld><a:t>${"y".repeat(80)}</a:t></p:sld>`,
+        }),
+        "ppt/slides/slide2.xml",
+        20,
+      ),
+      { maxPptxXmlPartBytes: 150, maxPptxXmlTotalBytes: 180 },
+    ],
+  ])("偽装した XML 展開サイズでも実測%s上限を強制する", (_, pptx, limits) => {
     const readWithXmlLimits = readPptxSlides as (
       bytes: Uint8Array,
       limits: Record<string, number>,
