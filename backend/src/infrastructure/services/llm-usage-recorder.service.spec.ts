@@ -27,6 +27,19 @@ describe('LlmUsageRecorder', () => {
     });
   });
 
+  it('RAG呼び出しで使用したプロンプト版IDを記録する', async () => {
+    const prisma = makePrisma();
+    const rec = new LlmUsageRecorder(prisma);
+    await rec.record(
+      { projectId: 'p1', area: 'RAG', promptVersionId: 'pv7' },
+      'claude-haiku-4-5',
+      { input_tokens: 12, output_tokens: 4 },
+    );
+    expect(prisma.llmUsageLog.create.mock.calls[0][0].data).toMatchObject({
+      area: 'RAG', model: 'claude-haiku-4-5', promptVersionId: 'pv7',
+    });
+  });
+
   it('insert が失敗しても例外を投げない（AI本処理を壊さない）', async () => {
     const prisma = makePrisma(async () => {
       throw new Error('db down');

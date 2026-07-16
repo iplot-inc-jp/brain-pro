@@ -44,6 +44,12 @@ export interface RagCompressionResult {
   model: string;
 }
 
+export interface RagCompressionConfig {
+  model: string;
+  systemPrompt: string;
+  promptVersionId: string;
+}
+
 interface BatchOptions {
   maxItems: number;
   maxChars: number;

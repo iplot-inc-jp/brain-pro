@@ -39,30 +39,54 @@ function makeDeps() {
   };
   const source = { build: jest.fn(async () => structuredClone(bundle)) };
   const claude = {
-    compressForRag: jest.fn(async (items: any[]) => ({
-      model: 'claude-sonnet-4-6',
+    compressForRag: jest.fn(async (items: any[], _apiKey?: string, config?: { model?: string }) => ({
+      model: config?.model ?? 'claude-sonnet-4-6',
       documents: items.map((row) => compressed(row.sourceKey, row.title)),
     })),
   };
-  return { prisma, source, claude };
+  const prompt = {
+    getActive: jest.fn(async () => ({
+      id: 'pv7', version: 7, model: 'claude-haiku-4-5',
+      systemPrompt: 'DB管理のRAGプロンプト',
+    })),
+  };
+  return { prisma, source, claude, prompt };
+}
+
+function service(deps: ReturnType<typeof makeDeps>) {
+  return new (RagIndexService as any)(
+    deps.prisma, deps.source, deps.claude, deps.prompt,
+  ) as RagIndexService;
 }
 
 describe('RagIndexService.generate', () => {
   it('Claude全バッチ成功後にoverviewとcomponentsを1トランザクションで保存する', async () => {
     const deps = makeDeps();
-    const service = new RagIndexService(deps.prisma, deps.source as any, deps.claude as any);
-    const result = await service.generate({
+    const index = service(deps);
+    const result = await index.generate({
       projectId: 'p1', featureType: 'TASK', userId: 'u1', apiKey: 'sk-test',
     });
 
     expect(deps.claude.compressForRag).toHaveBeenCalledTimes(2);
+    expect(deps.prompt.getActive).toHaveBeenCalledTimes(1);
+    expect(deps.claude.compressForRag).toHaveBeenNthCalledWith(
+      1,
+      [expect.objectContaining({ sourceKey: 'project:TASK' })],
+      'sk-test',
+      {
+        model: 'claude-haiku-4-5',
+        systemPrompt: 'DB管理のRAGプロンプト',
+        promptVersionId: 'pv7',
+      },
+      expect.objectContaining({ projectId: 'p1', area: 'RAG', userId: 'u1' }),
+    );
     expect(deps.prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(deps.prisma.ragDocument.upsert).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({ featureType: 'TASK', targetKey: 'project', documentCount: 3 });
     const creates = deps.prisma.ragDocument.upsert.mock.calls.map((call: any[]) => call[0].create);
     expect(creates).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ scopeLevel: 'OVERVIEW', sourceKey: 'project:TASK', sourceHash: 'source-hash-v1' }),
+        expect.objectContaining({ scopeLevel: 'OVERVIEW', sourceKey: 'project:TASK', sourceHash: 'source-hash-v1', model: 'claude-haiku-4-5', promptVersion: 'pv7' }),
         expect.objectContaining({ scopeLevel: 'COMPONENT', sourceKey: 't1', generatedById: 'u1' }),
       ]),
     );
@@ -70,7 +94,7 @@ describe('RagIndexService.generate', () => {
 
   it('再生成時に応答から消えた同一targetのcomponentだけを削除する', async () => {
     const deps = makeDeps();
-    await new RagIndexService(deps.prisma, deps.source as any, deps.claude as any).generate({
+    await service(deps).generate({
       projectId: 'p1', featureType: 'TASK', apiKey: 'sk-test',
     });
     expect(deps.prisma.ragDocument.deleteMany).toHaveBeenCalledWith({
@@ -85,7 +109,7 @@ describe('RagIndexService.generate', () => {
     const deps = makeDeps();
     deps.claude.compressForRag.mockRejectedValueOnce(new Error('Claude unavailable'));
     await expect(
-      new RagIndexService(deps.prisma, deps.source as any, deps.claude as any).generate({
+      service(deps).generate({
         projectId: 'p1', featureType: 'TASK', apiKey: 'sk-test',
       }),
     ).rejects.toThrow('Claude unavailable');
@@ -96,7 +120,7 @@ describe('RagIndexService.generate', () => {
 describe('RagIndexService.status', () => {
   it('索引が無ければ UNGENERATED', async () => {
     const deps = makeDeps();
-    const result = await new RagIndexService(deps.prisma, deps.source as any, deps.claude as any)
+    const result = await service(deps)
       .status('p1', 'TASK');
     expect(result.state).toBe('UNGENERATED');
   });
@@ -107,13 +131,13 @@ describe('RagIndexService.status', () => {
       { sourceHash: 'source-hash-v1', generatedAt: new Date('2026-07-16'), model: 'm', summary: 'ok', scopeLevel: 'OVERVIEW' },
       { sourceHash: 'source-hash-v1', generatedAt: new Date('2026-07-16'), model: 'm', summary: 'part', scopeLevel: 'COMPONENT' },
     ]);
-    const service = new RagIndexService(deps.prisma, deps.source as any, deps.claude as any);
-    expect((await service.status('p1', 'TASK')).state).toBe('FRESH');
+    const index = service(deps);
+    expect((await index.status('p1', 'TASK')).state).toBe('FRESH');
 
     deps.prisma.ragDocument.findMany.mockResolvedValueOnce([
       { sourceHash: 'old', generatedAt: new Date('2026-07-16'), model: 'm', summary: 'old', scopeLevel: 'OVERVIEW' },
     ]);
-    expect((await service.status('p1', 'TASK')).state).toBe('STALE');
+    expect((await index.status('p1', 'TASK')).state).toBe('STALE');
   });
 });
 
@@ -123,7 +147,7 @@ describe('RagIndexService.search', () => {
     deps.prisma.$queryRaw.mockResolvedValueOnce([
       { id: 'd1', projectId: 'p1', featureType: 'TASK', scopeLevel: 'COMPONENT', sourceKey: 't1', sourceUrl: '/tasks/t1', title: '受注確認', summary: '概要', content: '本文', keywords: ['受注'], aliases: [], questions: [], metadata: {}, generatedAt: new Date(), score: 4.5 },
     ]);
-    const result = await new RagIndexService(deps.prisma, deps.source as any, deps.claude as any)
+    const result = await service(deps)
       .search('p1', { q: '受注', featureType: 'TASK', scopeLevel: 'COMPONENT', limit: 999 });
 
     expect(result[0]).toMatchObject({ title: '受注確認', score: 4.5 });
@@ -135,7 +159,7 @@ describe('RagIndexService.search', () => {
   it('空クエリでは新しい索引を一覧する', async () => {
     const deps = makeDeps();
     deps.prisma.ragDocument.findMany.mockResolvedValueOnce([{ id: 'd1', title: '最新' }]);
-    const result = await new RagIndexService(deps.prisma, deps.source as any, deps.claude as any)
+    const result = await service(deps)
       .search('p1', { q: '', limit: 10 });
     expect(deps.prisma.ragDocument.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { projectId: 'p1' }, take: 10 }),

@@ -19,6 +19,7 @@ export interface LlmUsageContext {
   area: LlmUsageArea;
   userId?: string | null;
   organizationId?: string | null;
+  promptVersionId?: string | null;
 }
 
 /** Anthropic response.usage の最小形（フィールドは snake_case）。 */
@@ -57,6 +58,7 @@ export class LlmUsageRecorder {
           outputTokens: usage?.output_tokens ?? 0,
           cacheReadInputTokens: usage?.cache_read_input_tokens ?? null,
           cacheCreationInputTokens: usage?.cache_creation_input_tokens ?? null,
+          promptVersionId: ctx.promptVersionId ?? null,
         },
       });
     } catch (err) {
