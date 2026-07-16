@@ -104,9 +104,10 @@ describe('BackgroundJobsPanel hierarchy', () => {
     );
     expect(screen.getByText('4 / 4 回')).toBeInTheDocument();
     expect(screen.getByText('モデル応答が中断しました')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'スライド 2を再試行' }),
-    ).toBeInTheDocument();
+    const childRetry = screen.getByRole('button', {
+      name: '資料取り込み root-1 のスライド 2を再試行',
+    });
+    expect(childRetry).toHaveClass('min-h-11', 'min-w-11');
   });
 
   it('uses separate parent resume and failed-child retry endpoints', async () => {
@@ -119,11 +120,11 @@ describe('BackgroundJobsPanel hierarchy', () => {
     );
     render(<BackgroundJobsPanel projectId="project-1" />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: '資料取り込み root-1 の未完了ページを再開',
-      }),
-    );
+    const parentResume = await screen.findByRole('button', {
+      name: '資料取り込み root-1 の未完了ページを再開',
+    });
+    expect(parentResume).toHaveClass('min-h-11', 'min-w-11');
+    await user.click(parentResume);
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining('/api/projects/project-1/jobs/root-1/resume'),
@@ -136,7 +137,9 @@ describe('BackgroundJobsPanel hierarchy', () => {
       }),
     );
     await user.click(
-      screen.getByRole('button', { name: 'スライド 2を再試行' }),
+      screen.getByRole('button', {
+        name: '資料取り込み root-1 のスライド 2を再試行',
+      }),
     );
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(

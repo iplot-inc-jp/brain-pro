@@ -237,7 +237,7 @@ function JobsTable({
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="h-7 px-2 text-xs"
+                          className="h-7 min-h-11 min-w-11 px-2 text-xs"
                           disabled={busyId !== null}
                           aria-label={`${typeLabel(job.type)} ${job.id} の未完了ページを再開`}
                           onClick={() => onResume(job)}
@@ -291,9 +291,9 @@ function JobsTable({
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  className="h-7 justify-self-start px-2 text-xs sm:justify-self-end"
+                                  className="h-7 min-h-11 min-w-11 justify-self-start px-2 text-xs sm:justify-self-end"
                                   disabled={busyId !== null}
-                                  aria-label={`${label}を再試行`}
+                                  aria-label={`${typeLabel(job.type)} ${job.id} の${label}を再試行`}
                                   onClick={() => onRetryPage(child)}
                                 >
                                   <RotateCw className="mr-1 h-3 w-3" />

@@ -106,7 +106,10 @@ describe('NodeDetailPanel document pages', () => {
     expect(
       screen.getByText('自動再試行中、または現在は再試行できません。'),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /再試行/ })).toHaveLength(1);
+    const retry = screen.getByRole('button', {
+      name: '提案資料.pdf ページ 4を再試行',
+    });
+    expect(retry).toHaveClass('min-h-11', 'min-w-11');
     expect(screen.getByRole('button', { name: '全文を表示' })).toHaveAttribute(
       'aria-expanded',
       'false',

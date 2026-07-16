@@ -401,7 +401,7 @@ export function NodeDetailPanel({
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-xs"
+                            className="h-7 min-h-11 min-w-11 px-2 text-xs"
                             disabled={retryingPageId === page.id}
                             onClick={() => void retryPage(page)}
                             aria-label={`${selectedDocument.title} ${label}を再試行`}
