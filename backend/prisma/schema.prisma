@@ -33,6 +33,7 @@ model User {
   projectMemberships  ProjectMember[]
   createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
   generatedRagDocuments RagDocument[] @relation("RagDocumentGeneratedBy")
+  createdRagPromptVersions RagPromptVersion[] @relation("RagPromptVersionCreatedBy")
 
   @@map("users")
 }
@@ -337,6 +338,7 @@ model Project {
   knowledgeNodeLinks      KnowledgeNodeLink[]
   shareLinks              ShareLink[]
   ragDocuments            RagDocument[]
+  ragPromptVersions       RagPromptVersion[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -399,6 +401,26 @@ model RagDocument {
   @@index([projectId, featureType, targetKey], map: "rag_docs_project_feature_target_idx")
   @@index([projectId, scopeLevel], map: "rag_docs_project_scope_idx")
   @@map("rag_documents")
+}
+
+// プロジェクト単位のRAGモデル／システムプロンプト。変更時は上書きせず新しい版を作る。
+model RagPromptVersion {
+  id           String   @id @default(cuid())
+  projectId    String   @map("project_id")
+  version      Int
+  model        String
+  systemPrompt String   @map("system_prompt") @db.Text
+  isActive     Boolean  @default(true) @map("is_active")
+  createdById  String?  @map("created_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("RagPromptVersionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  usageLogs LlmUsageLog[]
+
+  @@unique([projectId, version], map: "rag_prompt_versions_project_version_key")
+  @@index([projectId, isActive], map: "rag_prompt_versions_project_active_idx")
+  @@map("rag_prompt_versions")
 }
 
 // ===========================================
@@ -3027,13 +3049,16 @@ model LlmUsageLog {
   outputTokens   Int          @default(0) @map("output_tokens")
   cacheReadInputTokens     Int? @map("cache_read_input_tokens")
   cacheCreationInputTokens Int? @map("cache_creation_input_tokens")
+  promptVersionId String?      @map("prompt_version_id")
   createdAt      DateTime     @default(now()) @map("created_at")
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  promptVersion RagPromptVersion? @relation(fields: [promptVersionId], references: [id], onDelete: SetNull)
 
   @@index([projectId, createdAt])
   @@index([projectId, area])
   @@index([projectId, model])
+  @@index([promptVersionId])
   @@map("llm_usage_logs")
 }
 
