@@ -1,6 +1,25 @@
-import { Injectable } from '@nestjs/common';
-import { KnowledgePageKind, Prisma } from '@prisma/client';
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  KnowledgeDocumentPage,
+  KnowledgePageKind,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../persistence/prisma/prisma.service';
+
+export interface KnowledgePagePrismaClient {
+  knowledgeDocumentPage: {
+    upsert(
+      args: Prisma.KnowledgeDocumentPageUpsertArgs,
+    ): Promise<KnowledgeDocumentPage>;
+    updateMany(
+      args: Prisma.KnowledgeDocumentPageUpdateManyArgs,
+    ): Promise<Prisma.BatchPayload>;
+    findMany(
+      args: Prisma.KnowledgeDocumentPageFindManyArgs,
+    ): Promise<KnowledgeDocumentPage[]>;
+    count(args: Prisma.KnowledgeDocumentPageCountArgs): Promise<number>;
+  };
+}
 
 export interface UpsertPendingKnowledgePageInput {
   projectId: string;
@@ -12,15 +31,40 @@ export interface UpsertPendingKnowledgePageInput {
   sourceBlobUrl: string | null;
 }
 
-export interface SucceededKnowledgePageInput {
+interface ScopedKnowledgePageInput {
+  id: string;
+  projectId: string;
+}
+
+export interface ProcessingKnowledgePageInput
+  extends ScopedKnowledgePageInput {
+  jobId: string;
+}
+
+export interface SucceededKnowledgePageInput
+  extends ScopedKnowledgePageInput {
   contentText: string;
   summary: string;
   extractionResult: Prisma.InputJsonValue;
 }
 
+export interface FailedKnowledgePageInput extends ScopedKnowledgePageInput {
+  error: string;
+}
+
+export class KnowledgePageNotFoundError extends Error {
+  constructor(id: string, projectId: string) {
+    super(`Knowledge page ${id} was not found in project ${projectId}`);
+    this.name = 'KnowledgePageNotFoundError';
+  }
+}
+
 @Injectable()
 export class KnowledgePageRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService)
+    private readonly prisma: KnowledgePagePrismaClient,
+  ) {}
 
   upsertPending(input: UpsertPendingKnowledgePageInput) {
     const {
@@ -60,38 +104,29 @@ export class KnowledgePageRepository {
     });
   }
 
-  markProcessing(id: string, jobId: string) {
-    return this.prisma.knowledgeDocumentPage.update({
-      where: { id },
-      data: {
-        status: 'PROCESSING',
-        jobId,
-        error: null,
-      },
+  markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
+    return this.updateScoped(input.id, input.projectId, {
+      status: 'PROCESSING',
+      jobId: input.jobId,
+      error: null,
     });
   }
 
-  markSucceeded(id: string, input: SucceededKnowledgePageInput) {
-    return this.prisma.knowledgeDocumentPage.update({
-      where: { id },
-      data: {
-        status: 'SUCCEEDED',
-        contentText: input.contentText,
-        summary: input.summary,
-        extractionResult: input.extractionResult,
-        error: null,
-      },
+  markSucceeded(input: SucceededKnowledgePageInput): Promise<void> {
+    return this.updateScoped(input.id, input.projectId, {
+      status: 'SUCCEEDED',
+      contentText: input.contentText,
+      summary: input.summary,
+      extractionResult: input.extractionResult,
+      error: null,
     });
   }
 
-  markFailed(id: string, error: string) {
-    return this.prisma.knowledgeDocumentPage.update({
-      where: { id },
-      data: {
-        status: 'FAILED',
-        attempts: { increment: 1 },
-        error,
-      },
+  markFailed(input: FailedKnowledgePageInput): Promise<void> {
+    return this.updateScoped(input.id, input.projectId, {
+      status: 'FAILED',
+      attempts: { increment: 1 },
+      error: input.error,
     });
   }
 
@@ -110,6 +145,11 @@ export class KnowledgePageRepository {
   }
 
   async allSucceeded(ingestionFileId: string): Promise<boolean> {
+    const total = await this.prisma.knowledgeDocumentPage.count({
+      where: { ingestionFileId },
+    });
+    if (total === 0) return false;
+
     const remaining = await this.prisma.knowledgeDocumentPage.count({
       where: {
         ingestionFileId,
@@ -117,5 +157,19 @@ export class KnowledgePageRepository {
       },
     });
     return remaining === 0;
+  }
+
+  private async updateScoped(
+    id: string,
+    projectId: string,
+    data: Prisma.KnowledgeDocumentPageUpdateManyMutationInput,
+  ): Promise<void> {
+    const { count } = await this.prisma.knowledgeDocumentPage.updateMany({
+      where: { id, projectId },
+      data,
+    });
+    if (count !== 1) {
+      throw new KnowledgePageNotFoundError(id, projectId);
+    }
   }
 }
