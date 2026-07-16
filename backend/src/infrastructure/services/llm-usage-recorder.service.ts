@@ -10,6 +10,7 @@ export type LlmUsageArea =
   | 'REQUIREMENT'
   | 'ISSUE_SUGGEST'
   | 'CODE_EXTRACTION'
+  | 'RAG'
   | 'OTHER';
 
 /** 記録に必要なコンテキスト（呼び出し元が渡す）。 */

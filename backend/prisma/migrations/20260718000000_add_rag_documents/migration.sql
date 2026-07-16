@@ -16,6 +16,8 @@ CREATE TYPE "RagFeatureType" AS ENUM (
 
 CREATE TYPE "RagScopeLevel" AS ENUM ('OVERVIEW', 'COMPONENT');
 
+ALTER TYPE "LlmUsageArea" ADD VALUE 'RAG';
+
 CREATE TABLE "rag_documents" (
   "id" TEXT NOT NULL,
   "project_id" TEXT NOT NULL,
