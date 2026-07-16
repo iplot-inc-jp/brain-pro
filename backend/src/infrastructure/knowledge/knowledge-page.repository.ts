@@ -10,23 +10,27 @@ export interface KnowledgePagePrismaClient {
   knowledgeDocumentPage: {
     findUnique(
       args: Prisma.KnowledgeDocumentPageFindUniqueArgs,
-    ): Promise<Pick<
-      KnowledgeDocumentPage,
-      'projectId' | 'knowledgeDocumentId'
-    > | null>;
+    ): Promise<KnowledgeDocumentPage | null>;
     create(
       args: Prisma.KnowledgeDocumentPageCreateArgs,
     ): Promise<KnowledgeDocumentPage>;
     updateMany(
       args: Prisma.KnowledgeDocumentPageUpdateManyArgs,
     ): Promise<Prisma.BatchPayload>;
-    findFirst(
-      args: Prisma.KnowledgeDocumentPageFindFirstArgs,
-    ): Promise<KnowledgeDocumentPage | null>;
     findMany(
       args: Prisma.KnowledgeDocumentPageFindManyArgs,
     ): Promise<KnowledgeDocumentPage[]>;
     count(args: Prisma.KnowledgeDocumentPageCountArgs): Promise<number>;
+  };
+  ingestionFile: {
+    findFirst(
+      args: Prisma.IngestionFileFindFirstArgs,
+    ): Promise<{ id: string } | null>;
+  };
+  knowledgeDocument: {
+    findFirst(
+      args: Prisma.KnowledgeDocumentFindFirstArgs,
+    ): Promise<{ id: string } | null>;
   };
 }
 
@@ -61,6 +65,16 @@ export interface FailedKnowledgePageInput extends ScopedKnowledgePageInput {
   error: string;
 }
 
+export interface KnowledgePagesForFileInput {
+  projectId: string;
+  ingestionFileId: string;
+}
+
+export interface KnowledgePagesForDocumentInput {
+  projectId: string;
+  knowledgeDocumentId: string;
+}
+
 export class KnowledgePageNotFoundError extends Error {
   constructor(id: string, projectId: string) {
     super(`Knowledge page ${id} was not found in project ${projectId}`);
@@ -92,12 +106,13 @@ export class KnowledgePageRepository {
     };
     const existing = await this.prisma.knowledgeDocumentPage.findUnique({
       where,
-      select: { projectId: true, knowledgeDocumentId: true },
     });
     if (existing) {
       this.assertPageParent(existing, input);
-      return this.refreshPending(input);
+      return existing;
     }
+
+    await this.assertScopedParents(input);
 
     try {
       return await this.prisma.knowledgeDocumentPage.create({
@@ -114,39 +129,27 @@ export class KnowledgePageRepository {
       });
     } catch (error: unknown) {
       if (!this.isUniqueConstraintError(error)) throw error;
-      return this.refreshPending(input);
+      const raced = await this.prisma.knowledgeDocumentPage.findUnique({ where });
+      if (!raced) throw this.pageNotFound(input);
+      this.assertPageParent(raced, input);
+      return raced;
     }
   }
 
-  private async refreshPending(
+  private async assertScopedParents(
     input: UpsertPendingKnowledgePageInput,
-  ): Promise<KnowledgeDocumentPage> {
-    const where = {
-      ingestionFileId: input.ingestionFileId,
-      pageNumber: input.pageNumber,
-      projectId: input.projectId,
-      knowledgeDocumentId: input.knowledgeDocumentId,
-    };
-    const { count } = await this.prisma.knowledgeDocumentPage.updateMany({
-      where,
-      data: {
-        pageKind: input.pageKind,
-        sourceText: input.sourceText,
-        sourceBlobUrl: input.sourceBlobUrl,
-        status: 'PENDING',
-        error: null,
-        jobId: null,
-      },
-    });
-    if (count !== 1) {
-      throw this.pageNotFound(input);
-    }
-
-    const saved = await this.prisma.knowledgeDocumentPage.findFirst({ where });
-    if (!saved) {
-      throw this.pageNotFound(input);
-    }
-    return saved;
+  ): Promise<void> {
+    const [file, document] = await Promise.all([
+      this.prisma.ingestionFile.findFirst({
+        where: { id: input.ingestionFileId, projectId: input.projectId },
+        select: { id: true },
+      }),
+      this.prisma.knowledgeDocument.findFirst({
+        where: { id: input.knowledgeDocumentId, projectId: input.projectId },
+        select: { id: true },
+      }),
+    ]);
+    if (!file || !document) throw this.pageNotFound(input);
   }
 
   private isUniqueConstraintError(error: unknown): boolean {
@@ -196,29 +199,39 @@ export class KnowledgePageRepository {
     });
   }
 
-  listForFile(ingestionFileId: string) {
+  listForFile(input: KnowledgePagesForFileInput) {
     return this.prisma.knowledgeDocumentPage.findMany({
-      where: { ingestionFileId },
+      where: {
+        projectId: input.projectId,
+        ingestionFileId: input.ingestionFileId,
+      },
       orderBy: { pageNumber: 'asc' },
     });
   }
 
-  listForDocument(knowledgeDocumentId: string) {
+  listForDocument(input: KnowledgePagesForDocumentInput) {
     return this.prisma.knowledgeDocumentPage.findMany({
-      where: { knowledgeDocumentId },
+      where: {
+        projectId: input.projectId,
+        knowledgeDocumentId: input.knowledgeDocumentId,
+      },
       orderBy: { pageNumber: 'asc' },
     });
   }
 
-  async allSucceeded(ingestionFileId: string): Promise<boolean> {
+  async allSucceeded(input: KnowledgePagesForFileInput): Promise<boolean> {
     const total = await this.prisma.knowledgeDocumentPage.count({
-      where: { ingestionFileId },
+      where: {
+        projectId: input.projectId,
+        ingestionFileId: input.ingestionFileId,
+      },
     });
     if (total === 0) return false;
 
     const remaining = await this.prisma.knowledgeDocumentPage.count({
       where: {
-        ingestionFileId,
+        projectId: input.projectId,
+        ingestionFileId: input.ingestionFileId,
         status: { not: 'SUCCEEDED' },
       },
     });
@@ -228,7 +241,7 @@ export class KnowledgePageRepository {
   private async updateScoped(
     id: string,
     projectId: string,
-    data: Prisma.KnowledgeDocumentPageUpdateManyMutationInput,
+    data: Prisma.KnowledgeDocumentPageUncheckedUpdateManyInput,
   ): Promise<void> {
     const { count } = await this.prisma.knowledgeDocumentPage.updateMany({
       where: { id, projectId },

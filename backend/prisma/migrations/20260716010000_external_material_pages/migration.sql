@@ -58,8 +58,14 @@ CREATE INDEX "ExternalMaterialImport_attachmentId_idx"
 CREATE INDEX "ExternalMaterialImport_ingestionBatchId_idx"
     ON "ExternalMaterialImport"("ingestionBatchId");
 
+CREATE UNIQUE INDEX "IngestionFile_id_projectId_key"
+    ON "IngestionFile"("id", "projectId");
+CREATE UNIQUE INDEX "KnowledgeDocument_id_projectId_key"
+    ON "KnowledgeDocument"("id", "projectId");
 CREATE UNIQUE INDEX "KnowledgeDocumentPage_ingestionFileId_pageNumber_key"
     ON "KnowledgeDocumentPage"("ingestionFileId", "pageNumber");
+CREATE UNIQUE INDEX "KnowledgeDocumentPage_jobId_key"
+    ON "KnowledgeDocumentPage"("jobId");
 CREATE INDEX "KnowledgeDocumentPage_knowledgeDocumentId_pageNumber_idx"
     ON "KnowledgeDocumentPage"("knowledgeDocumentId", "pageNumber");
 CREATE INDEX "KnowledgeDocumentPage_status_idx"
@@ -79,6 +85,12 @@ ALTER TABLE "ExternalMaterialImport" ADD CONSTRAINT "ExternalMaterialImport_inge
     FOREIGN KEY ("ingestionBatchId") REFERENCES "IngestionBatch"("id")
     ON DELETE SET NULL ON UPDATE CASCADE;
 
-ALTER TABLE "KnowledgeDocumentPage" ADD CONSTRAINT "KnowledgeDocumentPage_knowledgeDocumentId_fkey"
-    FOREIGN KEY ("knowledgeDocumentId") REFERENCES "KnowledgeDocument"("id")
+ALTER TABLE "KnowledgeDocumentPage" ADD CONSTRAINT "KnowledgeDocumentPage_ingestionFileId_projectId_fkey"
+    FOREIGN KEY ("ingestionFileId", "projectId") REFERENCES "IngestionFile"("id", "projectId")
     ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "KnowledgeDocumentPage" ADD CONSTRAINT "KnowledgeDocumentPage_knowledgeDocumentId_projectId_fkey"
+    FOREIGN KEY ("knowledgeDocumentId", "projectId") REFERENCES "KnowledgeDocument"("id", "projectId")
+    ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "KnowledgeDocumentPage" ADD CONSTRAINT "KnowledgeDocumentPage_jobId_fkey"
+    FOREIGN KEY ("jobId") REFERENCES "background_jobs"("id")
+    ON DELETE SET NULL ON UPDATE CASCADE;

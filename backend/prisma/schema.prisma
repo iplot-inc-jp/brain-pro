@@ -98,6 +98,7 @@ model BackgroundJob {
   parent         BackgroundJob?         @relation("BackgroundJobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
   children       BackgroundJob[]        @relation("BackgroundJobHierarchy")
   attemptRecords BackgroundJobAttempt[]
+  knowledgePage  KnowledgeDocumentPage? @relation("KnowledgePageJob")
 
   @@index([projectId, createdAt])
   @@index([parentJobId])
@@ -2801,6 +2802,7 @@ model ExternalMaterialImport {
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
 
+  // Task 4 invariant: attachmentId / ingestionBatchId are set only after both parents are transactionally verified in projectId.
   project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   attachment     Attachment?     @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
   ingestionBatch IngestionBatch? @relation(fields: [ingestionBatchId], references: [id], onDelete: SetNull)
@@ -2872,7 +2874,9 @@ model IngestionFile {
   finishedAt          DateTime?
 
   batch IngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  pages KnowledgeDocumentPage[]
 
+  @@unique([id, projectId])
   @@index([batchId])
   @@index([projectId])
   @@index([status])
@@ -2900,6 +2904,7 @@ model KnowledgeDocument {
   relations KnowledgeRelation[] @relation("RelationSourceDoc")
   pages     KnowledgeDocumentPage[]
 
+  @@unique([id, projectId])
   @@index([projectId])
 }
 
@@ -2919,11 +2924,13 @@ model KnowledgeDocumentPage {
   status              KnowledgePageStatus @default(PENDING)
   attempts            Int                 @default(0)
   error               String?             @db.Text
-  jobId               String?
+  jobId               String?             @unique
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
-  document KnowledgeDocument @relation(fields: [knowledgeDocumentId], references: [id], onDelete: Cascade)
+  ingestionFile IngestionFile     @relation(fields: [ingestionFileId, projectId], references: [id, projectId], onDelete: Cascade)
+  document      KnowledgeDocument @relation(fields: [knowledgeDocumentId, projectId], references: [id, projectId], onDelete: Cascade)
+  job           BackgroundJob?    @relation("KnowledgePageJob", fields: [jobId], references: [id], onDelete: SetNull)
 
   @@unique([ingestionFileId, pageNumber])
   @@index([knowledgeDocumentId, pageNumber])
