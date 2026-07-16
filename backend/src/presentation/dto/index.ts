@@ -6,4 +6,4 @@ export * from './project-phase';
 export * from './gap-item';
 export * from './issue-tree';
 export * from './invite';
-
+export * from './ipro-chat-history';
