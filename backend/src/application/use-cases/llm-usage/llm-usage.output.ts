@@ -20,6 +20,11 @@ export interface LlmUsageRecent {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  promptVersion: {
+    id: string;
+    version: number;
+    model: string;
+  } | null;
   createdAt: string;
 }
 export interface LlmUsageSummary {

@@ -28,6 +28,11 @@ interface Row {
   cacheReadInputTokens: number | null;
   cacheCreationInputTokens: number | null;
   createdAt: Date;
+  promptVersion?: {
+    id: string;
+    version: number;
+    model: string;
+  } | null;
 }
 
 @Injectable()
@@ -52,6 +57,11 @@ export class GetLlmUsageSummaryUseCase {
         ...(from ? { createdAt: { gte: from } } : {}),
       },
       orderBy: { createdAt: 'desc' },
+      include: {
+        promptVersion: {
+          select: { id: true, version: true, model: true },
+        },
+      },
     })) as unknown as Row[];
 
     const cost = (r: Row) =>
@@ -128,6 +138,7 @@ export class GetLlmUsageSummaryUseCase {
         inputTokens: r.inputTokens,
         outputTokens: r.outputTokens,
         costUsd: round(cost(r)),
+        promptVersion: r.promptVersion ?? null,
         createdAt: r.createdAt.toISOString(),
       })),
     };

@@ -68,4 +68,32 @@ describe('GetLlmUsageSummaryUseCase', () => {
     expect(r.byArea).toEqual([]);
     expect(r.from).not.toBeNull();
   });
+
+  it('直近のRAG呼び出しへ使用したプロンプト版を付ける', async () => {
+    const rows = [{
+      id: 'rag1', area: 'RAG', model: 'claude-haiku-4-5',
+      inputTokens: 120, outputTokens: 30,
+      cacheReadInputTokens: null, cacheCreationInputTokens: null,
+      createdAt: new Date('2026-07-16T02:00:00Z'),
+      promptVersion: {
+        id: 'pv7', version: 7, model: 'claude-haiku-4-5',
+      },
+    }, {
+      ...ROWS[0], id: 'legacy', promptVersion: null,
+    }];
+    const { prisma, access } = makeDeps(rows);
+    const result = await new GetLlmUsageSummaryUseCase(prisma, access).execute({
+      projectId: 'p1', userId: 'u1', principal: { id: 'u1' }, period: 'all',
+    });
+
+    expect(result.recent[0].promptVersion).toEqual({
+      id: 'pv7', version: 7, model: 'claude-haiku-4-5',
+    });
+    expect(result.recent[1].promptVersion).toBeNull();
+    expect(prisma.llmUsageLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: { promptVersion: { select: { id: true, version: true, model: true } } },
+      }),
+    );
+  });
 });

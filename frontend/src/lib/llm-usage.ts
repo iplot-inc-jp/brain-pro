@@ -9,6 +9,7 @@ export type LlmUsageArea =
   | 'REQUIREMENT'
   | 'ISSUE_SUGGEST'
   | 'CODE_EXTRACTION'
+  | 'RAG'
   | 'OTHER';
 
 export const AREA_LABEL: Record<LlmUsageArea, string> = {
@@ -19,8 +20,15 @@ export const AREA_LABEL: Record<LlmUsageArea, string> = {
   REQUIREMENT: '要求定義',
   ISSUE_SUGGEST: 'イシューツリー候補',
   CODE_EXTRACTION: 'コード/スキーマ解析',
+  RAG: 'RAG索引生成',
   OTHER: 'その他',
 };
+
+export interface LlmPromptVersionRef {
+  id: string;
+  version: number;
+  model: string;
+}
 
 export interface LlmUsageBucket {
   inputTokens: number;
@@ -42,6 +50,7 @@ export interface LlmUsageRecent {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  promptVersion: LlmPromptVersionRef | null;
   createdAt: string;
 }
 export interface LlmUsageSummary {
@@ -88,4 +97,11 @@ export function formatTokens(n: number): string {
 /** 概算コスト（USD）表示。 */
 export function formatUsd(n: number): string {
   return `$${n.toFixed(n < 1 ? 4 : 2)}`;
+}
+
+export function formatPromptVersionLabel(
+  promptVersion: LlmPromptVersionRef | null,
+): string | null {
+  if (!promptVersion) return null;
+  return `プロンプト v${promptVersion.version} · ${promptVersion.model}`;
 }
