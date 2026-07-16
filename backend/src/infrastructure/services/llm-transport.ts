@@ -41,12 +41,15 @@ export class AnthropicTransport implements LlmTransport {
 
   async run(req: LlmRunRequest): Promise<LlmRunResult> {
     const client = new Anthropic({ apiKey: this.apiKey });
-    const response = await client.messages.create({
-      model: req.model,
-      max_tokens: req.maxTokens,
-      messages: req.messages,
-      ...(req.system ? { system: req.system } : {}),
-    });
+    const response = await client.messages.create(
+      {
+        model: req.model,
+        max_tokens: req.maxTokens,
+        messages: req.messages,
+        ...(req.system ? { system: req.system } : {}),
+      },
+      { timeout: 4 * 60 * 1000 },
+    );
     const text = response.content
       .filter((c): c is Anthropic.TextBlock => c.type === 'text')
       .map((c) => c.text)

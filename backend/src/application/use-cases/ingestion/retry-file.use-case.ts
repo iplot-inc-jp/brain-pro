@@ -45,9 +45,19 @@ export class RetryFileUseCase {
       'edit',
     );
 
-    // 成功済み資料は確定成果物を保持する。再試行で新rootや再課金を発生させない。
+    // 成果物が先にSUCCEEDEDでも、merge job/親の可視状態更新前に落ちた可能性がある。
+    // 同じrootだけを回収し、新rootや再課金は発生させない。
     if (file.status === 'SUCCEEDED') {
-      return toIngestionFileOutput(file);
+      if (this.isPaged(file) && file.jobId) {
+        await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+          true,
+        );
+      }
+      const refreshed = await this.fileRepository.findById(file.id);
+      return toIngestionFileOutput(refreshed ?? file);
     }
 
     file.requeue();

@@ -76,6 +76,19 @@ export class ResumeBatchUseCase {
     const now = Date.now();
 
     for (const file of files) {
+      if (
+        file.status === 'SUCCEEDED' &&
+        this.isPaged(file) &&
+        file.jobId
+      ) {
+        await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+          true,
+        );
+        continue;
+      }
       if (!this.isResumable(file, now)) continue;
       file.requeue();
       await this.fileRepository.save(file);

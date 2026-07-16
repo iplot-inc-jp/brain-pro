@@ -118,4 +118,56 @@ describe('ClaudeService page extraction', () => {
       ),
     ).rejects.toThrow('完了マーカーなし');
   });
+
+  it('processes 25 metadata chunks with bounded concurrency and stable ordering', async () => {
+    const { service } = makeService();
+    const visualText = 'x'.repeat(999_999);
+    let calls = 0;
+    let active = 0;
+    let maxActive = 0;
+    jest
+      .spyOn(service as never, 'runLlm' as never)
+      .mockImplementation((async () => {
+        calls += 1;
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await Promise.resolve();
+        active -= 1;
+        if (calls === 1) {
+          return {
+            text: `${visualText}[[PAGE_COMPLETE]]`,
+            model: 'm',
+            usage: null,
+            stopReason: 'end_turn',
+          };
+        }
+        const index = calls - 1;
+        return {
+          text: JSON.stringify({
+            summary: `S${index}`,
+            tags: [`T${index}`],
+            entities: [],
+            relations: [],
+          }),
+          model: 'm',
+          usage: null,
+        };
+      }) as never);
+    const heartbeat = jest.fn(async () => undefined);
+
+    const result = await service.extractPageKnowledge(
+      { filename: 'dense.pdf', pdfBase64: 'AAAA' },
+      'sk-test',
+      'm',
+      undefined,
+      heartbeat,
+    );
+
+    expect(calls).toBe(26);
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(result.tags).toEqual(
+      Array.from({ length: 25 }, (_, index) => `T${index + 1}`),
+    );
+    expect(heartbeat).toHaveBeenCalledTimes(52);
+  });
 });

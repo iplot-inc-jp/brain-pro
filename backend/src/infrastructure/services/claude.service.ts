@@ -739,6 +739,7 @@ ${description}`,
     apiKey: string,
     model?: string,
     usage?: LlmUsageContext,
+    heartbeat?: () => Promise<void>,
   ): Promise<KnowledgeExtraction> {
     const hasVisual = !!input.pdfBase64 || (input.images?.length ?? 0) > 0;
     if (!hasVisual) return this.extractKnowledge(input, apiKey, model, usage);
@@ -748,27 +749,29 @@ ${description}`,
       apiKey,
       model || this.defaultModel(),
       usage,
+      heartbeat,
     );
     // PPTXのテキスト層はモデルに再生成させず、原文を先頭にそのまま保持する。
     const fullText = [input.text ?? '', visualText]
       .filter((part) => part.length > 0)
       .join('\n\n');
     const chunks = this.chunkText(fullText, 40_000);
-    const metadata = chunks.length
-      ? await Promise.all(
-          chunks.map((text, index) =>
-            this.extractKnowledge(
-              {
-                text,
-                filename: `${input.filename}#metadata=${index + 1}/${chunks.length}`,
-              },
-              apiKey,
-              model,
-              usage,
-            ),
-          ),
-        )
-      : [];
+    const metadata: KnowledgeExtraction[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      await heartbeat?.();
+      metadata.push(
+        await this.extractKnowledge(
+          {
+            text: chunks[index],
+            filename: `${input.filename}#metadata=${index + 1}/${chunks.length}`,
+          },
+          apiKey,
+          model,
+          usage,
+        ),
+      );
+      await heartbeat?.();
+    }
     const unique = <T>(rows: T[], key: (row: T) => string): T[] => {
       const seen = new Set<string>();
       return rows.filter((row) => {
@@ -805,12 +808,14 @@ ${description}`,
     apiKey: string,
     model: string,
     usage?: LlmUsageContext,
+    heartbeat?: () => Promise<void>,
   ): Promise<string> {
     const maxChunks = 16;
     const maxChars = 1_000_000;
     const marker = '[[PAGE_COMPLETE]]';
     let result = '';
     for (let part = 0; part < maxChunks; part += 1) {
+      await heartbeat?.();
       const content: any[] = [];
       if (input.pdfBase64) {
         content.push({
@@ -850,6 +855,7 @@ ${description}`,
         usage,
       });
       if (usage) await this.usageRecorder.record(usage, run.model, run.usage);
+      await heartbeat?.();
       if (!run.text) throw new Error('ページ全文書き起こしの応答が空です');
       const markerAt = run.text.lastIndexOf(marker);
       const piece = markerAt >= 0 ? run.text.slice(0, markerAt) : run.text;

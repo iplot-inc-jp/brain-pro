@@ -52,12 +52,15 @@ describe('AnthropicTransport', () => {
       messages: [{ role: 'user', content: 'q' }],
       taskType: 'KPI',
     });
-    expect(mockCreate).toHaveBeenCalledWith({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 100,
-      system: 'SYS',
-      messages: [{ role: 'user', content: 'q' }],
-    });
+    expect(mockCreate).toHaveBeenCalledWith(
+      {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 100,
+        system: 'SYS',
+        messages: [{ role: 'user', content: 'q' }],
+      },
+      { timeout: 240_000 },
+    );
     expect(res).toEqual({
       text: 'hello',
       model: 'claude-sonnet-4-6',

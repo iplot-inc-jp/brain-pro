@@ -22,7 +22,7 @@ const jobRow = (overrides: Partial<BackgroundJob> = {}): BackgroundJob => ({
 });
 
 function makeService() {
-  const prisma = {
+  const prisma: any = {
     backgroundJob: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => jobRow(data as Partial<BackgroundJob>)),
       findUnique: jest.fn<Promise<BackgroundJob | null>, [unknown]>(async () => null),
@@ -32,7 +32,9 @@ function makeService() {
     backgroundJobAttempt: {
       create: jest.fn(async () => ({ id: 'attempt-1' })),
       update: jest.fn(async () => ({ id: 'attempt-1' })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
+    $transaction: jest.fn(async (callback: (tx: unknown) => unknown) => callback(prisma)),
   };
   const qstash = {
     publishEnabled: true,
@@ -249,6 +251,36 @@ describe('JobService page ingestion jobs', () => {
     expect(retry).toHaveBeenCalledWith('parent-1');
   });
 
+  it('recovers a completed file under a FAILED parent without rerunning file extraction', async () => {
+    const { service, prisma, knowledgeIngestion } = makeService();
+    const parent = jobRow({
+      id: 'parent-1',
+      type: 'KG_INGEST_FILE',
+      status: 'FAILED',
+      payload: { fileId: 'file-1' },
+      parentJobId: null,
+    });
+    prisma.backgroundJob.findUnique
+      .mockResolvedValueOnce(parent)
+      .mockResolvedValueOnce(jobRow({ ...parent, status: 'RUNNING' }));
+    const retry = jest.spyOn(service, 'retry');
+
+    await service.resumeIngestionParent('parent-1', 'file-1', 'p1', true);
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'parent-1', status: 'FAILED' },
+        data: expect.objectContaining({ status: 'RUNNING' }),
+      }),
+    );
+    expect(knowledgeIngestion.resumePagedFile).toHaveBeenCalledWith(
+      'file-1',
+      'parent-1',
+    );
+    expect(retry).not.toHaveBeenCalled();
+    expect(knowledgeIngestion.processFile).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])(
     'atomically lets only one concurrent retry start (QStash=%s)',
     async (publishEnabled) => {
@@ -298,7 +330,52 @@ describe('JobService page ingestion jobs', () => {
         data: expect.objectContaining({ status: 'QUEUED', startedAt: null }),
       }),
     );
+    expect(prisma.backgroundJobAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { jobId: 'merge-1', status: 'RUNNING' },
+        data: expect.objectContaining({ status: 'FAILED' }),
+      }),
+    );
     expect(startReserved).toHaveBeenCalledWith('merge-1');
+  });
+
+  it('keeps attempt numbers and retry budget advancing across repeated stale recoveries', async () => {
+    const { service, prisma } = makeService();
+    const first = new Date('2026-07-16T00:00:00.000Z');
+    const second = new Date('2026-07-16T00:05:00.000Z');
+    prisma.backgroundJob.findUnique
+      .mockResolvedValueOnce(
+        jobRow({ id: 'merge-1', status: 'RUNNING', startedAt: first, attempts: 0, maxAttempts: 4 }),
+      )
+      .mockResolvedValueOnce(
+        jobRow({ id: 'merge-1', status: 'RUNNING', startedAt: second, attempts: 1, maxAttempts: 5 }),
+      );
+    jest.spyOn(service, 'startReserved').mockResolvedValue(
+      jobRow({ id: 'merge-1', status: 'QUEUED' }),
+    );
+
+    await service.recoverStaleRunning('merge-1', 1);
+    await service.recoverStaleRunning('merge-1', 1);
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attempts: { increment: 1 },
+          maxAttempts: 5,
+        }),
+      }),
+    );
+    expect(prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attempts: { increment: 1 },
+          maxAttempts: 6,
+        }),
+      }),
+    );
+    expect(prisma.backgroundJobAttempt.updateMany).toHaveBeenCalledTimes(2);
   });
 
   it('fences completion with the exact RUNNING claim timestamp', async () => {
@@ -318,6 +395,11 @@ describe('JobService page ingestion jobs', () => {
     const claim = (prisma.backgroundJob.updateMany.mock.calls as unknown as Array<[
       { data: { startedAt: Date } },
     ]>)[0][0];
+    expect(knowledgeIngestion.mergePagedFile).toHaveBeenCalledWith(
+      'file-1',
+      'merge-1',
+      claim.data.startedAt,
+    );
     expect(prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({

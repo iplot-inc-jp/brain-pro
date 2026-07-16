@@ -81,12 +81,20 @@ function makeService(
     $executeRawUnsafe: jest.fn(async () => 1),
     knowledgeDocumentPage: {
       findMany: jest.fn(async () => pages),
+      findFirst: jest.fn(async () =>
+        pages[0] ? { id: pages[0].id } : null,
+      ),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
     backgroundJob: {
       create: jest.fn(async ({ data }: { data: Record<string, unknown> }) =>
         backgroundJob(data as Partial<BackgroundJob>),
       ),
+      updateMany: jest.fn(async () => ({ count: 1 })),
+      findFirst: jest.fn(async () => ({ id: 'merge-1' })),
+    },
+    backgroundJobAttempt: {
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
   };
   const prisma = {
@@ -96,6 +104,7 @@ function makeService(
     backgroundJob: {
       findUnique: jest.fn(async () => backgroundJob()),
       findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => ({ id: 'merge-1' })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       update: jest.fn(async () => backgroundJob()),
     },
@@ -453,6 +462,90 @@ describe('KnowledgeIngestionService paged documents', () => {
     expect(fixture.tx.knowledgeDocumentPage.updateMany).not.toHaveBeenCalled();
   });
 
+  it('frees both just-succeeded RUNNING child slots and steadily reserves the next two pages', async () => {
+    const pages = [
+      Object.assign(pageRow(1, { status: 'SUCCEEDED', jobId: 'child-1' }), {
+        job: { id: 'child-1', status: 'RUNNING', updatedAt: now },
+      }),
+      Object.assign(pageRow(2, { status: 'SUCCEEDED', jobId: 'child-2' }), {
+        job: { id: 'child-2', status: 'RUNNING', updatedAt: now },
+      }),
+      Object.assign(pageRow(3), { job: null }),
+      Object.assign(pageRow(4), { job: null }),
+      Object.assign(pageRow(5), { job: null }),
+    ];
+    const fixture = makeService({ pages });
+    const scheduler = fixture.service as unknown as {
+      fillPageWorkerWindow(file: IngestionFile, parentJobId: string): Promise<void>;
+    };
+
+    await scheduler.fillPageWorkerWindow(fixture.file, 'parent-1');
+
+    expect(fixture.tx.backgroundJob.create).toHaveBeenCalledTimes(2);
+    expect(fixture.tx.knowledgeDocumentPage.updateMany).toHaveBeenCalledTimes(2);
+    expect(fixture.jobService.startReserved).toHaveBeenCalledTimes(2);
+  });
+
+  it('terminalizes an expired old page child before assigning its replacement', async () => {
+    const expired = new Date(Date.now() - 11 * 60 * 1000);
+    const pages = [
+      Object.assign(pageRow(1, { status: 'PROCESSING', jobId: 'old-child' }), {
+        job: { id: 'old-child', status: 'RUNNING', updatedAt: expired },
+      }),
+    ];
+    const fixture = makeService({ pages });
+    const scheduler = fixture.service as unknown as {
+      fillPageWorkerWindow(
+        file: IngestionFile,
+        parentJobId: string,
+        recoverQueued: boolean,
+      ): Promise<void>;
+    };
+
+    await scheduler.fillPageWorkerWindow(fixture.file, 'parent-1', true);
+
+    expect(fixture.tx.backgroundJob.updateMany).toHaveBeenCalledWith({
+      where: { id: 'old-child', status: 'RUNNING', updatedAt: expired },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        error: expect.stringContaining('superseded'),
+        finishedAt: expect.any(Date),
+      }),
+    });
+    expect(fixture.tx.backgroundJob.create).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.backgroundJobAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { jobId: 'old-child', status: 'RUNNING' },
+        data: expect.objectContaining({ status: 'FAILED' }),
+      }),
+    );
+  });
+
+  it('keeps a freshly heartbeating page child and never assigns a duplicate worker', async () => {
+    const pages = [
+      Object.assign(pageRow(1, { status: 'PROCESSING', jobId: 'live-child' }), {
+        job: { id: 'live-child', status: 'RUNNING', updatedAt: new Date() },
+      }),
+      Object.assign(pageRow(2), { job: null }),
+    ];
+    const fixture = makeService({ pages });
+    const scheduler = fixture.service as unknown as {
+      fillPageWorkerWindow(
+        file: IngestionFile,
+        parentJobId: string,
+        recoverQueued: boolean,
+      ): Promise<void>;
+    };
+
+    await scheduler.fillPageWorkerWindow(fixture.file, 'parent-1', true);
+
+    expect(fixture.tx.backgroundJob.updateMany).not.toHaveBeenCalled();
+    expect(fixture.tx.knowledgeDocumentPage.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'page-1' }) }),
+    );
+    expect(fixture.tx.backgroundJob.create).toHaveBeenCalledTimes(1);
+  });
+
   it('drains untouched pages without auto-recharging a permanent failure, then explicit resume retries it once', async () => {
     const pages = [
       Object.assign(pageRow(1, { status: 'FAILED', jobId: 'failed-child' }), {
@@ -645,6 +738,98 @@ describe('KnowledgeIngestionService paged documents', () => {
         data: expect.objectContaining({ status: 'FAILED' }),
       }),
     );
+  });
+
+  it('allows a current direct child retry to revive FAILED parent and merge it to SUCCEEDED', async () => {
+    const fixture = makeService();
+    const parentState = fixture.service as unknown as {
+      setParentState(
+        parentJobId: string,
+        projectId: string,
+        status: 'RUNNING' | 'SUCCEEDED',
+      ): Promise<void>;
+    };
+
+    await parentState.setParentState('parent-1', 'p1', 'RUNNING');
+    await parentState.setParentState('parent-1', 'p1', 'SUCCEEDED');
+
+    expect(fixture.prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          id: 'parent-1',
+          projectId: 'p1',
+          status: { in: ['RUNNING', 'FAILED'] },
+        },
+        data: expect.objectContaining({ status: 'RUNNING' }),
+      }),
+    );
+    expect(fixture.prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: ['RUNNING', 'FAILED'] },
+        }),
+        data: expect.objectContaining({ status: 'SUCCEEDED' }),
+      }),
+    );
+  });
+
+  it('heartbeats only the current PROCESSING page child during long extraction', async () => {
+    const page = pageRow(1, { status: 'PENDING', jobId: 'child-1' });
+    const fixture = makeService({ pages: [page] });
+    fixture.claude.extractPageKnowledge.mockImplementationOnce(
+      (async (
+        _input: unknown,
+        _key: string,
+        _model: unknown,
+        _usage: unknown,
+        heartbeat?: () => Promise<void>,
+      ) => {
+        await heartbeat?.();
+        await heartbeat?.();
+        return {
+          summary: '要約',
+          fullText: '本文',
+          tags: [],
+          entities: [],
+          relations: [],
+        };
+      }) as never,
+    );
+
+    await fixture.service.processPage('page-1', 'child-1');
+
+    expect(fixture.tx.knowledgeDocumentPage.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'page-1',
+          jobId: 'child-1',
+          status: 'PROCESSING',
+        }),
+      }),
+    );
+    expect(fixture.tx.backgroundJob.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects an obsolete merge lease before graph side effects', async () => {
+    const fixture = makeService({
+      pages: [pageRow(1, { status: 'SUCCEEDED' })],
+    });
+    fixture.prisma.backgroundJob.findUnique.mockResolvedValueOnce(
+      backgroundJob({ id: 'merge-1', type: 'KG_MERGE_INGEST_FILE' }),
+    );
+    fixture.prisma.backgroundJob.findFirst.mockResolvedValueOnce(null as never);
+    const merge = jest.spyOn(
+      fixture.service as unknown as { merge: (...args: unknown[]) => Promise<string> },
+      'merge',
+    );
+
+    await expect(
+      fixture.service.mergePagedFile('file-1', 'merge-1', now),
+    ).rejects.toThrow('lease');
+    expect(merge).not.toHaveBeenCalled();
+    expect(fixture.fileRepository.save).not.toHaveBeenCalled();
   });
 
   it('does not settle a transient FAILED page while its child is QUEUED', async () => {

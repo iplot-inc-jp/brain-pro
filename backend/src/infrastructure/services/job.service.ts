@@ -148,6 +148,7 @@ export class JobService {
     parentJobId: string,
     fileId: string,
     projectId: string,
+    fileSucceeded = false,
   ): Promise<BackgroundJob | null> {
     const parent = await this.prisma.backgroundJob.findUnique({
       where: { id: parentJobId },
@@ -161,6 +162,28 @@ export class JobService {
       payload.fileId !== fileId
     ) {
       return null;
+    }
+    if (
+      fileSucceeded &&
+      (parent.status === 'FAILED' || parent.status === 'QUEUED')
+    ) {
+      await this.prisma.backgroundJob.updateMany({
+        where: {
+          id: parent.id,
+          status: parent.status,
+        },
+        data: {
+          status: 'RUNNING',
+          error: null,
+          finishedAt: null,
+          startedAt: parent.startedAt ?? new Date(),
+        },
+      });
+      await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id: parent.id } })) ??
+        parent
+      );
     }
     if (parent.status === 'FAILED') return this.retry(parent.id);
     if (parent.status === 'QUEUED') return this.startReserved(parent.id);
@@ -279,15 +302,32 @@ export class JobService {
     ) {
       return job;
     }
-    const recovered = await this.prisma.backgroundJob.updateMany({
-      where: { id, status: 'RUNNING', startedAt: job.startedAt },
-      data: {
-        status: 'QUEUED',
-        progress: 0,
-        startedAt: null,
-        finishedAt: null,
-        error: 'stale RUNNING lease recovered',
-      },
+    const reason = 'stale RUNNING lease recovered';
+    const recovered = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: job.startedAt },
+        data: {
+          status: 'QUEUED',
+          progress: 0,
+          attempts: { increment: 1 },
+          maxAttempts: job.maxAttempts + 1,
+          startedAt: null,
+          finishedAt: null,
+          error: reason,
+        },
+      });
+      if (claim.count !== 1) return claim;
+      const finishedAt = new Date();
+      await tx.backgroundJobAttempt.updateMany({
+        where: { jobId: id, status: 'RUNNING' },
+        data: {
+          status: 'FAILED',
+          error: reason,
+          finishedAt,
+          durationMs: Math.max(0, finishedAt.getTime() - job.startedAt!.getTime()),
+        },
+      });
+      return claim;
     });
     if (recovered.count !== 1) {
       return (
@@ -368,7 +408,7 @@ export class JobService {
     const attempt = await this.createAttempt(id, attemptNo, attemptStartedAt);
 
     try {
-      const result = await this.dispatch(job);
+      const result = await this.dispatch(job, claimStartedAt);
       // 成功: 試行記録を SUCCEEDED で確定。
       await this.finishAttempt(attempt?.id, {
         status: 'SUCCEEDED',
@@ -552,8 +592,8 @@ export class JobService {
     if (!attemptId) return;
     const finishedAt = new Date();
     try {
-      await this.prisma.backgroundJobAttempt.update({
-        where: { id: attemptId },
+      await this.prisma.backgroundJobAttempt.updateMany({
+        where: { id: attemptId, status: 'RUNNING' },
         data: {
           status: args.status,
           error: args.error ?? null,
@@ -605,7 +645,10 @@ export class JobService {
    *     compute ジョブとし、クライアントが既存の同期エンドポイントで適用する
    *     （AI_MERMAID_FLOW / AI_ISSUE_SUGGEST）。
    */
-  private async dispatch(job: BackgroundJob): Promise<unknown> {
+  private async dispatch(
+    job: BackgroundJob,
+    claimStartedAt?: Date,
+  ): Promise<unknown> {
     const payload = (job.payload ?? {}) as Record<string, unknown>;
 
     switch (job.type) {
@@ -762,6 +805,7 @@ export class JobService {
         const result = await this.knowledgeIngestion.mergePagedFile(
           fileId,
           job.id,
+          ...(claimStartedAt ? [claimStartedAt] : []),
         );
         return { kind: 'KG_MERGE_INGEST_FILE', fileId, ...result };
       }

@@ -483,6 +483,7 @@ export class KnowledgeIngestionService {
             area: 'KNOWLEDGE_EXTRACTION',
             userId: batch?.createdById ?? null,
           },
+          () => this.heartbeatPageJob(page, childJobId),
         );
         extraction = {
           ...result,
@@ -560,6 +561,44 @@ export class KnowledgeIngestionService {
     return { mergeQueued: true };
   }
 
+  private async heartbeatPageJob(
+    page: KnowledgeDocumentPage,
+    childJobId: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const owned = await tx.knowledgeDocumentPage.findFirst({
+        where: {
+          id: page.id,
+          projectId: page.projectId,
+          jobId: childJobId,
+          status: 'PROCESSING',
+        },
+        select: { id: true },
+      });
+      if (!owned) return;
+      await tx.backgroundJob.updateMany({
+        where: {
+          id: childJobId,
+          projectId: page.projectId,
+          status: 'RUNNING',
+        },
+        data: { updatedAt: new Date() },
+      });
+    });
+  }
+
+  private async assertMergeLease(
+    jobId: string,
+    projectId: string,
+    startedAt: Date,
+  ): Promise<void> {
+    const live = await this.prisma.backgroundJob.findFirst({
+      where: { id: jobId, projectId, status: 'RUNNING', startedAt },
+      select: { id: true },
+    });
+    if (!live) throw new Error('Merge execution lease is no longer current');
+  }
+
   /** JobService が自動試行上限到達を確定した後だけ呼ぶ。失敗で空いたslotを補充する。 */
   async handlePageJobTerminalFailure(
     pageId: string,
@@ -586,14 +625,16 @@ export class KnowledgeIngestionService {
   async resumePagedFile(fileId: string, parentJobId: string): Promise<void> {
     const file = await this.fileRepository.findById(fileId);
     if (!file) throw new Error(`IngestionFile ${fileId} not found`);
-    file.update({
-      status: 'EXTRACTING',
-      step: 'ページ抽出を再開しています',
-      progress: 50,
-      error: null,
-      finishedAt: null,
-    });
-    await this.fileRepository.save(file);
+    if (file.status !== 'SUCCEEDED') {
+      file.update({
+        status: 'EXTRACTING',
+        step: 'ページ抽出を再開しています',
+        progress: 50,
+        error: null,
+        finishedAt: null,
+      });
+      await this.fileRepository.save(file);
+    }
     await this.fillPageWorkerWindow(file, parentJobId, true);
 
     // 全ページ成功後、merge job作成〜publish間で落ちたケースも同じstable IDから回収する。
@@ -613,6 +654,8 @@ export class KnowledgeIngestionService {
         await this.jobService.retry(existingMerge.id);
       } else if (existingMerge?.status === 'RUNNING') {
         await this.jobService.recoverStaleRunning(existingMerge.id);
+      } else if (existingMerge?.status === 'SUCCEEDED') {
+        await this.setParentState(parentJobId, file.projectId, 'SUCCEEDED', 100);
       } else if (!existingMerge) {
         const batch = await this.batchRepository.findById(file.batchId);
         await this.jobService.enqueue(
@@ -633,6 +676,7 @@ export class KnowledgeIngestionService {
   async mergePagedFile(
     fileId: string,
     mergeJobId: string,
+    leaseStartedAt?: Date,
   ): Promise<{ knowledgeDocumentId: string; skipped?: boolean }> {
     const mergeJob = await this.prisma.backgroundJob.findUnique({
       where: { id: mergeJobId },
@@ -642,6 +686,9 @@ export class KnowledgeIngestionService {
       throw new Error(
         `Merge job ${mergeJobId} is missing its project or parent`,
       );
+    }
+    if (leaseStartedAt) {
+      await this.assertMergeLease(mergeJobId, mergeJob.projectId, leaseStartedAt);
     }
     const file = await this.fileRepository.findById(fileId);
     if (!file || file.projectId !== mergeJob.projectId) {
@@ -683,7 +730,13 @@ export class KnowledgeIngestionService {
       kind,
       mimeType: file.mimeType,
       contentText,
+      mergeLease: leaseStartedAt
+        ? { jobId: mergeJobId, startedAt: leaseStartedAt }
+        : undefined,
     });
+    if (leaseStartedAt) {
+      await this.assertMergeLease(mergeJobId, file.projectId, leaseStartedAt);
+    }
     file.update({
       status: 'SUCCEEDED',
       step: '完了',
@@ -734,7 +787,14 @@ export class KnowledgeIngestionService {
       const pages = await tx.knowledgeDocumentPage.findMany({
         where: { projectId: file.projectId, ingestionFileId: file.id },
         include: {
-          job: { select: { id: true, status: true, updatedAt: true } },
+          job: {
+            select: {
+              id: true,
+              status: true,
+              updatedAt: true,
+              startedAt: true,
+            },
+          },
         },
         orderBy: { pageNumber: 'asc' },
       });
@@ -744,6 +804,7 @@ export class KnowledgeIngestionService {
         page.job.updatedAt.getTime() < staleBefore;
       const active = pages.filter(
         (page) =>
+          page.status !== 'SUCCEEDED' &&
           page.job &&
           (page.job.status === 'QUEUED' ||
             (page.job.status === 'RUNNING' &&
@@ -761,6 +822,40 @@ export class KnowledgeIngestionService {
       });
       const created: BackgroundJobReservation[] = [];
       for (const page of candidates.slice(0, available)) {
+        if (jobIsStale(page) && page.job) {
+          const finishedAt = new Date();
+          const reason = 'superseded after page worker heartbeat lease expired';
+          const superseded = await tx.backgroundJob.updateMany({
+            where: {
+              id: page.job.id,
+              status: 'RUNNING',
+              updatedAt: page.job.updatedAt,
+            },
+            data: {
+              status: 'FAILED',
+              attempts: { increment: 1 },
+              error: reason,
+              finishedAt,
+            },
+          });
+          if (superseded.count !== 1) continue;
+          await tx.backgroundJobAttempt.updateMany({
+            where: { jobId: page.job.id, status: 'RUNNING' },
+            data: {
+              status: 'FAILED',
+              error: reason,
+              finishedAt,
+              ...(page.job.startedAt
+                ? {
+                    durationMs: Math.max(
+                      0,
+                      finishedAt.getTime() - page.job.startedAt.getTime(),
+                    ),
+                  }
+                : {}),
+            },
+          });
+        }
         const id = randomUUID();
         const job = await tx.backgroundJob.create({
           data: {
@@ -915,7 +1010,10 @@ export class KnowledgeIngestionService {
       where: {
         id: parentJobId,
         projectId,
-        status: 'RUNNING',
+        status:
+          status === 'FAILED'
+            ? 'RUNNING'
+            : { in: ['RUNNING', 'FAILED'] },
       },
       data: {
         status,
@@ -1335,13 +1433,34 @@ export class KnowledgeIngestionService {
       entities: { label: string; kind: string; description?: string }[];
       relations: { from: string; to: string; label?: string }[];
     },
-    meta: { kind: FileKind; mimeType: string | null; contentText: string | null },
+    meta: {
+      kind: FileKind;
+      mimeType: string | null;
+      contentText: string | null;
+      mergeLease?: { jobId: string; startedAt: Date };
+    },
   ): Promise<string> {
     const projectId = file.projectId;
     const plan = buildMergePlan(extraction);
     const title = file.displayName || file.filename;
 
     return this.prisma.$transaction(async (tx) => {
+      if (meta.mergeLease) {
+        await tx.$executeRawUnsafe(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          `knowledge-merge:${file.id}`,
+        );
+        const live = await tx.backgroundJob.findFirst({
+          where: {
+            id: meta.mergeLease.jobId,
+            projectId,
+            status: 'RUNNING',
+            startedAt: meta.mergeLease.startedAt,
+          },
+          select: { id: true },
+        });
+        if (!live) throw new Error('Merge execution lease is no longer current');
+      }
       // 1. KnowledgeDocument upsert（1ファイル=1文書）。
       const existingDoc = await tx.knowledgeDocument.findUnique({
         where: { ingestionFileId: file.id },
@@ -1466,6 +1585,19 @@ export class KnowledgeIngestionService {
           where: { id: nodeId },
           data: { mentionCount: count },
         });
+      }
+
+      if (meta.mergeLease) {
+        const live = await tx.backgroundJob.findFirst({
+          where: {
+            id: meta.mergeLease.jobId,
+            projectId,
+            status: 'RUNNING',
+            startedAt: meta.mergeLease.startedAt,
+          },
+          select: { id: true },
+        });
+        if (!live) throw new Error('Merge execution lease expired during merge');
       }
 
       // 抽出が空（AI OFF 等）でも文書ノードは作る契約。

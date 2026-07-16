@@ -45,7 +45,12 @@ describe('RetryFileUseCase paged hierarchy', () => {
 
     expect(result.status).toBe('SUCCEEDED');
     expect(files.save).not.toHaveBeenCalled();
-    expect(jobs.resumeIngestionParent).not.toHaveBeenCalled();
+    expect(jobs.resumeIngestionParent).toHaveBeenCalledWith(
+      'parent-1',
+      'file-1',
+      'p1',
+      true,
+    );
     expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 
