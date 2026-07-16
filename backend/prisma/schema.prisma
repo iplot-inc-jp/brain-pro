@@ -32,6 +32,7 @@ model User {
   userApiTokens       UserApiToken[]
   projectMemberships  ProjectMember[]
   createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
+  generatedRagDocuments RagDocument[] @relation("RagDocumentGeneratedBy")
 
   @@map("users")
 }
@@ -335,9 +336,69 @@ model Project {
   nodeAttachments         NodeAttachment[]
   knowledgeNodeLinks      KnowledgeNodeLink[]
   shareLinks              ShareLink[]
+  ragDocuments            RagDocument[]
 
   @@unique([organizationId, slug])
   @@map("projects")
+}
+
+// ===========================================
+// 機能横断 RAG 索引
+// ===========================================
+
+enum RagFeatureType {
+  BUSINESS_FLOW
+  REQUIREMENT
+  ISSUE_TREE
+  TASK
+  STAKEHOLDER
+  RISK
+  KPI
+  SYSTEM
+  DATA_CATALOG
+  MEETING
+}
+
+enum RagScopeLevel {
+  OVERVIEW
+  COMPONENT
+}
+
+// brain-pro の構造化データを Claude で検索向けに圧縮した索引。
+// アップロード文書の KnowledgeDocument とはライフサイクルが異なるため分離する。
+model RagDocument {
+  id            String         @id @default(cuid())
+  projectId     String         @map("project_id")
+  featureType   RagFeatureType @map("feature_type")
+  scopeLevel    RagScopeLevel  @map("scope_level")
+  // 1回の生成対象。project 全体、flow ID、issue tree ID など。
+  targetKey     String         @map("target_key")
+  // 元レコードを指す安定キー。概要は project/target ID、component は元レコード ID。
+  sourceKey     String         @map("source_key")
+  sourceUrl     String         @map("source_url")
+  title         String
+  summary       String         @db.Text
+  content       String         @db.Text
+  keywords      Json           @default("[]")
+  aliases       Json           @default("[]")
+  questions     Json           @default("[]")
+  searchText    String         @map("search_text") @db.Text
+  metadata      Json           @default("{}")
+  sourceHash    String         @map("source_hash")
+  model         String
+  promptVersion String         @map("prompt_version")
+  generatedById String?        @map("generated_by_id")
+  generatedAt   DateTime       @default(now()) @map("generated_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generatedBy User?   @relation("RagDocumentGeneratedBy", fields: [generatedById], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, featureType, scopeLevel, sourceKey], map: "rag_docs_project_feature_scope_source_key")
+  @@index([projectId, featureType, targetKey], map: "rag_docs_project_feature_target_idx")
+  @@index([projectId, scopeLevel], map: "rag_docs_project_scope_idx")
+  @@map("rag_documents")
 }
 
 // ===========================================
