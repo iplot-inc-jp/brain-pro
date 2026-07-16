@@ -79,14 +79,23 @@ export class ResumeBatchUseCase {
       if (!this.isResumable(file, now)) continue;
       file.requeue();
       await this.fileRepository.save(file);
+      if (this.isPaged(file) && file.jobId) {
+        const resumed = await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+        );
+        if (resumed) continue;
+      }
       const type = file.isArchive ? 'KG_EXPAND_ARCHIVE' : 'KG_INGEST_FILE';
       const job = await this.jobService.enqueue(
         type,
         { fileId: file.id },
         { projectId: batch.projectId, createdById: input.userId },
       );
+      // inline完了状態を古いrequeued entityのfull saveで巻き戻さない。
+      await this.fileRepository.setJobId(file.id, job.id);
       file.setJobId(job.id);
-      await this.fileRepository.save(file);
     }
 
     // バッチを RUNNING へ（CANCELLED から再開する場合も含め進行中扱い）。
@@ -98,5 +107,12 @@ export class ResumeBatchUseCase {
       ...toIngestionBatchOutput(batch),
       files: updated.map((f) => toIngestionFileOutput(f)),
     };
+  }
+
+  private isPaged(file: { filename: string; mimeType: string | null }): boolean {
+    return (
+      /\.(pdf|pptx)$/i.test(file.filename) ||
+      /application\/pdf|presentationml\.presentation/i.test(file.mimeType ?? '')
+    );
   }
 }

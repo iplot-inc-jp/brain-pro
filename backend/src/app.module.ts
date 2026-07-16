@@ -499,6 +499,7 @@ import {
 import { BlobStorageService } from './infrastructure/services/blob-storage.service';
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
+import { KnowledgePageRepository } from './infrastructure/knowledge/knowledge-page.repository';
 import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
@@ -1128,6 +1129,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     FileExtractionService,
     ExcelTaskImportService,
     KnowledgeIngestionService,
+    KnowledgePageRepository,
     KnowledgeDocumentExtractService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,

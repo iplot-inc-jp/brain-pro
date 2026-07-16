@@ -156,7 +156,7 @@ export interface KnowledgeExtraction {
    * 入力で AI が読み取った本文）。検索/RAG の土台として KnowledgeDocument.contentText に保持する。
    * テキスト系入力（前処理で全文を持っている）では空でよい。
    */
-  fullText?: string;
+  fullText: string;
   /** 主題タグ（簡潔な名詞句） */
   tags: string[];
   /** 固有物（実体） */
@@ -845,10 +845,12 @@ ${description}`,
       : [];
     return {
       summary: typeof parsed?.summary === 'string' ? parsed.summary : '',
+      // ページ単位の耐久保存では毎回同じshapeを持たせる。テキスト入力など
+      // 書き起こし不要な場合も空文字を返し、呼び出し側がsource textで補完できる契約。
       fullText:
         typeof parsed?.fullText === 'string' && parsed.fullText.trim()
           ? parsed.fullText
-          : undefined,
+          : '',
       tags,
       entities,
       relations,
@@ -1308,4 +1310,3 @@ ${context.category === 'AI_QUALITY' ? aiQualityGuide : businessGuide}
     return process.env.ANALYSIS_MODEL || 'claude-haiku-4-5-20251001';
   }
 }
-

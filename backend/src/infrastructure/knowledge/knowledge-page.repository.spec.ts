@@ -56,6 +56,10 @@ function makePrisma({
   let findUniqueCalls = 0;
   return {
     knowledgeDocumentPage: {
+      findFirst: jest.fn<
+        Promise<KnowledgeDocumentPage | null>,
+        [Prisma.KnowledgeDocumentPageFindFirstArgs]
+      >(async () => existingPage),
       findUnique: jest.fn<
         Promise<KnowledgeDocumentPage | null>,
         [Prisma.KnowledgeDocumentPageFindUniqueArgs]
@@ -119,6 +123,18 @@ const pendingInput = {
 };
 
 describe('KnowledgePageRepository', () => {
+  it('finds a page only inside the requested project scope', async () => {
+    const prisma = makePrisma({ existingPage: pageRow });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.findById({ id: 'page-1', projectId: 'p1' }),
+    ).resolves.toBe(pageRow);
+    expect(prisma.knowledgeDocumentPage.findFirst).toHaveBeenCalledWith({
+      where: { id: 'page-1', projectId: 'p1' },
+    });
+  });
+
   it('creates a missing page only after both parents are found in the project', async () => {
     const prisma = makePrisma({ existingPage: null });
     const repo = new KnowledgePageRepository(prisma);

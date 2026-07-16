@@ -8,6 +8,9 @@ import { PrismaService } from '../persistence/prisma/prisma.service';
 
 export interface KnowledgePagePrismaClient {
   knowledgeDocumentPage: {
+    findFirst(
+      args: Prisma.KnowledgeDocumentPageFindFirstArgs,
+    ): Promise<KnowledgeDocumentPage | null>;
     findUnique(
       args: Prisma.KnowledgeDocumentPageFindUniqueArgs,
     ): Promise<KnowledgeDocumentPage | null>;
@@ -100,6 +103,12 @@ export class KnowledgePageRepository {
     @Inject(PrismaService)
     private readonly prisma: KnowledgePagePrismaClient,
   ) {}
+
+  findById(input: ScopedKnowledgePageInput) {
+    return this.prisma.knowledgeDocumentPage.findFirst({
+      where: { id: input.id, projectId: input.projectId },
+    });
+  }
 
   async upsertPending(
     input: UpsertPendingKnowledgePageInput,
