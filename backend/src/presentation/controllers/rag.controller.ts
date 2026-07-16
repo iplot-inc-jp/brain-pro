@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -17,13 +18,18 @@ import {
   ApiPropertyOptional,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { JobService } from '../../infrastructure/services/job.service';
 import {
   RAG_FEATURE_TYPES,
   RagFeatureType,
 } from '../../infrastructure/rag/rag.types';
 import { RagIndexService } from '../../infrastructure/rag/rag-index.service';
+import { RagPromptService } from '../../infrastructure/rag/rag-prompt.service';
+import {
+  RAG_ALLOWED_MODELS,
+  RAG_PROMPT_MAX_LENGTH,
+} from '../../infrastructure/rag/rag-prompt.defaults';
 import {
   CurrentUser,
   CurrentUserPayload,
@@ -42,6 +48,18 @@ class GenerateRagDto {
   targetId?: string;
 }
 
+export class UpdateRagSettingsDto {
+  @ApiProperty({ enum: RAG_ALLOWED_MODELS, description: 'RAG圧縮に使うClaudeモデル' })
+  @IsIn(RAG_ALLOWED_MODELS)
+  model!: string;
+
+  @ApiProperty({ description: 'RAG圧縮用システムプロンプト', maxLength: RAG_PROMPT_MAX_LENGTH })
+  @IsString()
+  @Matches(/\S/u, { message: 'systemPrompt を空にはできません' })
+  @MaxLength(RAG_PROMPT_MAX_LENGTH)
+  systemPrompt!: string;
+}
+
 const SCOPE_LEVELS = ['OVERVIEW', 'COMPONENT'] as const;
 type ScopeLevel = (typeof SCOPE_LEVELS)[number];
 
@@ -54,6 +72,7 @@ export class RagController {
   constructor(
     private readonly jobs: JobService,
     private readonly index: RagIndexService,
+    private readonly prompts: RagPromptService,
   ) {}
 
   @Post('generate')
@@ -70,6 +89,34 @@ export class RagController {
       { projectId, createdById: user.id },
     );
     return { jobId: job.id, status: job.status };
+  }
+
+  @Get('settings')
+  @ApiOperation({ summary: 'RAGモデル・プロンプトの有効設定と変更履歴を取得' })
+  settings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.prompts.getSettings(projectId, user.id);
+  }
+
+  @Put('settings')
+  @ApiOperation({ summary: 'RAGモデル・プロンプトを新しい版として保存' })
+  updateSettings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Body() dto: UpdateRagSettingsDto,
+  ) {
+    return this.prompts.update(projectId, dto, user.id);
+  }
+
+  @Post('settings/reset')
+  @ApiOperation({ summary: 'RAG設定を既定値の新しい版として復元' })
+  resetSettings(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.prompts.reset(projectId, user.id);
   }
 
   @Get('status')

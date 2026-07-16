@@ -1,5 +1,18 @@
 import { JobService } from '../../infrastructure/services/job.service';
-import { RagController } from './rag.controller';
+import { validate } from 'class-validator';
+import { RagController, UpdateRagSettingsDto } from './rag.controller';
+
+function controllerWithPrompts() {
+  const jobs = { enqueue: jest.fn() };
+  const index = { status: jest.fn(), list: jest.fn(), search: jest.fn() };
+  const prompts = {
+    getSettings: jest.fn(async () => ({ active: { version: 1 }, history: [] })),
+    update: jest.fn(async () => ({ version: 2 })),
+    reset: jest.fn(async () => ({ version: 3 })),
+  };
+  const controller = new (RagController as any)(jobs, index, prompts) as RagController;
+  return { controller, prompts };
+}
 
 describe('RagController', () => {
   it('生成ジョブには機能種別と対象IDだけを渡し、鍵をpayloadへ入れない', async () => {
@@ -7,7 +20,7 @@ describe('RagController', () => {
       enqueue: jest.fn(async () => ({ id: 'job1', status: 'QUEUED' })),
     };
     const index = { status: jest.fn(), list: jest.fn(), search: jest.fn() };
-    const controller = new RagController(jobs as any, index as any);
+    const controller = new RagController(jobs as any, index as any, {} as any);
 
     const result = await controller.generate(
       { id: 'u1' } as any,
@@ -31,7 +44,7 @@ describe('RagController', () => {
       list: jest.fn(async () => []),
       search: jest.fn(async () => []),
     };
-    const controller = new RagController(jobs as any, index as any);
+    const controller = new RagController(jobs as any, index as any, {} as any);
 
     await controller.status('p1', 'TASK', 'task1');
     await controller.documents('p1', 'TASK', 'COMPONENT', '8');
@@ -44,6 +57,34 @@ describe('RagController', () => {
     expect(index.search).toHaveBeenCalledWith('p1', {
       q: '受注', featureType: 'TASK', scopeLevel: 'OVERVIEW', limit: 6,
     });
+  });
+});
+
+describe('RagController settings', () => {
+  it('設定取得・新バージョン保存・既定値復元へprojectとuserを渡す', async () => {
+    const { controller, prompts } = controllerWithPrompts();
+    const user = { id: 'u1' } as any;
+
+    await controller.settings(user, 'p1');
+    await controller.updateSettings(user, 'p1', {
+      model: 'claude-haiku-4-5', systemPrompt: 'DB管理のプロンプト',
+    });
+    await controller.resetSettings(user, 'p1');
+
+    expect(prompts.getSettings).toHaveBeenCalledWith('p1', 'u1');
+    expect(prompts.update).toHaveBeenCalledWith('p1', {
+      model: 'claude-haiku-4-5', systemPrompt: 'DB管理のプロンプト',
+    }, 'u1');
+    expect(prompts.reset).toHaveBeenCalledWith('p1', 'u1');
+  });
+
+  it.each([
+    ['unknown', '有効な本文'],
+    ['claude-sonnet-4-6', '   '],
+    ['claude-sonnet-4-6', 'x'.repeat(20_001)],
+  ])('不正なモデル／プロンプトをDTOで拒否する', async (model, systemPrompt) => {
+    const dto = Object.assign(new UpdateRagSettingsDto(), { model, systemPrompt });
+    expect(await validate(dto)).not.toHaveLength(0);
   });
 });
 
