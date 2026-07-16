@@ -259,6 +259,7 @@ import {
   CancelBatchUseCase,
   RetryFileUseCase,
   SkipFileUseCase,
+  ImportExternalMaterialUseCase,
   // Knowledge（ナレッジグラフ read + node/document/relation 編集）
   GetKnowledgeGraphUseCase,
   GetKnowledgeNodeUseCase,
@@ -499,6 +500,7 @@ import {
 import { BlobStorageService } from './infrastructure/services/blob-storage.service';
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
+import { KnowledgePageRepository } from './infrastructure/knowledge/knowledge-page.repository';
 import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
@@ -507,11 +509,13 @@ import {
 } from './presentation/controllers/ingestion.controller';
 import { IngestionFileController } from './presentation/controllers/ingestion-file.controller';
 import { IngestionUploadController } from './presentation/controllers/ingestion-upload.controller';
+import { ExternalMaterialController } from './presentation/controllers/external-material.controller';
 import { IngestionSourceController } from './presentation/controllers/ingestion-source.controller';
 import {
   KnowledgeProjectController,
   KnowledgeNodeController,
   KnowledgeDocumentController,
+  KnowledgeDocumentPageController,
   KnowledgeRelationController,
 } from './presentation/controllers/knowledge.controller';
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
@@ -677,10 +681,12 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     MyIngestionBatchController,
     IngestionFileController,
     IngestionUploadController,
+    ExternalMaterialController,
     IngestionSourceController,
     KnowledgeProjectController,
     KnowledgeNodeController,
     KnowledgeDocumentController,
+    KnowledgeDocumentPageController,
     KnowledgeRelationController,
     KnowledgeSettingsController,
     RagController,
@@ -1080,6 +1086,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     CancelBatchUseCase,
     RetryFileUseCase,
     SkipFileUseCase,
+    ImportExternalMaterialUseCase,
     // Knowledge（ナレッジグラフ read + node/document/relation 編集）
     GetKnowledgeGraphUseCase,
     GetKnowledgeNodeUseCase,
@@ -1133,6 +1140,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     FileExtractionService,
     ExcelTaskImportService,
     KnowledgeIngestionService,
+    KnowledgePageRepository,
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,

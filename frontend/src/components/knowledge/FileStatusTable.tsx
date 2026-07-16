@@ -151,6 +151,18 @@ function FileRow({
           <div className="text-xs text-muted-foreground truncate mb-1" title={file.step || ''}>
             {file.step || '-'}
           </div>
+          {file.pageProgress && (
+            <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+              <span className="font-medium text-foreground/80">
+                {file.pageProgress.succeeded} / {file.pageProgress.total} ページ成功
+              </span>
+              {file.pageProgress.failedPageNumbers.length > 0 && (
+                <span className="text-destructive">
+                  失敗: {file.pageProgress.failedPageNumbers.join(', ')}
+                </span>
+              )}
+            </div>
+          )}
           <ProgressBar value={file.progress} />
         </td>
 

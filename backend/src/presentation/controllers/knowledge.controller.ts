@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -50,6 +51,7 @@ import { ProjectAccessGuard } from '../guards/project-access.guard';
 import { PrismaService } from '../../infrastructure/persistence/prisma/prisma.service';
 import { ProjectAccessService } from '../../infrastructure/services/project-access.service';
 import { KnowledgeDocumentExtractService } from '../../infrastructure/knowledge/knowledge-document-extract.service';
+import { JobService } from '../../infrastructure/services/job.service';
 import { EntityNotFoundError } from '../../domain';
 
 // ========== DTOs ==========
@@ -288,6 +290,56 @@ export class KnowledgeDocumentController {
     private readonly extractService: KnowledgeDocumentExtractService,
   ) {}
 
+  @Get(':id/pages')
+  @ApiOperation({ summary: '文書のページ／スライド抽出結果をページ順で取得' })
+  @ApiParam({ name: 'id', description: '文書ID' })
+  @ApiResponse({ status: 404, description: '文書が見つかりません' })
+  async pages(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const document = await this.prisma.knowledgeDocument.findUnique({
+      where: { id },
+      select: { id: true, projectId: true },
+    });
+    if (!document) throw new EntityNotFoundError('KnowledgeDocument', id);
+    await this.projectAccess.assertPrincipalAccess(
+      user,
+      document.projectId,
+      'view',
+    );
+    const pages = await this.prisma.knowledgeDocumentPage.findMany({
+      where: { projectId: document.projectId, knowledgeDocumentId: id },
+      orderBy: { pageNumber: 'asc' },
+      select: {
+        id: true,
+        pageNumber: true,
+        pageKind: true,
+        status: true,
+        summary: true,
+        contentText: true,
+        error: true,
+        job: {
+          select: {
+            status: true,
+            type: true,
+            parentJobId: true,
+            projectId: true,
+          },
+        },
+      },
+    });
+    return pages.map(({ job, ...page }) => ({
+      ...page,
+      retryable:
+        page.status === 'FAILED' &&
+        job?.status === 'FAILED' &&
+        job.type === 'KG_INGEST_PAGE' &&
+        job.projectId === document.projectId &&
+        job.parentJobId !== null,
+    }));
+  }
+
   @Patch(':id/position')
   @ApiOperation({ summary: '文書ノードの位置更新（キャンバスのドラッグ位置永続化）' })
   @ApiParam({ name: 'id', description: '文書ID' })
@@ -370,6 +422,73 @@ export class KnowledgeDocumentController {
       id,
     });
     return { success: true };
+  }
+}
+
+@ApiTags('ナレッジグラフ')
+@ApiBearerAuth()
+@ProjectScopedAccess()
+@UseGuards(ProjectAccessGuard)
+@Controller('knowledge-document-pages')
+export class KnowledgeDocumentPageController {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projectAccess: ProjectAccessService,
+    private readonly jobService: JobService,
+  ) {}
+
+  @Post(':id/retry')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: '失敗したページ／スライドだけを再実行' })
+  @ApiParam({ name: 'id', description: 'ページID' })
+  @ApiResponse({ status: 202, description: 'ページ子ジョブの再起票成功' })
+  @ApiResponse({ status: 400, description: '失敗ページ以外は再実行不可' })
+  @ApiResponse({ status: 404, description: 'ページが見つかりません' })
+  async retry(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
+    const page = await this.prisma.knowledgeDocumentPage.findUnique({
+      where: { id },
+      include: {
+        job: {
+          include: {
+            parent: {
+              select: {
+                id: true,
+                projectId: true,
+                parentJobId: true,
+                type: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!page) throw new EntityNotFoundError('KnowledgeDocumentPage', id);
+    await this.projectAccess.assertPrincipalAccess(user, page.projectId, 'edit');
+    const job = page.job;
+    const parent = job?.parent;
+    if (
+      page.status !== 'FAILED' ||
+      !page.jobId ||
+      !job ||
+      job.id !== page.jobId ||
+      job.status !== 'FAILED' ||
+      job.type !== 'KG_INGEST_PAGE' ||
+      job.projectId !== page.projectId ||
+      !job.parentJobId ||
+      !parent ||
+      parent.id !== job.parentJobId ||
+      parent.projectId !== page.projectId ||
+      parent.parentJobId !== null ||
+      parent.type !== 'KG_INGEST_FILE'
+    ) {
+      throw new BadRequestException(
+        'FAILED のページ子ジョブだけ再実行できます',
+      );
+    }
+    return this.jobService.retry(job.id);
   }
 }
 

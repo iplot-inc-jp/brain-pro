@@ -42,6 +42,7 @@ export interface JobAttempt {
 /** バックグラウンドジョブ（GET /api/jobs/:id・一覧のレスポンス形）。 */
 export interface Job {
   id: string;
+  parentJobId?: string | null;
   type: string;
   status: JobStatus;
   /** 完了時の結果（type ごとに { kind, ... } 構造。未完了は null）。 */
@@ -64,6 +65,35 @@ export interface Job {
   payload?: Record<string, unknown> | null;
   /** 試行ごとの履歴（batch-jobs / getJob で同梱）。一覧 API では未同梱のことがある。 */
   attemptRecords?: JobAttempt[];
+  children?: Job[];
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: 'PDF_PAGE' | 'PPTX_SLIDE';
+    status: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+    error: string | null;
+  } | null;
+}
+
+/** 一覧画面専用の公開 DTO。payload/result などの内部情報は一覧 API で扱わない。 */
+export interface JobListItem {
+  id: string;
+  type: string;
+  status: JobStatus;
+  error: string | null;
+  progress: number;
+  attempts: number;
+  maxAttempts?: number;
+  createdAt: string;
+  finishedAt: string | null;
+  children?: JobListItem[];
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: 'PDF_PAGE' | 'PPTX_SLIDE';
+    status: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+    error: string | null;
+  } | null;
 }
 
 /** ジョブ起票レスポンス（POST /api/projects/:projectId/ai-jobs）。 */
@@ -207,14 +237,33 @@ export async function retryJob(id: string): Promise<Job> {
 }
 
 /** プロジェクトの直近ジョブ一覧。GET /api/projects/:projectId/jobs?limit= */
-export async function listJobs(projectId: string, limit?: number): Promise<Job[]> {
+export async function listJobs(
+  projectId: string,
+  limit?: number,
+  options?: { signal?: AbortSignal },
+): Promise<JobListItem[]> {
   const q = typeof limit === 'number' && limit > 0 ? `?limit=${limit}` : '';
   const res = await fetch(`${API_URL}/api/projects/${projectId}/jobs${q}`, {
     headers: headers(),
+    signal: options?.signal,
   });
   if (!res.ok) {
     await throwApiError(res, 'ジョブ一覧の取得に失敗しました');
   }
+  return res.json();
+}
+
+/** ページ資料のrootを、成功済みページを保ったまま再開する。 */
+export async function resumeJob(
+  projectId: string,
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<Job> {
+  const res = await fetch(
+    `${API_URL}/api/projects/${projectId}/jobs/${id}/resume`,
+    { method: 'POST', headers: headers(), signal: options?.signal },
+  );
+  if (!res.ok) await throwApiError(res, '親ジョブの再開に失敗しました');
   return res.json();
 }
 

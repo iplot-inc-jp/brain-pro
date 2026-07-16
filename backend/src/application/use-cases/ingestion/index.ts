@@ -7,3 +7,4 @@ export * from './cancel-batch.use-case';
 export * from './retry-file.use-case';
 export * from './skip-file.use-case';
 export * from './get-all-accessible-ingestion-batches.use-case';
+export * from './import-external-material.use-case';

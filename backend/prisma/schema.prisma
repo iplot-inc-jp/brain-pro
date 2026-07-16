@@ -75,6 +75,7 @@ enum BackgroundJobStatus {
 model BackgroundJob {
   id          String              @id @default(uuid())
   projectId   String?             @map("project_id")
+  parentJobId String?             @map("parent_job_id")
   // ジョブ種別（例: AI_MERMAID_FLOW / AI_MERMAID_OBJECTMAP / AI_KPI / AI_SCHEMA_ANALYZE / AI_ISSUE_SUGGEST）
   type        String
   status      BackgroundJobStatus @default(QUEUED)
@@ -96,9 +97,13 @@ model BackgroundJob {
   finishedAt  DateTime?           @map("finished_at")
 
   project        Project?               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent         BackgroundJob?         @relation("BackgroundJobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
+  children       BackgroundJob[]        @relation("BackgroundJobHierarchy")
   attemptRecords BackgroundJobAttempt[]
+  knowledgePage  KnowledgeDocumentPage? @relation("KnowledgePageJob")
 
   @@index([projectId, createdAt])
+  @@index([parentJobId])
   @@index([status])
   @@map("background_jobs")
 }
@@ -326,6 +331,7 @@ model Project {
   webhooks                Webhook[]
   trackerConnections      IssueTrackerConnection[]
   ingestionBatches        IngestionBatch[]
+  externalMaterialImports ExternalMaterialImport[]
   knowledgeDocuments      KnowledgeDocument[]
   knowledgeNodes          KnowledgeNode[]
   knowledgeRelations      KnowledgeRelation[]
@@ -1698,6 +1704,7 @@ model Attachment {
   flow    BusinessFlow? @relation("FlowAttachments", fields: [flowId], references: [id], onDelete: Cascade)
   diagramElements DiagramElement[]
   nodeAttachments NodeAttachment[]
+  externalMaterialImports ExternalMaterialImport[]
 
   @@map("attachments")
 }
@@ -2840,6 +2847,61 @@ enum IngestionSourceType {
   DRIVE
 }
 
+// LINE / Slack 等から受け取った外部資料の段階的な登録状態。
+enum ExternalMaterialImportStatus {
+  PENDING
+  STORED
+  BATCHED
+  FAILED
+}
+
+// 1ページ行が表す原本上の単位。
+enum KnowledgePageKind {
+  PDF_PAGE
+  PPTX_SLIDE
+}
+
+// ページ単位抽出の状態。成功ページは再開時に再実行しない。
+enum KnowledgePageStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+// 外部チャット資料を共有添付と取り込みバッチへ冪等に登録する台帳。
+model ExternalMaterialImport {
+  id               String                       @id @default(cuid())
+  projectId        String
+  idempotencyKey   String
+  attachmentId     String?
+  ingestionBatchId String?
+  sourcePlatform   String
+  sourceChannelId  String
+  sourceMessageId  String
+  sourceFileId     String
+  // 冪等キーが別の内容へ再利用されるのを Blob 保存前に拒否するための固定 fingerprint。
+  // nullable は Task 4 より前に作られた行を安全に段階移行するため。新規 API は必ず全項目を設定する。
+  filename         String?
+  mimeType         String?
+  size             Int?
+  contentSha256    String?
+  status           ExternalMaterialImportStatus @default(PENDING)
+  error            String?                      @db.Text
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  // Task 4 invariant: attachmentId / ingestionBatchId are set only after both parents are transactionally verified in projectId.
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  attachment     Attachment?     @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  ingestionBatch IngestionBatch? @relation(fields: [ingestionBatchId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status])
+  @@index([attachmentId])
+  @@index([ingestionBatchId])
+}
+
 // ナレッジノードの種別（自動タグ / 実体）
 enum KnowledgeNodeType {
   TAG
@@ -2865,6 +2927,7 @@ model IngestionBatch {
 
   project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   files   IngestionFile[]
+  externalMaterialImports ExternalMaterialImport[]
 
   @@index([projectId])
 }
@@ -2900,7 +2963,9 @@ model IngestionFile {
   finishedAt          DateTime?
 
   batch IngestionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  pages KnowledgeDocumentPage[]
 
+  @@unique([id, projectId])
   @@index([batchId])
   @@index([projectId])
   @@index([status])
@@ -2926,8 +2991,39 @@ model KnowledgeDocument {
   project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   mentions  KnowledgeMention[]
   relations KnowledgeRelation[] @relation("RelationSourceDoc")
+  pages     KnowledgeDocumentPage[]
 
+  @@unique([id, projectId])
   @@index([projectId])
+}
+
+// PDFページ / PPTXスライドごとの再開可能な抽出結果。
+model KnowledgeDocumentPage {
+  id                  String              @id @default(cuid())
+  projectId           String
+  ingestionFileId     String
+  knowledgeDocumentId String
+  pageNumber          Int
+  pageKind            KnowledgePageKind
+  sourceText          String?             @db.Text
+  sourceBlobUrl       String?
+  contentText         String?             @db.Text
+  summary             String?             @db.Text
+  extractionResult    Json?
+  status              KnowledgePageStatus @default(PENDING)
+  attempts            Int                 @default(0)
+  error               String?             @db.Text
+  jobId               String?             @unique
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  ingestionFile IngestionFile     @relation(fields: [ingestionFileId, projectId], references: [id, projectId], onDelete: Cascade)
+  document      KnowledgeDocument @relation(fields: [knowledgeDocumentId, projectId], references: [id, projectId], onDelete: Cascade)
+  job           BackgroundJob?    @relation("KnowledgePageJob", fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([ingestionFileId, pageNumber])
+  @@index([knowledgeDocumentId, pageNumber])
+  @@index([status])
 }
 
 // ナレッジノード（タグ / 実体）。文書横断で名寄せマージ。

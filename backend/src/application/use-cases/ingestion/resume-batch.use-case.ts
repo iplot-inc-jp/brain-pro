@@ -74,29 +74,74 @@ export class ResumeBatchUseCase {
 
     const files = await this.fileRepository.findByBatchId(batch.id);
     const now = Date.now();
+    let didResume = false;
 
     for (const file of files) {
+      if (
+        file.status === 'SUCCEEDED' &&
+        this.isPaged(file) &&
+        file.jobId
+      ) {
+        const resumed = await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+          true,
+        );
+        didResume ||= resumed?.recoveryTriggered === true;
+        continue;
+      }
       if (!this.isResumable(file, now)) continue;
       file.requeue();
       await this.fileRepository.save(file);
+      if (this.isPaged(file) && file.jobId) {
+        const resumed = await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+        );
+        if (resumed) {
+          didResume ||=
+            resumed.recoveryTriggered === true ||
+            resumed.status === 'QUEUED' ||
+            resumed.status === 'RUNNING';
+          continue;
+        }
+      }
       const type = file.isArchive ? 'KG_EXPAND_ARCHIVE' : 'KG_INGEST_FILE';
       const job = await this.jobService.enqueue(
         type,
         { fileId: file.id },
         { projectId: batch.projectId, createdById: input.userId },
       );
+      didResume ||= job.status === 'QUEUED' || job.status === 'RUNNING';
+      // inline完了状態を古いrequeued entityのfull saveで巻き戻さない。
+      await this.fileRepository.setJobId(file.id, job.id);
       file.setJobId(job.id);
-      await this.fileRepository.save(file);
     }
 
     // バッチを RUNNING へ（CANCELLED から再開する場合も含め進行中扱い）。
-    batch.markStarted();
-    await this.batchRepository.save(batch);
+    if (didResume) {
+      batch.update({
+        status: 'RUNNING',
+        startedAt: batch.startedAt ?? new Date(),
+        finishedAt: null,
+      });
+      await this.batchRepository.save(batch);
+    }
 
+    const refreshedBatch = await this.batchRepository.findById(batch.id);
     const updated = await this.fileRepository.findByBatchId(batch.id);
     return {
-      ...toIngestionBatchOutput(batch),
+      ...toIngestionBatchOutput(refreshedBatch ?? batch),
       files: updated.map((f) => toIngestionFileOutput(f)),
     };
+  }
+
+  private isPaged(file: { filename: string; mimeType: string | null }): boolean {
+    return (
+      /\.(pdf|pptx)$/i.test(file.filename) ||
+      /application\/pdf|presentationml\.presentation/i.test(file.mimeType ?? '')
+    );
   }
 }

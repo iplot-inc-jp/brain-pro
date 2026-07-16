@@ -1,0 +1,232 @@
+import { IngestionBatch, IngestionFile } from '../../../domain';
+import { ResumeBatchUseCase } from './resume-batch.use-case';
+
+describe('ResumeBatchUseCase paged hierarchy', () => {
+  it('inspects a SUCCEEDED paged file for incomplete same-parent merge recovery', async () => {
+    const batch = IngestionBatch.create({ projectId: 'p1', name: 'batch', status: 'SUCCEEDED' }, 'batch-1');
+    const file = IngestionFile.create(
+      {
+        batchId: batch.id,
+        projectId: 'p1',
+        sourceType: 'UPLOAD',
+        filename: 'deck.pdf',
+        mimeType: 'application/pdf',
+        blobUrl: 'blob://original',
+        status: 'SUCCEEDED',
+      },
+      'file-1',
+    );
+    file.setJobId('parent-1');
+    const batches = {
+      findById: jest.fn(async () => batch),
+      save: jest.fn(async () => undefined),
+    };
+    const files = {
+      findByBatchId: jest.fn(async () => [file]),
+      save: jest.fn(),
+      setJobId: jest.fn(),
+    };
+    const jobs = {
+      resumeIngestionParent: jest.fn(async () => ({
+        id: 'parent-1',
+        recoveryTriggered: true,
+      })),
+      enqueue: jest.fn(),
+    };
+    const useCase = new ResumeBatchUseCase(
+      batches as never,
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      jobs as never,
+    );
+
+    await useCase.execute({ id: batch.id, userId: 'u1', principal: { id: 'u1' } });
+
+    expect(jobs.resumeIngestionParent).toHaveBeenCalledWith(
+      'parent-1',
+      'file-1',
+      'p1',
+      true,
+    );
+    expect(files.save).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(batch.status).toBe('RUNNING');
+    expect(batches.save).toHaveBeenCalled();
+  });
+
+  it('preserves a fully SUCCEEDED batch when reconciliation is a no-op', async () => {
+    const batch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const file = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    file.setJobId('parent-1');
+    const completedBatch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const completedFile = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    completedFile.setJobId('parent-1');
+    const batches = {
+      findById: jest.fn()
+        .mockResolvedValueOnce(batch)
+        .mockResolvedValueOnce(completedBatch),
+      save: jest.fn(),
+    };
+    const files = {
+      findByBatchId: jest.fn()
+        .mockResolvedValueOnce([file])
+        .mockResolvedValueOnce([completedFile]),
+      save: jest.fn(),
+      setJobId: jest.fn(),
+    };
+    const useCase = new ResumeBatchUseCase(
+      batches as never,
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      {
+        resumeIngestionParent: jest.fn(async () => ({
+          id: 'parent-1',
+          recoveryTriggered: false,
+        })),
+        enqueue: jest.fn(),
+      } as never,
+    );
+
+    await useCase.execute({ id: batch.id, userId: 'u1', principal: { id: 'u1' } });
+
+    expect(batch.status).toBe('SUCCEEDED');
+    expect(batches.save).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an inline-finalized SUCCEEDED batch with stale RUNNING state', async () => {
+    const batch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'FAILED' },
+      'batch-1',
+    );
+    const file = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'FAILED',
+    }, 'file-1');
+    file.setJobId('parent-1');
+    const completedBatch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const completedFile = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    completedFile.setJobId('parent-1');
+    const batches = {
+      findById: jest.fn()
+        .mockResolvedValueOnce(batch)
+        .mockResolvedValueOnce(completedBatch),
+      save: jest.fn(),
+    };
+    const files = {
+      findByBatchId: jest.fn()
+        .mockResolvedValueOnce([file])
+        .mockResolvedValueOnce([completedFile]),
+      save: jest.fn(async () => undefined),
+      setJobId: jest.fn(),
+    };
+    const jobs = {
+      resumeIngestionParent: jest.fn(async () => {
+        return { id: 'parent-1', status: 'SUCCEEDED', recoveryTriggered: false };
+      }),
+      enqueue: jest.fn(),
+    };
+    const useCase = new ResumeBatchUseCase(
+      batches as never,
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      jobs as never,
+    );
+
+    const result = await useCase.execute({
+      id: batch.id,
+      userId: 'u1',
+      principal: { id: 'u1' },
+    });
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(result.files[0].status).toBe('SUCCEEDED');
+    expect(batch.status).toBe('FAILED');
+    expect(batches.save).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed PDF on its existing parent while resuming the batch', async () => {
+    const batch = IngestionBatch.create({ projectId: 'p1', name: 'batch', status: 'FAILED' }, 'batch-1');
+    const file = IngestionFile.create(
+      {
+        batchId: batch.id,
+        projectId: 'p1',
+        sourceType: 'UPLOAD',
+        filename: 'deck.pptx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        blobUrl: 'blob://original',
+        status: 'FAILED',
+      },
+      'file-1',
+    );
+    file.setJobId('parent-1');
+    const batches = {
+      findById: jest.fn(async () => batch),
+      save: jest.fn(async () => undefined),
+    };
+    const files = {
+      findByBatchId: jest.fn(async () => [file]),
+      save: jest.fn(async () => undefined),
+      setJobId: jest.fn(async () => undefined),
+    };
+    const jobs = {
+      resumeIngestionParent: jest.fn(async () => ({ id: 'parent-1' })),
+      enqueue: jest.fn(),
+    };
+    const useCase = new ResumeBatchUseCase(
+      batches as never,
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      jobs as never,
+    );
+
+    await useCase.execute({
+      id: batch.id,
+      userId: 'u1',
+      principal: { id: 'u1' },
+    });
+
+    expect(jobs.resumeIngestionParent).toHaveBeenCalledWith('parent-1', 'file-1', 'p1');
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(files.setJobId).not.toHaveBeenCalled();
+    expect(file.jobId).toBe('parent-1');
+  });
+});

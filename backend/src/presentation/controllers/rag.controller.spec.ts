@@ -104,6 +104,7 @@ describe('JobService AI_RAG_SUMMARIZE dispatch', () => {
       {} as any,
       {} as any,
       ragIndex as any,
+      {} as any,
     );
 
     expect(JobService.isAllowedType('AI_RAG_SUMMARIZE')).toBe(true);

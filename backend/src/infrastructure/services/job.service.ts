@@ -14,6 +14,7 @@ import { TrackerImportService } from './trackers/tracker-import.service';
 import { KnowledgeIngestionService } from '../knowledge/knowledge-ingestion.service';
 import { RagIndexService } from '../rag/rag-index.service';
 import { RAG_FEATURE_TYPES, RagFeatureType } from '../rag/rag.types';
+import { ImportExternalMaterialUseCase } from '../../application/use-cases/ingestion/import-external-material.use-case';
 
 /**
  * 非同期バックグラウンドジョブの起票・実行サービス。
@@ -48,6 +49,8 @@ export class JobService {
     @Inject(forwardRef(() => KnowledgeIngestionService))
     private readonly knowledgeIngestion: KnowledgeIngestionService,
     private readonly ragIndex: RagIndexService,
+    @Inject(forwardRef(() => ImportExternalMaterialUseCase))
+    private readonly importExternalMaterial: ImportExternalMaterialUseCase,
   ) {}
 
   /**
@@ -58,21 +61,53 @@ export class JobService {
   async enqueue(
     type: string,
     payload: Record<string, unknown> | undefined,
-    opts: { projectId?: string | null; createdById?: string | null } = {},
+    opts: {
+      projectId?: string | null;
+      createdById?: string | null;
+      parentJobId?: string | null;
+      /** 同じ論理ジョブの競合起票を PK 一意制約でまとめる決定的 ID。 */
+      dedupeId?: string;
+    } = {},
   ): Promise<BackgroundJob> {
-    const job = await this.prisma.backgroundJob.create({
-      data: {
-        type,
-        status: 'QUEUED',
-        payload: (payload ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-        projectId: opts.projectId ?? null,
-        createdById: opts.createdById ?? null,
-        // 自動リトライ予算を MAX_ATTEMPTS(=4) に揃える。
-        // schema 既定(3) のままだと runJob の `attemptsAfter < job.maxAttempts` が
-        // 「初回+リトライ2回=3」で確定し、QStash(retries:3=最大4配信) と不整合になる。
-        maxAttempts: JobService.MAX_ATTEMPTS,
-      },
-    });
+    let job: BackgroundJob;
+    try {
+      job = await this.prisma.backgroundJob.create({
+        data: {
+          ...(opts.dedupeId ? { id: opts.dedupeId } : {}),
+          type,
+          status: 'QUEUED',
+          payload: (payload ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+          projectId: opts.projectId ?? null,
+          createdById: opts.createdById ?? null,
+          parentJobId: opts.parentJobId ?? null,
+          // 自動リトライ予算を MAX_ATTEMPTS(=4) に揃える。
+          // schema 既定(3) のままだと runJob の `attemptsAfter < job.maxAttempts` が
+          // 「初回+リトライ2回=3」で確定し、QStash(retries:3=最大4配信) と不整合になる。
+          maxAttempts: JobService.MAX_ATTEMPTS,
+        },
+      });
+    } catch (error: unknown) {
+      if (!opts.dedupeId || !this.isUniqueConstraintError(error)) throw error;
+      const existing = await this.prisma.backgroundJob.findUnique({
+        where: { id: opts.dedupeId },
+      });
+      if (!existing) throw error;
+      if (
+        existing.type !== type ||
+        existing.projectId !== (opts.projectId ?? null) ||
+        existing.parentJobId !== (opts.parentJobId ?? null) ||
+        JSON.stringify(existing.payload ?? null) !==
+          JSON.stringify(payload ?? null)
+      ) {
+        throw new Error(
+          `Job dedupe id ${opts.dedupeId} belongs to another job`,
+        );
+      }
+      // 前回 merge が永久失敗した後に最後のページが成功した場合も、同じ durable
+      // claim を手動リトライ相当で再開して取り残さない。
+      if (existing.status === 'FAILED') return this.retry(existing.id);
+      return existing;
+    }
 
     if (this.qstash.publishEnabled) {
       // 本番: QStash に実行を委譲。publish 失敗時も例外は握られ、QUEUED のまま残る。
@@ -82,6 +117,98 @@ export class JobService {
 
     // ローカル/QStash無: その場で終端（SUCCEEDED/FAILED）まで実行して完了 job を返す。
     return this.runInline(job.id);
+  }
+
+  private isUniqueConstraintError(error: unknown): boolean {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      return error.code === 'P2002';
+    }
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'P2002'
+    );
+  }
+
+  /**
+   * Knowledge ingestion がDB transaction内で予約済みにした QUEUED jobを開始する。
+   * crash後の親resumeから何度呼ばれても、runJobのatomic claimが二重dispatchを防ぐ。
+   */
+  async startReserved(id: string): Promise<BackgroundJob> {
+    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    if (!job) throw new Error(`Reserved job ${id} not found`);
+    if (job.status !== 'QUEUED') return job;
+    if (this.qstash.publishEnabled) {
+      await this.qstash.publishJob(id);
+      return job;
+    }
+    return this.runInline(id);
+  }
+
+  /**
+   * ページ資料の親hierarchyを保ったまま再開する。validな既存rootが無い場合だけnullを返し、
+   * use-case側が新しいKG_INGEST_FILE rootを作る。
+   */
+  async resumeIngestionParent(
+    parentJobId: string,
+    fileId: string,
+    projectId: string,
+    fileSucceeded = false,
+  ): Promise<(BackgroundJob & { recoveryTriggered?: boolean }) | null> {
+    const parent = await this.prisma.backgroundJob.findUnique({
+      where: { id: parentJobId },
+    });
+    const payload = (parent?.payload ?? {}) as Record<string, unknown>;
+    if (
+      !parent ||
+      parent.type !== 'KG_INGEST_FILE' ||
+      parent.projectId !== projectId ||
+      parent.parentJobId !== null ||
+      payload.fileId !== fileId
+    ) {
+      return null;
+    }
+    if (
+      fileSucceeded &&
+      (parent.status === 'FAILED' || parent.status === 'QUEUED')
+    ) {
+      await this.prisma.backgroundJob.updateMany({
+        where: {
+          id: parent.id,
+          status: parent.status,
+        },
+        data: {
+          status: 'RUNNING',
+          error: null,
+          finishedAt: null,
+          startedAt: parent.startedAt ?? new Date(),
+        },
+      });
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
+      return (
+        { ...((await this.prisma.backgroundJob.findUnique({ where: { id: parent.id } })) ?? parent), recoveryTriggered }
+      );
+    }
+    if (parent.status === 'FAILED') return this.retry(parent.id);
+    if (parent.status === 'QUEUED') return this.startReserved(parent.id);
+    if (parent.status === 'RUNNING') {
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
+      return {
+        ...((await this.prisma.backgroundJob.findUnique({
+          where: { id: parent.id },
+        })) ?? parent),
+        recoveryTriggered,
+      };
+    }
+    if (fileSucceeded && parent.status === 'SUCCEEDED') {
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(
+        fileId,
+        parent.id,
+      );
+      return { ...parent, recoveryTriggered };
+    }
+    return null;
   }
 
   /**
@@ -135,14 +262,18 @@ export class JobService {
     if (!job) {
       throw new Error(`Job ${id} not found`);
     }
+    if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+      // 並行retryの敗者は、勝者が作った実行可能/実行中状態をそのまま返す。
+      return job;
+    }
     if (job.status !== 'FAILED') {
       throw new Error(`Job ${id} is ${job.status}; only FAILED jobs can be retried`);
     }
 
     // QUEUED へ戻す。attempts は保持し、maxAttempts に再試行余地を足す
     // （自動リトライ上限を使い切った FAILED でも、手動再起票後に自動リトライが効く）。
-    const requeued = await this.prisma.backgroundJob.update({
-      where: { id },
+    const requeued = await this.prisma.backgroundJob.updateMany({
+      where: { id, status: 'FAILED' },
       data: {
         status: 'QUEUED',
         maxAttempts: job.attempts + JobService.MAX_ATTEMPTS,
@@ -153,13 +284,80 @@ export class JobService {
         finishedAt: null,
       },
     });
+    if (requeued.count !== 1) {
+      const current = await this.prisma.backgroundJob.findUnique({ where: { id } });
+      if (!current) throw new Error(`Job ${id} not found`);
+      return current;
+    }
 
     if (this.qstash.publishEnabled) {
-      await this.qstash.publishJob(requeued.id);
-      return requeued;
+      await this.qstash.publishJob(id);
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ??
+        { ...job, status: 'QUEUED' }
+      );
     }
     // ローカル/QStash無: その場で終端まで実行して完了 job を返す。
-    return this.runInline(requeued.id);
+    return this.runInline(id);
+  }
+
+  /** stale RUNNING のleaseだけを同じjob idで回収し、再実行する。 */
+  async recoverStaleRunning(
+    id: string,
+    staleMs = 10 * 60 * 1000,
+  ): Promise<BackgroundJob & { recoveryTriggered?: boolean }> {
+    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    if (!job) throw new Error(`Job ${id} not found`);
+    if (
+      job.status !== 'RUNNING' ||
+      !job.startedAt ||
+      job.startedAt.getTime() > Date.now() - staleMs
+    ) {
+      return { ...job, recoveryTriggered: false };
+    }
+    const reason = 'stale RUNNING lease recovered';
+    const recovered = await this.prisma.$transaction(async (tx) => {
+      const payload = (job.payload ?? {}) as Record<string, unknown>;
+      if (
+        job.type === 'KG_MERGE_INGEST_FILE' &&
+        typeof payload.fileId === 'string'
+      ) {
+        await tx.$executeRawUnsafe(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          `knowledge-merge:${payload.fileId}`,
+        );
+      }
+      const claim = await tx.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: job.startedAt },
+        data: {
+          status: 'QUEUED',
+          progress: 0,
+          attempts: { increment: 1 },
+          maxAttempts: job.maxAttempts + 1,
+          startedAt: null,
+          finishedAt: null,
+          error: reason,
+        },
+      });
+      if (claim.count !== 1) return claim;
+      const finishedAt = new Date();
+      await tx.backgroundJobAttempt.updateMany({
+        where: { jobId: id, status: 'RUNNING' },
+        data: {
+          status: 'FAILED',
+          error: reason,
+          finishedAt,
+          durationMs: Math.max(0, finishedAt.getTime() - job.startedAt!.getTime()),
+        },
+      });
+      return claim;
+    });
+    if (recovered.count !== 1) {
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ?? job
+      );
+    }
+    return { ...(await this.startReserved(id)), recoveryTriggered: true };
   }
 
   /**
@@ -211,9 +409,10 @@ export class JobService {
     //  上の findUnique では両者とも QUEUED を読みうる）で二重 dispatch されるため、
     //  QUEUED→RUNNING の遷移を条件付き updateMany で原子的に行い、
     //  count===1（＝この呼び出しが遷移を勝ち取った）時だけ実行する。
+    const claimStartedAt = new Date();
     const claimed = await this.prisma.backgroundJob.updateMany({
       where: { id, status: 'QUEUED' },
-      data: { status: 'RUNNING', startedAt: new Date(), progress: 10 },
+      data: { status: 'RUNNING', startedAt: claimStartedAt, progress: 10 },
     });
     if (claimed.count !== 1) {
       // 別の並行実行が先に QUEUED→RUNNING を確定させた。二重 dispatch しない。
@@ -232,14 +431,29 @@ export class JobService {
     const attempt = await this.createAttempt(id, attemptNo, attemptStartedAt);
 
     try {
-      const result = await this.dispatch(job);
+      const result = await this.dispatch(job, claimStartedAt);
       // 成功: 試行記録を SUCCEEDED で確定。
       await this.finishAttempt(attempt?.id, {
         status: 'SUCCEEDED',
         startedAt: attemptStartedAt,
       });
-      return this.prisma.backgroundJob.update({
-        where: { id },
+      if (this.isDeferredResult(job, result)) {
+        // ページ子ジョブがinlineで即完了/失敗し、すでに親を終端した可能性がある。
+        // RUNNING 条件付き更新にして、その終端状態を外側のorchestrator完了で巻き戻さない。
+        await this.prisma.backgroundJob.updateMany({
+          where: { id, status: 'RUNNING', startedAt: claimStartedAt },
+          data: {
+            result: result as Prisma.InputJsonValue,
+            progress: 50,
+          },
+        });
+        const current = await this.prisma.backgroundJob.findUnique({
+          where: { id },
+        });
+        return current ?? job;
+      }
+      const completed = await this.prisma.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: claimStartedAt },
         data: {
           status: 'SUCCEEDED',
           result: (result ?? Prisma.JsonNull) as Prisma.InputJsonValue,
@@ -248,6 +462,16 @@ export class JobService {
           finishedAt: new Date(),
         },
       });
+      const current = await this.prisma.backgroundJob.findUnique({ where: { id } });
+      return current ??
+        (completed.count === 1
+          ? ({ ...job,
+              status: 'SUCCEEDED',
+              result: (result ?? Prisma.JsonNull) as Prisma.JsonValue,
+              progress: 100,
+              error: null,
+            } as BackgroundJob)
+          : job);
     } catch (err) {
       const message = (err as Error)?.message ?? String(err);
       // エラーは（スタック含め）全文記録する。秘匿値は payload に入れない方針のため
@@ -273,8 +497,8 @@ export class JobService {
         this.logger.warn(
           `Job ${id} (${job.type}) failed (attempt ${attemptsAfter}/${job.maxAttempts}), requeueing for retry: ${message}`,
         );
-        await this.prisma.backgroundJob.update({
-          where: { id },
+        const requeueClaim = await this.prisma.backgroundJob.updateMany({
+          where: { id, status: 'RUNNING', startedAt: claimStartedAt },
           data: {
             status: 'QUEUED',
             error: errorText,
@@ -283,6 +507,12 @@ export class JobService {
             startedAt: null,
           },
         });
+
+        if (requeueClaim.count !== 1) {
+          return (
+            (await this.prisma.backgroundJob.findUnique({ where: { id } })) ?? job
+          );
+        }
 
         if (opts.throwOnFailure === true) {
           // ワーカー経路: 例外を再 throw → ワーカーが非2xx を返し QStash 自動リトライが発火。
@@ -299,8 +529,8 @@ export class JobService {
       this.logger.error(
         `Job ${id} (${job.type}) failed permanently (attempt ${attemptsAfter}/${job.maxAttempts}): ${message}`,
       );
-      return this.prisma.backgroundJob.update({
-        where: { id },
+      const failed = await this.prisma.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: claimStartedAt },
         data: {
           status: 'FAILED',
           error: errorText,
@@ -308,7 +538,43 @@ export class JobService {
           finishedAt: new Date(),
         },
       });
+      if (failed.count === 1 && job.type === 'KG_INGEST_PAGE') {
+        const payload = (job.payload ?? {}) as Record<string, unknown>;
+        const pageId =
+          typeof payload.pageId === 'string' ? payload.pageId : null;
+        if (pageId) {
+          try {
+            await this.knowledgeIngestion.handlePageJobTerminalFailure(
+              pageId,
+              job.id,
+            );
+          } catch (terminalError) {
+            this.logger.warn(
+              `Failed to replenish page workers after ${job.id}: ${(terminalError as Error)?.message ?? String(terminalError)}`,
+            );
+          }
+        }
+      }
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ??
+        (failed.count === 1
+          ? ({ ...job,
+              status: 'FAILED',
+              error: errorText,
+              attempts: attemptsAfter,
+            } as BackgroundJob)
+          : job)
+      );
     }
+  }
+
+  private isDeferredResult(job: BackgroundJob, result: unknown): boolean {
+    return (
+      job.type === 'KG_INGEST_FILE' &&
+      !!result &&
+      typeof result === 'object' &&
+      (result as { deferred?: unknown }).deferred === true
+    );
   }
 
   /**
@@ -349,8 +615,8 @@ export class JobService {
     if (!attemptId) return;
     const finishedAt = new Date();
     try {
-      await this.prisma.backgroundJobAttempt.update({
-        where: { id: attemptId },
+      await this.prisma.backgroundJobAttempt.updateMany({
+        where: { id: attemptId, status: 'RUNNING' },
         data: {
           status: args.status,
           error: args.error ?? null,
@@ -385,6 +651,8 @@ export class JobService {
     'AI_RAG_SUMMARIZE',
     // ナレッジ取り込み（1ファイル=1ジョブ）。
     'KG_INGEST_FILE',
+    'KG_INGEST_PAGE',
+    'KG_MERGE_INGEST_FILE',
     'KG_EXPAND_ARCHIVE',
   ] as const;
 
@@ -401,7 +669,10 @@ export class JobService {
    *     compute ジョブとし、クライアントが既存の同期エンドポイントで適用する
    *     （AI_MERMAID_FLOW / AI_ISSUE_SUGGEST）。
    */
-  private async dispatch(job: BackgroundJob): Promise<unknown> {
+  private async dispatch(
+    job: BackgroundJob,
+    claimStartedAt?: Date,
+  ): Promise<unknown> {
     const payload = (job.payload ?? {}) as Record<string, unknown>;
 
     switch (job.type) {
@@ -552,11 +823,42 @@ export class JobService {
       }
 
       // ===== ナレッジ取り込みジョブ（1ファイル=1ジョブ） =====
+      case 'KG_FINALIZE_EXTERNAL_MATERIAL': {
+        const importId = this.requireString(payload.importId, 'payload.importId');
+        const result = await this.importExternalMaterial.verifyAndBatch(
+          importId,
+          job.id,
+        );
+        return { kind: 'KG_FINALIZE_EXTERNAL_MATERIAL', ...result };
+      }
+
       case 'KG_INGEST_FILE': {
         // FETCH→PREPROCESS→EXTRACT→MERGE。IngestionFile.status を各段で更新する。
         const fileId = this.requireString(payload.fileId, 'payload.fileId');
-        const result = await this.knowledgeIngestion.processFile(fileId);
+        const result = await this.knowledgeIngestion.processFile(
+          fileId,
+          job.id,
+        );
         return { kind: 'KG_INGEST_FILE', fileId, ...result };
+      }
+
+      case 'KG_INGEST_PAGE': {
+        const pageId = this.requireString(payload.pageId, 'payload.pageId');
+        const result = await this.knowledgeIngestion.processPage(
+          pageId,
+          job.id,
+        );
+        return { kind: 'KG_INGEST_PAGE', pageId, ...result };
+      }
+
+      case 'KG_MERGE_INGEST_FILE': {
+        const fileId = this.requireString(payload.fileId, 'payload.fileId');
+        const result = await this.knowledgeIngestion.mergePagedFile(
+          fileId,
+          job.id,
+          ...(claimStartedAt ? [claimStartedAt] : []),
+        );
+        return { kind: 'KG_MERGE_INGEST_FILE', fileId, ...result };
       }
 
       case 'KG_EXPAND_ARCHIVE': {

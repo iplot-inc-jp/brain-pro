@@ -118,6 +118,12 @@ export interface IngestionFile {
   error: string | null;
   jobId: string | null;
   knowledgeDocumentId: string | null;
+  /** PDF/PPTX のページ抽出進捗（バッチ詳細取得時のみ）。 */
+  pageProgress?: {
+    succeeded: number;
+    total: number;
+    failedPageNumbers: number[];
+  } | null;
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
@@ -275,6 +281,25 @@ export interface KnowledgeDocument {
   updatedAt: string;
 }
 
+export type KnowledgeDocumentPageStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCEEDED'
+  | 'FAILED';
+
+export type KnowledgeDocumentPageKind = 'PDF_PAGE' | 'PPTX_SLIDE';
+
+export interface KnowledgeDocumentPage {
+  id: string;
+  pageNumber: number;
+  pageKind: KnowledgeDocumentPageKind;
+  status: KnowledgeDocumentPageStatus;
+  summary: string | null;
+  contentText: string | null;
+  error: string | null;
+  retryable: boolean;
+}
+
 /** グラフ全体（nodes + edges + documents）。backend KnowledgeGraphOutput と一致。 */
 export interface KnowledgeGraph {
   nodes: KnowledgeNode[];
@@ -376,6 +401,34 @@ async function throwApiError(res: Response, fallback: string): Promise<never> {
 async function ok<T>(res: Response, errMsg: string): Promise<T> {
   if (!res.ok) await throwApiError(res, errMsg);
   return res.json() as Promise<T>;
+}
+
+export async function getKnowledgeDocumentPages(
+  documentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<KnowledgeDocumentPage[]> {
+  const res = await fetch(
+    `${API_URL}/api/knowledge-documents/${documentId}/pages`,
+    { headers: headers(), signal: options?.signal },
+  );
+  return ok<KnowledgeDocumentPage[]>(
+    res,
+    'ページ抽出結果の取得に失敗しました',
+  );
+}
+
+export async function retryKnowledgeDocumentPage(
+  pageId: string,
+  options?: { signal?: AbortSignal },
+) {
+  const res = await fetch(
+    `${API_URL}/api/knowledge-document-pages/${pageId}/retry`,
+    { method: 'POST', headers: headers(), signal: options?.signal },
+  );
+  return ok<{ id: string; status: string }>(
+    res,
+    'ページの再試行に失敗しました',
+  );
 }
 
 // ---------------------------------------------------------------------------

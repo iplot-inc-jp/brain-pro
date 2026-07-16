@@ -67,6 +67,82 @@ class RunJobDto {
   jobId: string;
 }
 
+type JobListRow = Pick<
+  BackgroundJob,
+  | 'id'
+  | 'type'
+  | 'status'
+  | 'error'
+  | 'progress'
+  | 'attempts'
+  | 'maxAttempts'
+  | 'createdAt'
+  | 'finishedAt'
+> & {
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: string;
+    status: string;
+    error: string | null;
+  } | null;
+  children?: JobListRow[];
+};
+
+interface JobListItem
+  extends Omit<JobListRow, 'children' | 'knowledgePage' | 'error'> {
+  error: string | null;
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: string;
+    status: string;
+    error: string | null;
+  } | null;
+  children?: JobListItem[];
+}
+
+function safeJobListError(value: string | null): string | null {
+  if (!value) return null;
+  const firstLine = value.split(/\r?\n/u, 1)[0] ?? '';
+  const safe = firstLine
+    .replace(/https?:\/\/\S+/giu, '[url]')
+    .replace(/(?:[A-Za-z]:\\|\/)\S+/gu, '[path]')
+    .replace(/\b(?:sk|key)[-_][A-Za-z0-9_-]{12,}\b/giu, '[secret]')
+    .trim();
+  return safe.slice(0, 300) || '処理に失敗しました';
+}
+
+function toJobListItem(row: JobListRow): JobListItem {
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    error: safeJobListError(row.error),
+    progress: row.progress,
+    attempts: row.attempts,
+    maxAttempts: row.maxAttempts,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
+    ...(row.knowledgePage !== undefined
+      ? {
+          knowledgePage: row.knowledgePage
+            ? {
+                id: row.knowledgePage.id,
+                pageNumber: row.knowledgePage.pageNumber,
+                pageKind: row.knowledgePage.pageKind,
+                status: row.knowledgePage.status,
+                error: safeJobListError(row.knowledgePage.error),
+              }
+            : null,
+        }
+      : {}),
+    ...(row.children
+      ? { children: row.children.map((child) => toJobListItem(child)) }
+      : {}),
+  };
+}
+
 /**
  * QStash ワーカー（push 受信）エンドポイント。
  *
@@ -178,12 +254,95 @@ export class ProjectJobController {
   async list(
     @Param('projectId') projectId: string,
     @Query('limit') limit?: string,
-  ): Promise<BackgroundJob[]> {
-    return this.prisma.backgroundJob.findMany({
-      where: { projectId },
+  ) {
+    const roots = await this.prisma.backgroundJob.findMany({
+      where: { projectId, parentJobId: null },
       orderBy: { createdAt: 'desc' },
       take: this.parseLimit(limit),
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        error: true,
+        progress: true,
+        attempts: true,
+        maxAttempts: true,
+        createdAt: true,
+        finishedAt: true,
+        children: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            error: true,
+            progress: true,
+            attempts: true,
+            maxAttempts: true,
+            createdAt: true,
+            finishedAt: true,
+            knowledgePage: {
+              select: {
+                id: true,
+                pageNumber: true,
+                pageKind: true,
+                status: true,
+                error: true,
+              },
+            },
+          },
+        },
+      },
     });
+    return roots.map((root) =>
+      toJobListItem({
+        ...root,
+        children: [...root.children].sort((a, b) => {
+          const pageA =
+            a.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+          const pageB =
+            b.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+          if (pageA !== pageB) return pageA - pageB;
+          return a.createdAt.getTime() - b.createdAt.getTime();
+        }),
+      }),
+    );
+  }
+
+  @Post('jobs/:id/resume')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'ページ資料の親ジョブを未完了ページから再開' })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiParam({ name: 'id', description: '親ジョブID' })
+  async resume(
+    @CurrentUser() _user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    const root = await this.prisma.backgroundJob.findFirst({
+      where: { id, projectId, parentJobId: null },
+    });
+    const payload = (root?.payload ?? {}) as Record<string, unknown>;
+    const fileId = typeof payload.fileId === 'string' ? payload.fileId : null;
+    if (!root) throw new NotFoundException('親ジョブが見つかりません');
+    if (root.type !== 'KG_INGEST_FILE' || !fileId) {
+      throw new BadRequestException('ページ資料の親ジョブだけ再開できます');
+    }
+    const file = await this.prisma.ingestionFile.findFirst({
+      where: { id: fileId, projectId },
+      select: { id: true, projectId: true, status: true },
+    });
+    if (!file) throw new NotFoundException('取り込みファイルが見つかりません');
+    const resumed = await this.jobService.resumeIngestionParent(
+      root.id,
+      file.id,
+      projectId,
+      file.status === 'SUCCEEDED',
+    );
+    if (!resumed) {
+      throw new BadRequestException('この親ジョブは再開できません');
+    }
+    return resumed;
   }
 
   /**

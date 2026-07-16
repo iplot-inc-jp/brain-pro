@@ -45,8 +45,35 @@ export class RetryFileUseCase {
       'edit',
     );
 
+    // 成果物が先にSUCCEEDEDでも、merge job/親の可視状態更新前に落ちた可能性がある。
+    // 同じrootだけを回収し、新rootや再課金は発生させない。
+    if (file.status === 'SUCCEEDED') {
+      if (this.isPaged(file) && file.jobId) {
+        await this.jobService.resumeIngestionParent(
+          file.jobId,
+          file.id,
+          file.projectId,
+          true,
+        );
+      }
+      const refreshed = await this.fileRepository.findById(file.id);
+      return toIngestionFileOutput(refreshed ?? file);
+    }
+
     file.requeue();
     await this.fileRepository.save(file);
+
+    if (this.isPaged(file) && file.jobId) {
+      const resumed = await this.jobService.resumeIngestionParent(
+        file.jobId,
+        file.id,
+        file.projectId,
+      );
+      if (resumed) {
+        const refreshed = await this.fileRepository.findById(file.id);
+        return toIngestionFileOutput(refreshed ?? file);
+      }
+    }
 
     const type = file.isArchive ? 'KG_EXPAND_ARCHIVE' : 'KG_INGEST_FILE';
     const job = await this.jobService.enqueue(
@@ -54,9 +81,18 @@ export class RetryFileUseCase {
       { fileId: file.id },
       { projectId: file.projectId, createdById: input.userId },
     );
+    // enqueue のinline経路がstatusを終端済みでも、古いPENDING entityのfull saveで巻き戻さない。
+    await this.fileRepository.setJobId(file.id, job.id);
     file.setJobId(job.id);
-    await this.fileRepository.save(file);
 
-    return toIngestionFileOutput(file);
+    const refreshed = await this.fileRepository.findById(file.id);
+    return toIngestionFileOutput(refreshed ?? file);
+  }
+
+  private isPaged(file: { filename: string; mimeType: string | null }): boolean {
+    return (
+      /\.(pdf|pptx)$/i.test(file.filename) ||
+      /application\/pdf|presentationml\.presentation/i.test(file.mimeType ?? '')
+    );
   }
 }
