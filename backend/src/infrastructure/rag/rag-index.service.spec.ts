@@ -12,7 +12,7 @@ const bundle = {
     metadata: { targetKey: 'project' },
   },
   components: [
-    { sourceKey: 't1', sourceUrl: '/tasks/t1', title: '要件確認', facts: { status: 'OPEN' } },
+    { sourceKey: 't1', sourceUrl: '/tasks/t1', title: '要件確認', facts: { status: 'OPEN' }, sourceFiles: [{ kind: 'FILE', label: '要件.pdf', url: '/api/attachments/a1/file', filename: '要件.pdf', mimeType: 'application/pdf' }] },
     { sourceKey: 't2', sourceUrl: '/tasks/t2', title: '設計', facts: { status: 'DONE' } },
   ],
 };
@@ -33,6 +33,10 @@ function makeDeps() {
       upsert: jest.fn(async ({ create }: any) => ({ id: create.sourceKey, ...create })),
       deleteMany: jest.fn(async () => ({ count: 0 })),
       findMany: jest.fn(async () => []),
+    },
+    ragSourceReference: {
+      deleteMany: jest.fn(async () => ({ count: 0 })),
+      createMany: jest.fn(async () => ({ count: 1 })),
     },
     $transaction: jest.fn(async (callback: any) => callback(prisma)),
     $queryRaw: jest.fn(async () => []),
@@ -102,6 +106,25 @@ describe('RagIndexService.generate', () => {
         projectId: 'p1', featureType: 'TASK', targetKey: 'project', scopeLevel: 'COMPONENT',
         sourceKey: { notIn: ['t1', 't2'] },
       },
+    });
+  });
+
+  it('upsertごとに古い元ファイル参照を置き換える', async () => {
+    const deps = makeDeps();
+    await service(deps).generate({
+      projectId: 'p1', featureType: 'TASK', apiKey: 'sk-test',
+    });
+
+    expect(deps.prisma.ragSourceReference.deleteMany).toHaveBeenCalledWith({
+      where: { ragDocumentId: 't1' },
+    });
+    expect(deps.prisma.ragSourceReference.createMany).toHaveBeenCalledWith({
+      data: [{
+        ragDocumentId: 't1', kind: 'FILE', label: '要件.pdf',
+        url: '/api/attachments/a1/file', filename: '要件.pdf',
+        mimeType: 'application/pdf', order: 0,
+      }],
+      skipDuplicates: true,
     });
   });
 

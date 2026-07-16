@@ -14,6 +14,7 @@ function makePrisma() {
           definition: { purpose: '注文を受ける', input: '注文書', output: '受注票' },
           nodes: [{ id: 'n1', label: '受付', type: 'PROCESS', description: '内容確認', order: 1, role: { name: '営業' }, informationLinks: [] }],
           edges: [], assignees: [],
+          attachments: [{ id: 'fa1', filename: 'flow.pdf', displayName: '業務フロー資料', mimeType: 'application/pdf' }],
         },
       ]),
     },
@@ -29,7 +30,7 @@ function makePrisma() {
     },
     task: {
       findMany: jest.fn(async () => [
-        { id: 'task1', title: '要件確認', description: '担当者と確認', status: 'OPEN', priority: 'HIGH', issueType: 'TASK', parentId: null, assigneeName: '田中', progress: 20, dueDate: at, acceptanceCriteria: '承認済み', updatedAt: at, assigneeRole: { name: 'PM' }, subProject: null, issueNode: null, risk: null, gapItem: null },
+        { id: 'task1', title: '要件確認', description: '担当者と確認', status: 'OPEN', priority: 'HIGH', issueType: 'TASK', parentId: null, assigneeName: '田中', progress: 20, dueDate: at, acceptanceCriteria: '承認済み', updatedAt: at, assigneeRole: { name: 'PM' }, subProject: null, issueNode: null, risk: null, gapItem: null, attachments: [{ id: 'ta1', filename: 'task.xlsx', displayName: null, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }] },
       ]),
     },
     stakeholder: {
@@ -113,6 +114,25 @@ describe('RagSourceService', () => {
     const first = await service.build('p1', 'TASK');
     const second = await service.build('p1', 'TASK');
     expect(first.sourceHash).toBe(second.sourceHash);
+  });
+
+  it('業務フロー・タスク添付と会議Google Docsを元ファイルとして保持する', async () => {
+    const service = new RagSourceService(makePrisma() as any);
+    const flow = await service.build('p1', 'BUSINESS_FLOW');
+    const task = await service.build('p1', 'TASK');
+    const meeting = await service.build('p1', 'MEETING');
+
+    expect(flow.components[0].sourceFiles).toContainEqual(expect.objectContaining({
+      kind: 'FILE', url: '/api/attachments/fa1/file', filename: 'flow.pdf', label: '業務フロー資料',
+    }));
+    expect(task.components[0].sourceFiles).toContainEqual(expect.objectContaining({
+      kind: 'FILE', url: '/api/attachments/ta1/file', filename: 'task.xlsx',
+    }));
+    expect(meeting.components.find((item) => item.sourceKey === 'document:md1')?.sourceFiles)
+      .toContainEqual(expect.objectContaining({
+        kind: 'EXTERNAL', url: 'https://example.com', label: '移行計画',
+      }));
+    expect(task.overview.sourceFiles).toHaveLength(1);
   });
 
   it('対象フローは projectId と id を同時に条件指定し、ノードをcomponentにする', async () => {

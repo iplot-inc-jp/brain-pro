@@ -4,6 +4,7 @@ import { PrismaService } from '../persistence/prisma/prisma.service';
 import {
   RagFeatureType,
   RagSourceBundle,
+  RagSourceFile,
   RagSourceItem,
 } from './rag.types';
 
@@ -48,8 +49,22 @@ function item(
   title: string,
   facts: JsonRecord,
   metadata: JsonRecord = {},
+  sourceFiles: RagSourceFile[] = [],
 ): RagSourceItem {
-  return { sourceKey, sourceUrl, title, facts: canonicalize(facts) as JsonRecord, metadata };
+  const uniqueFiles = new Map<string, RagSourceFile>();
+  for (const file of sourceFiles) {
+    if (!file.url || uniqueFiles.has(file.url)) continue;
+    uniqueFiles.set(file.url, file);
+    if (uniqueFiles.size >= 20) break;
+  }
+  return {
+    sourceKey,
+    sourceUrl,
+    title,
+    facts: canonicalize(facts) as JsonRecord,
+    metadata,
+    sourceFiles: [...uniqueFiles.values()],
+  };
 }
 
 @Injectable()
@@ -121,6 +136,7 @@ export class RagSourceService {
       overviewTitle || `${project.name}の${FEATURE_LABELS[featureType]}`,
       { projectName: project.name, ...overviewFacts },
       { targetKey, featureType },
+      components.flatMap((component) => component.sourceFiles ?? []),
     );
     return {
       featureType,
@@ -150,6 +166,10 @@ export class RagSourceService {
         },
         edges: { include: { informationType: true } },
         assignees: { include: { stakeholder: { select: { name: true } } } },
+        attachments: {
+          select: { id: true, filename: true, displayName: true, mimeType: true },
+          orderBy: { order: 'asc' },
+        },
       },
     } as any);
     if (rows.length === 0) return this.empty(`${this.base(projectId)}/flows`, '業務フロー');
@@ -201,7 +221,7 @@ export class RagSourceService {
             handledCount: node.handledCount,
             supplement: node.supplement,
             inputsAndOutputs: node.informationLinks,
-          }),
+          }, {}, this.attachmentFiles(flow.attachments)),
         ),
         overviewUrl: url,
         overviewTitle: flow.name,
@@ -210,7 +230,14 @@ export class RagSourceService {
     return {
       overviewFacts: { flows: rows.map(flowFacts) },
       components: rows.map((flow) =>
-        item(flow.id, `${this.base(projectId)}/flows/${flow.id}`, flow.name, flowFacts(flow)),
+        item(
+          flow.id,
+          `${this.base(projectId)}/flows/${flow.id}`,
+          flow.name,
+          flowFacts(flow),
+          {},
+          this.attachmentFiles(flow.attachments),
+        ),
       ),
       overviewUrl: `${this.base(projectId)}/flows`,
       overviewTitle: '業務フロー全体',
@@ -271,6 +298,10 @@ export class RagSourceService {
         assigneeRole: { select: { name: true } }, subProject: { select: { name: true } },
         issueNode: { select: { label: true } }, risk: { select: { code: true, event: true } },
         gapItem: { select: { businessArea: true, gapDescription: true } },
+        attachments: {
+          select: { id: true, filename: true, displayName: true, mimeType: true },
+          orderBy: { order: 'asc' },
+        },
       },
     } as any);
     const url = `${this.base(projectId)}/tasks`;
@@ -282,7 +313,15 @@ export class RagSourceService {
       milestone: row.milestone, acceptanceCriteria: row.acceptanceCriteria,
       issue: row.issueNode?.label, risk: row.risk, gap: row.gapItem, updatedAt: row.updatedAt,
     });
-    return this.collection(rows, url, 'タスク全体', facts, (row) => row.title, (row) => `${url}/${row.id}`);
+    return this.collection(
+      rows,
+      url,
+      'タスク全体',
+      facts,
+      (row) => row.title,
+      (row) => `${url}/${row.id}`,
+      (row) => this.attachmentFiles(row.attachments),
+    );
   }
 
   private async stakeholders(projectId: string) {
@@ -414,11 +453,17 @@ export class RagSourceService {
       agenda: row.agenda, minutes: row.minutes, decisions: row.decisions,
       nextActions: row.nextActions, source: row.source, updatedAt: row.updatedAt,
     }));
-    const documentItems = documents.map((row) => item(`document:${row.id}`, `${base}/meeting-documents?doc=${row.id}`, row.title || row.fetchedTitle || '会議資料', {
-      kind: 'DOCUMENT', meeting: row.meeting?.name, documentKind: row.kind,
-      fetchedTitle: row.fetchedTitle, content: row.fetchedContent, sourceUrl: row.googleDocUrl,
-      fetchedAt: row.fetchedAt, updatedAt: row.updatedAt,
-    }));
+    const documentItems = documents.map((row) => {
+      const title = row.title || row.fetchedTitle || '会議資料';
+      return item(`document:${row.id}`, `${base}/meeting-documents?doc=${row.id}`, title, {
+        kind: 'DOCUMENT', meeting: row.meeting?.name, documentKind: row.kind,
+        fetchedTitle: row.fetchedTitle, content: row.fetchedContent, sourceUrl: row.googleDocUrl,
+        fetchedAt: row.fetchedAt, updatedAt: row.updatedAt,
+      }, {}, row.googleDocUrl ? [{
+        kind: 'EXTERNAL', label: title, url: row.googleDocUrl,
+        filename: null, mimeType: row.fetchedMime ?? null,
+      }] : []);
+    });
     const components = [...meetingItems, ...occurrenceItems, ...documentItems];
     return {
       overviewFacts: { meetings: meetingItems.map((x) => x.facts), occurrences: occurrenceItems.map((x) => x.facts), documents: documentItems.map((x) => x.facts) },
@@ -435,12 +480,27 @@ export class RagSourceService {
     facts: (row: any) => JsonRecord,
     title: (row: any) => string,
     url: (row: any) => string = () => overviewUrl,
+    sourceFiles: (row: any) => RagSourceFile[] = () => [],
   ) {
-    const components = rows.map((row) => item(row.id, url(row), title(row), facts(row)));
+    const components = rows.map((row) =>
+      item(row.id, url(row), title(row), facts(row), {}, sourceFiles(row)),
+    );
     return { overviewFacts: { items: components.map((component) => component.facts) }, components, overviewUrl, overviewTitle };
   }
 
   private empty(overviewUrl: string, overviewTitle: string) {
     return { overviewFacts: {}, components: [] as RagSourceItem[], overviewUrl, overviewTitle };
+  }
+
+  private attachmentFiles(
+    attachments: Array<{ id: string; filename: string; displayName: string | null; mimeType: string }> = [],
+  ): RagSourceFile[] {
+    return attachments.map((attachment) => ({
+      kind: 'FILE',
+      label: attachment.displayName || attachment.filename,
+      url: `/api/attachments/${attachment.id}/file`,
+      filename: attachment.filename,
+      mimeType: attachment.mimeType,
+    }));
   }
 }
