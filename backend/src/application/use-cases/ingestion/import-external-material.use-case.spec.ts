@@ -138,6 +138,11 @@ function makeUseCase() {
       contentType: 'application/pdf',
     })),
     readPrivate: jest.fn(async () => PDF_BYTES),
+    sealPrivate: jest.fn(async (pathname: string, bytes: Buffer) => ({
+      pathname,
+      reference: `private-blob:${pathname}`,
+      bytes: Buffer.from(bytes),
+    })),
     deletePrivate: jest.fn(async () => undefined),
     createPrivateDownload: jest.fn(async () => ({
       downloadUrl: 'https://private-download.example/get',
@@ -343,8 +348,20 @@ describe('ImportExternalMaterialUseCase direct private flow', () => {
     expect([...ctx.state.attachments.values()][0]).toEqual(
       expect.objectContaining({
         folder: 'LINE・Slack',
-        blobUrl: expect.stringMatching(/^private-blob:/u),
+        blobUrl: expect.stringMatching(
+          new RegExp(`^private-blob:external-materials/p1/[^/]+/${PDF_HASH}/`),
+        ),
       }),
+    );
+    expect(ctx.blob.sealPrivate).toHaveBeenCalledWith(
+      expect.stringMatching(
+        new RegExp(`^external-materials/p1/[^/]+/${PDF_HASH}/資料\\.pdf$`),
+      ),
+      PDF_BYTES,
+      'application/pdf',
+    );
+    expect(ctx.blob.deletePrivate).toHaveBeenCalledWith(
+      expect.stringMatching(/^external-materials\/p1\/[^/]+\/資料\.pdf$/u),
     );
     expect(ctx.state.batches.size).toBe(1);
     expect(ctx.state.files.size).toBe(1);
@@ -353,6 +370,101 @@ describe('ImportExternalMaterialUseCase direct private flow', () => {
         (job) => job.type === 'KG_INGEST_FILE',
       ),
     ).toHaveLength(1);
+  });
+
+  it('seals the verified bytes so a later staging replay cannot change ingestion or download', async () => {
+    const ctx = makeUseCase();
+    const prepared = await prepareAndFinalize(ctx);
+    const verifier = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_FINALIZE_EXTERNAL_MATERIAL',
+    );
+    await ctx.useCase.verifyAndBatch(prepared.importId, verifier!.id);
+    const sealedCall = ctx.blob.sealPrivate.mock.calls[0];
+    const sealedPathname = sealedCall[0];
+    const sealedBytes = sealedCall[1];
+
+    ctx.blob.readPrivate.mockResolvedValue(Buffer.from('replayed staging'));
+    await ctx.useCase.getDownload({
+      principal: { id: 'u1' },
+      projectId: 'p1',
+      importId: prepared.importId,
+    });
+
+    expect(sealedBytes).toEqual(PDF_BYTES);
+    expect([...ctx.state.files.values()][0].blobUrl).toBe(
+      `private-blob:${sealedPathname}`,
+    );
+    expect(ctx.blob.createPrivateDownload).toHaveBeenCalledWith(sealedPathname);
+  });
+
+  it('does not sign a staging download before the import is BATCHED', async () => {
+    const ctx = makeUseCase();
+    const prepared = await prepareAndFinalize(ctx);
+
+    await expect(
+      ctx.useCase.getDownload({
+        principal: { id: 'u1' },
+        projectId: 'p1',
+        importId: prepared.importId,
+      }),
+    ).rejects.toBeInstanceOf(ValidationError);
+    expect(ctx.blob.createPrivateDownload).not.toHaveBeenCalled();
+  });
+
+  it('does not issue another staging upload token after BATCHED', async () => {
+    const ctx = makeUseCase();
+    const prepared = await prepareAndFinalize(ctx);
+    const verifier = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_FINALIZE_EXTERNAL_MATERIAL',
+    );
+    await ctx.useCase.verifyAndBatch(prepared.importId, verifier!.id);
+    ctx.blob.createPrivateUpload.mockClear();
+
+    const repeated = await ctx.useCase.prepare(prepareInput());
+
+    expect(repeated.status).toBe('BATCHED');
+    expect(repeated.upload).toBeNull();
+    expect(ctx.blob.createPrivateUpload).not.toHaveBeenCalled();
+  });
+
+  it('polling STORED self-heals the existing verifier without finalize again', async () => {
+    const ctx = makeUseCase();
+    const prepared = await prepareAndFinalize(ctx);
+    const verifier = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_FINALIZE_EXTERNAL_MATERIAL',
+    );
+    ctx.jobs.startReserved.mockClear();
+
+    await ctx.useCase.getStatus({
+      principal: { id: 'u1' },
+      projectId: 'p1',
+      importId: prepared.importId,
+    });
+
+    expect(ctx.jobs.startReserved).toHaveBeenCalledWith(verifier!.id);
+  });
+
+  it('polling BATCHED self-heals the existing root without verification again', async () => {
+    const ctx = makeUseCase();
+    const prepared = await prepareAndFinalize(ctx);
+    const verifier = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_FINALIZE_EXTERNAL_MATERIAL',
+    );
+    await ctx.useCase.verifyAndBatch(prepared.importId, verifier!.id);
+    const root = [...ctx.state.jobs.values()].find(
+      (job) => job.type === 'KG_INGEST_FILE',
+    );
+    ctx.jobs.startReserved.mockClear();
+    ctx.blob.readPrivate.mockClear();
+
+    await ctx.useCase.getStatus({
+      principal: { id: 'u1' },
+      projectId: 'p1',
+      importId: prepared.importId,
+    });
+
+    expect(ctx.jobs.startReserved).toHaveBeenCalledWith(root!.id);
+    expect(ctx.blob.readPrivate).not.toHaveBeenCalled();
   });
 
   it('fails and deletes the private object when the measured SHA differs', async () => {

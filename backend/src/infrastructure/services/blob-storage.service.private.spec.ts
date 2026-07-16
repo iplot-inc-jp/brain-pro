@@ -6,6 +6,7 @@ const del = jest.fn();
 const put = jest.fn();
 
 jest.mock('@vercel/blob', () => ({
+  BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {},
   issueSignedToken,
   presignUrl,
   head,
@@ -15,6 +16,8 @@ jest.mock('@vercel/blob', () => ({
 }));
 
 import { BlobStorageService } from './blob-storage.service';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 
 describe('BlobStorageService private external materials', () => {
   const originalPrivateToken = process.env.PRIVATE_BLOB_READ_WRITE_TOKEN;
@@ -165,5 +168,88 @@ describe('BlobStorageService private external materials', () => {
         validUntil: 90_000,
       },
     );
+  });
+
+  it('seals verified bytes at an immutable exact path and safely reuses a concurrent seal', async () => {
+    const pathname = 'external-materials/p1/i1/abc123/file.pdf';
+    const bytes = Buffer.from('verified bytes');
+    put.mockResolvedValueOnce({ pathname });
+    const service = new BlobStorageService();
+
+    await expect(
+      service.sealPrivate(pathname, bytes, 'application/pdf'),
+    ).resolves.toEqual({
+      pathname,
+      reference: `private-blob:${pathname}`,
+    });
+    expect(put).toHaveBeenCalledWith(pathname, bytes, {
+      access: 'private',
+      token: 'private-store-token',
+      contentType: 'application/pdf',
+      addRandomSuffix: false,
+      allowOverwrite: false,
+    });
+
+    const { BlobPreconditionFailedError } = jest.requireMock('@vercel/blob');
+    put.mockRejectedValueOnce(new BlobPreconditionFailedError());
+    head.mockResolvedValueOnce({
+      pathname,
+      size: bytes.length,
+      contentType: 'application/pdf',
+    });
+    await expect(
+      service.sealPrivate(pathname, bytes, 'application/pdf'),
+    ).resolves.toEqual({
+      pathname,
+      reference: `private-blob:${pathname}`,
+    });
+    expect(head).toHaveBeenCalledWith(pathname, {
+      token: 'private-store-token',
+    });
+  });
+
+  it('keeps immutable local-disk sealing for legacy development uploads', async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalVercel = process.env.VERCEL;
+    const originalUploadDir = process.env.UPLOAD_DIR;
+    const uploadDir = fs.mkdtempSync(`${os.tmpdir()}/brainpro-seal-`);
+    delete process.env.PRIVATE_BLOB_READ_WRITE_TOKEN;
+    delete process.env.VERCEL;
+    process.env.NODE_ENV = 'test';
+    process.env.UPLOAD_DIR = uploadDir;
+    const service = new BlobStorageService();
+    const pathname = 'external-materials/p1/i1/hash/file.pdf';
+    try {
+      const first = await service.sealPrivate(
+        pathname,
+        Buffer.from('verified'),
+        'application/pdf',
+      );
+      await expect(
+        service.sealPrivate(
+          pathname,
+          Buffer.from('verified'),
+          'application/pdf',
+        ),
+      ).resolves.toEqual(first);
+      await expect(
+        service.sealPrivate(
+          pathname,
+          Buffer.from('different'),
+          'application/pdf',
+        ),
+      ).rejects.toThrow('existing sealed private blob bytes mismatch');
+      expect(first.reference).toMatch(/^file:\/\//u);
+      expect(put).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(uploadDir, { recursive: true, force: true });
+      process.env.PRIVATE_BLOB_READ_WRITE_TOKEN = 'private-store-token';
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+      if (originalVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = originalVercel;
+      if (originalUploadDir === undefined) delete process.env.UPLOAD_DIR;
+      else process.env.UPLOAD_DIR = originalUploadDir;
+    }
   });
 });

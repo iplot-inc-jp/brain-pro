@@ -149,6 +149,77 @@ export class BlobStorageService {
     });
   }
 
+  /**
+   * Persist the already verified buffer to a server-only immutable pathname.
+   * A concurrent retry may win the first write; that object is reusable only
+   * when its immutable metadata exactly matches this verified buffer.
+   */
+  async sealPrivate(
+    pathname: string,
+    bytes: Buffer | Uint8Array,
+    contentType: string,
+  ): Promise<{ reference: string; pathname: string }> {
+    const normalizedPathname = pathname.replace(/^\/+/, '');
+    const data = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    if (!this.privateToken) {
+      if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+        this.requirePrivateToken();
+      }
+      fs.mkdirSync(this.uploadDir, { recursive: true });
+      const diskPath = path.join(
+        this.uploadDir,
+        this.sanitizeKey(normalizedPathname),
+      );
+      try {
+        fs.writeFileSync(diskPath, data, { flag: 'wx' });
+      } catch (error) {
+        if (
+          !error ||
+          typeof error !== 'object' ||
+          !('code' in error) ||
+          error.code !== 'EEXIST'
+        ) {
+          throw error;
+        }
+        if (!fs.readFileSync(diskPath).equals(data)) {
+          throw new Error('existing sealed private blob bytes mismatch');
+        }
+      }
+      return {
+        reference: `file://${diskPath}`,
+        pathname: normalizedPathname,
+      };
+    }
+    const token = this.requirePrivateToken();
+    const sdk = await import('@vercel/blob');
+    try {
+      const stored = await sdk.put(normalizedPathname, data, {
+        access: 'private',
+        token,
+        contentType,
+        addRandomSuffix: false,
+        allowOverwrite: false,
+      });
+      if (stored.pathname !== normalizedPathname) {
+        throw new Error('sealed private blob pathname mismatch');
+      }
+    } catch (error) {
+      if (!(error instanceof sdk.BlobPreconditionFailedError)) throw error;
+      const existing = await sdk.head(normalizedPathname, { token });
+      if (
+        existing.pathname !== normalizedPathname ||
+        existing.size !== data.length ||
+        existing.contentType?.toLowerCase() !== contentType.toLowerCase()
+      ) {
+        throw new Error('existing sealed private blob metadata mismatch');
+      }
+    }
+    return {
+      reference: this.privateReference(normalizedPathname),
+      pathname: normalizedPathname,
+    };
+  }
+
   async createPrivateDownload(
     pathname: string,
     validUntil = Date.now() + 5 * 60 * 1000,

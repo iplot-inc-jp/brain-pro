@@ -134,7 +134,7 @@ export class ImportExternalMaterialUseCase {
       row = { ...row, status: 'PENDING', error: null };
     }
     const upload = await this.blob.createPrivateUpload(
-      this.pathname(row),
+      this.stagingPathname(row),
       input.file.mimeType,
       input.file.size,
     );
@@ -161,9 +161,9 @@ export class ImportExternalMaterialUseCase {
     if (!row.filename || !row.mimeType || !row.size) {
       throw new ValidationError('資料メタデータが未登録です');
     }
-    const metadata = await this.blob.headPrivate(this.pathname(row));
+    const metadata = await this.blob.headPrivate(this.stagingPathname(row));
     if (
-      metadata.pathname !== this.pathname(row) ||
+      metadata.pathname !== this.stagingPathname(row) ||
       metadata.size !== row.size ||
       metadata.contentType?.toLowerCase() !== row.mimeType.toLowerCase()
     ) {
@@ -216,9 +216,16 @@ export class ImportExternalMaterialUseCase {
       input.projectId,
       'view',
     );
-    return this.toResponse(
-      await this.findImport(input.projectId, input.importId),
-    );
+    let row = await this.findImport(input.projectId, input.importId);
+    if (row.status === 'STORED') {
+      await this.startOrRecoverJob(this.verifierJobId(row.id));
+      row = await this.findImport(input.projectId, input.importId);
+    }
+    if (row.status === 'BATCHED') {
+      await this.ensureRootRecovery(row);
+      row = await this.findImport(input.projectId, input.importId);
+    }
+    return this.toResponse(row);
   }
 
   async getDownload(input: {
@@ -232,10 +239,10 @@ export class ImportExternalMaterialUseCase {
       'view',
     );
     const row = await this.findImport(input.projectId, input.importId);
-    if (row.status !== 'STORED' && row.status !== 'BATCHED') {
+    if (row.status !== 'BATCHED') {
       throw new ValidationError('資料はまだダウンロードできません');
     }
-    return this.blob.createPrivateDownload(this.pathname(row));
+    return this.blob.createPrivateDownload(this.sealedPathname(row));
   }
 
   /** Called only by JobService after its atomic QUEUED -> RUNNING claim. */
@@ -268,7 +275,7 @@ export class ImportExternalMaterialUseCase {
     let bytes: Buffer;
     try {
       bytes = await this.blob.readPrivate(
-        this.pathname(row),
+        this.stagingPathname(row),
         EXTERNAL_MATERIAL_MAX_FILE_BYTES,
       );
       if (bytes.length !== row.size) {
@@ -287,7 +294,7 @@ export class ImportExternalMaterialUseCase {
       }
     } catch (error) {
       try {
-        await this.blob.deletePrivate(this.pathname(row));
+        await this.blob.deletePrivate(this.stagingPathname(row));
       } catch {
         // The import remains FAILED even when cleanup itself is unavailable.
       }
@@ -295,12 +302,21 @@ export class ImportExternalMaterialUseCase {
       throw error;
     }
 
-    const reference = `private-blob:${this.pathname(row)}`;
+    const sealed = await this.blob.sealPrivate(
+      this.sealedPathname(row),
+      bytes,
+      row.mimeType,
+    );
     const artifacts = await this.ensureBatchArtifacts(
       row,
       verifier!.createdById ?? null,
-      reference,
+      sealed.reference,
     );
+    try {
+      await this.blob.deletePrivate(this.stagingPathname(row));
+    } catch {
+      // A replayed or undeletable staging object is intentionally unreferenced.
+    }
     await this.startOrResumeRoot(artifacts, row.projectId);
     return this.toResponse(await this.findImport(row.projectId, row.id));
   }
@@ -343,8 +359,8 @@ export class ImportExternalMaterialUseCase {
     } else {
       validatePptxStructure(rawInput.file.bytes);
     }
-    const saved = await this.blob.savePrivate(
-      this.pathname(row),
+    const sealed = await this.blob.sealPrivate(
+      this.sealedPathname(row),
       rawInput.file.bytes,
       normalized.file.mimeType,
     );
@@ -356,7 +372,7 @@ export class ImportExternalMaterialUseCase {
     const artifacts = await this.ensureBatchArtifacts(
       row,
       rawInput.userId,
-      saved.reference,
+      sealed.reference,
     );
     await this.startOrResumeRoot(artifacts, row.projectId);
     return this.toResponse(await this.findImport(row.projectId, row.id));
@@ -807,11 +823,20 @@ export class ImportExternalMaterialUseCase {
       .slice(0, 2000);
   }
 
-  private pathname(
+  private stagingPathname(
     row: Pick<ImportRow, 'projectId' | 'id' | 'filename'>,
   ): string {
     if (!row.filename) throw new Error('External material filename is missing');
     return `external-materials/${row.projectId}/${row.id}/${this.safeFilename(row.filename)}`;
+  }
+
+  private sealedPathname(
+    row: Pick<ImportRow, 'projectId' | 'id' | 'filename' | 'contentSha256'>,
+  ): string {
+    if (!row.filename || !row.contentSha256) {
+      throw new Error('External material sealed metadata is missing');
+    }
+    return `external-materials/${row.projectId}/${row.id}/${row.contentSha256}/${this.safeFilename(row.filename)}`;
   }
 
   private verifierJobId(importId: string): string {

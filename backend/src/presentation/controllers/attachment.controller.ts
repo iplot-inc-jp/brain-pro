@@ -678,7 +678,11 @@ export class AttachmentController {
     }
     // Chat-imported originals live in a dedicated private Blob store. Never expose
     // their opaque reference or redirect URL through this legacy public endpoint.
-    if (row.folder === 'LINE・Slack') {
+    if (
+      row.folder === 'LINE・Slack' ||
+      row.blobUrl?.startsWith('private-blob:') ||
+      row.url?.startsWith('private-blob:')
+    ) {
       throw new NotFoundException('Attachment file not found');
     }
 
