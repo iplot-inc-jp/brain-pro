@@ -178,12 +178,73 @@ export class ProjectJobController {
   async list(
     @Param('projectId') projectId: string,
     @Query('limit') limit?: string,
-  ): Promise<BackgroundJob[]> {
-    return this.prisma.backgroundJob.findMany({
-      where: { projectId },
+  ) {
+    const roots = await this.prisma.backgroundJob.findMany({
+      where: { projectId, parentJobId: null },
       orderBy: { createdAt: 'desc' },
       take: this.parseLimit(limit),
+      include: {
+        children: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            knowledgePage: {
+              select: {
+                id: true,
+                pageNumber: true,
+                pageKind: true,
+                status: true,
+                error: true,
+              },
+            },
+          },
+        },
+      },
     });
+    return roots.map((root) => ({
+      ...root,
+      children: [...root.children].sort((a, b) => {
+        const pageA = a.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+        const pageB = b.knowledgePage?.pageNumber ?? Number.MAX_SAFE_INTEGER;
+        if (pageA !== pageB) return pageA - pageB;
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      }),
+    }));
+  }
+
+  @Post('jobs/:id/resume')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'ページ資料の親ジョブを未完了ページから再開' })
+  @ApiParam({ name: 'projectId', description: 'プロジェクトID' })
+  @ApiParam({ name: 'id', description: '親ジョブID' })
+  async resume(
+    @CurrentUser() _user: CurrentUserPayload,
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+  ) {
+    const root = await this.prisma.backgroundJob.findFirst({
+      where: { id, projectId, parentJobId: null },
+    });
+    const payload = (root?.payload ?? {}) as Record<string, unknown>;
+    const fileId = typeof payload.fileId === 'string' ? payload.fileId : null;
+    if (!root) throw new NotFoundException('親ジョブが見つかりません');
+    if (root.type !== 'KG_INGEST_FILE' || !fileId) {
+      throw new BadRequestException('ページ資料の親ジョブだけ再開できます');
+    }
+    const file = await this.prisma.ingestionFile.findFirst({
+      where: { id: fileId, projectId },
+      select: { id: true, projectId: true, status: true },
+    });
+    if (!file) throw new NotFoundException('取り込みファイルが見つかりません');
+    const resumed = await this.jobService.resumeIngestionParent(
+      root.id,
+      file.id,
+      projectId,
+      file.status === 'SUCCEEDED',
+    );
+    if (!resumed) {
+      throw new BadRequestException('この親ジョブは再開できません');
+    }
+    return resumed;
   }
 
   /**

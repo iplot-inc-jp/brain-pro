@@ -44,8 +44,19 @@ export interface IngestionFileOutput {
   finishedAt: Date | null;
 }
 
+export interface IngestionFilePageProgressOutput {
+  succeeded: number;
+  total: number;
+  failedPageNumbers: number[];
+}
+
+export interface IngestionBatchFileOutput extends IngestionFileOutput {
+  /** バッチ詳細取得時のみ、全ページを一括集計して付与する。 */
+  pageProgress?: IngestionFilePageProgressOutput | null;
+}
+
 export interface IngestionBatchDetailOutput extends IngestionBatchOutput {
-  files: IngestionFileOutput[];
+  files: IngestionBatchFileOutput[];
 }
 
 export function toIngestionBatchOutput(

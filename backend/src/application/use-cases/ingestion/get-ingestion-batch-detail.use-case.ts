@@ -15,6 +15,7 @@ import {
   toIngestionBatchOutput,
   toIngestionFileOutput,
 } from './ingestion-output';
+import { KnowledgePageRepository } from '../../../infrastructure/knowledge/knowledge-page.repository';
 
 export interface GetIngestionBatchDetailInput {
   userId: string;
@@ -34,6 +35,7 @@ export class GetIngestionBatchDetailUseCase {
     @Inject(INGESTION_FILE_REPOSITORY)
     private readonly fileRepository: IIngestionFileRepository,
     private readonly projectAccess: ProjectAccessService,
+    private readonly pageRepository: KnowledgePageRepository,
   ) {}
 
   async execute(
@@ -48,10 +50,36 @@ export class GetIngestionBatchDetailUseCase {
       batch.projectId,
       'view',
     );
-    const files = await this.fileRepository.findByBatchId(batch.id);
+    const [files, pages] = await Promise.all([
+      this.fileRepository.findByBatchId(batch.id),
+      this.pageRepository.listForBatch({
+        projectId: batch.projectId,
+        batchId: batch.id,
+      }),
+    ]);
+    const progressByFile = new Map<
+      string,
+      { succeeded: number; total: number; failedPageNumbers: number[] }
+    >();
+    for (const page of pages) {
+      const progress = progressByFile.get(page.ingestionFileId) ?? {
+        succeeded: 0,
+        total: 0,
+        failedPageNumbers: [],
+      };
+      progress.total += 1;
+      if (page.status === 'SUCCEEDED') progress.succeeded += 1;
+      if (page.status === 'FAILED') {
+        progress.failedPageNumbers.push(page.pageNumber);
+      }
+      progressByFile.set(page.ingestionFileId, progress);
+    }
     return {
       ...toIngestionBatchOutput(batch),
-      files: files.map((f) => toIngestionFileOutput(f)),
+      files: files.map((file) => ({
+        ...toIngestionFileOutput(file),
+        pageProgress: progressByFile.get(file.id) ?? null,
+      })),
     };
   }
 }

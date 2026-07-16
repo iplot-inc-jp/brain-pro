@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react';
+import { Fragment, useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react';
 import {
   Loader2,
   RefreshCw,
@@ -8,13 +8,17 @@ import {
   CheckCircle2,
   AlertCircle,
   Cog,
+  ChevronDown,
+  ChevronRight,
+  RotateCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { useTableSort } from '@/lib/use-table-sort';
 import { SortableTh } from '@/components/ui/sortable-th';
-import { listJobs, type Job, type JobStatus } from '@/lib/jobs';
+import { listJobs, resumeJob, type Job, type JobStatus } from '@/lib/jobs';
+import { retryKnowledgeDocumentPage } from '@/lib/knowledge';
 
 // ---- ステータスバッジのメタ（integrations の SyncRun テーブルと同系統の見た目） ----
 const statusMeta: Record<JobStatus, { label: string; badge: string }> = {
@@ -30,6 +34,9 @@ const typeMeta: Record<string, string> = {
   AI_MERMAID_FLOW: 'Mermaid → 業務フロー',
   AI_KPI: 'KPI 生成',
   AI_ISSUE_SUGGEST: '課題ノード提案',
+  KG_INGEST_FILE: '資料取り込み',
+  KG_INGEST_PAGE: 'ページ抽出',
+  KG_MERGE_INGEST_FILE: 'ページ結果の統合',
 };
 
 function typeLabel(type: string): string {
@@ -73,8 +80,33 @@ export interface BackgroundJobsPanelHandle {
   refresh: () => void;
 }
 
-function JobsTable({ jobs }: { jobs: Job[] }) {
+function StatusBadge({ job }: { job: Job }) {
+  const sm = statusMeta[job.status] ?? statusMeta.QUEUED;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border font-medium ${sm.badge}`}
+    >
+      {job.status === 'RUNNING' && <Loader2 className="h-3 w-3 animate-spin" />}
+      {job.status === 'SUCCEEDED' && <CheckCircle2 className="h-3 w-3" />}
+      {job.status === 'FAILED' && <AlertCircle className="h-3 w-3" />}
+      {sm.label}
+    </span>
+  );
+}
+
+function JobsTable({
+  jobs,
+  busyId,
+  onResume,
+  onRetryPage,
+}: {
+  jobs: Job[];
+  busyId: string | null;
+  onResume: (job: Job) => void;
+  onRetryPage: (job: Job) => void;
+}) {
   const { sorted, sortKey, sortDir, toggleSort } = useTableSort(jobs, JOB_SORT_ACCESSORS);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const thClass = 'font-medium border-b border-gray-200';
   return (
     <div className="overflow-x-auto">
@@ -135,45 +167,147 @@ function JobsTable({ jobs }: { jobs: Job[] }) {
         </thead>
         <tbody>
           {sorted.map((job) => {
-            const sm = statusMeta[job.status] ?? statusMeta.QUEUED;
+            const children = job.children ?? [];
+            const pageChildren = children.filter((child) => child.knowledgePage);
+            const succeeded = pageChildren.filter(
+              (child) => child.knowledgePage?.status === 'SUCCEEDED',
+            ).length;
+            const isOpen = expanded.has(job.id);
+            const canResume =
+              job.type === 'KG_INGEST_FILE' &&
+              (job.status === 'FAILED' ||
+                pageChildren.some(
+                  (child) => child.knowledgePage?.status !== 'SUCCEEDED',
+                ));
             return (
-              <tr
-                key={job.id}
-                className="border-b border-gray-100 hover:bg-gray-50/60 align-top"
-              >
-                <td className="px-3 py-2">
-                  <span
-                    className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border font-medium ${sm.badge}`}
-                  >
-                    {job.status === 'RUNNING' && (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+              <Fragment key={job.id}>
+                <tr
+                  data-testid="root-job"
+                  className="border-b border-gray-100 hover:bg-gray-50/60 align-top"
+                >
+                  <td className="px-3 py-2"><StatusBadge job={job} /></td>
+                  <td className="px-3 py-2 text-gray-700">
+                    <div className="flex items-center gap-2">
+                      {children.length > 0 && (
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                          aria-label={`${typeLabel(job.type)}の子ジョブを${isOpen ? '非表示' : '表示'}`}
+                          aria-expanded={isOpen}
+                          aria-controls={`job-children-${job.id}`}
+                          onClick={() =>
+                            setExpanded((current) => {
+                              const next = new Set(current);
+                              if (next.has(job.id)) next.delete(job.id);
+                              else next.add(job.id);
+                              return next;
+                            })
+                          }
+                        >
+                          {isOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                      <span>{typeLabel(job.type)}</span>
+                    </div>
+                    {pageChildren.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {succeeded} / {pageChildren.length} ページ成功
+                      </p>
                     )}
-                    {job.status === 'SUCCEEDED' && <CheckCircle2 className="h-3 w-3" />}
-                    {job.status === 'FAILED' && <AlertCircle className="h-3 w-3" />}
-                    {sm.label}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-gray-700">{typeLabel(job.type)}</td>
-                <td className="px-3 py-2 text-gray-500">{job.progress}%</td>
-                <td className="px-3 py-2 text-gray-700">
-                  {job.status === 'FAILED' && job.error ? (
-                    <span className="inline-flex items-start gap-1 text-red-600">
-                      <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                      <span className="break-all">{job.error}</span>
-                    </span>
-                  ) : job.status === 'SUCCEEDED' ? (
-                    <span className="text-emerald-700">完了</span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                  {formatDateTime(job.createdAt)}
-                </td>
-                <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
-                  {formatDateTime(job.finishedAt)}
-                </td>
-              </tr>
+                  </td>
+                  <td className="px-3 py-2 text-gray-500">{job.progress}%</td>
+                  <td className="px-3 py-2 text-gray-700">
+                    <div className="space-y-1.5">
+                      {job.status === 'FAILED' && job.error ? (
+                        <span className="inline-flex items-start gap-1 text-red-600">
+                          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                          <span className="break-all">{job.error}</span>
+                        </span>
+                      ) : job.status === 'SUCCEEDED' ? (
+                        <span className="text-emerald-700">完了</span>
+                      ) : (
+                        <span>—</span>
+                      )}
+                      {canResume && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          disabled={busyId !== null}
+                          aria-label="未完了ページを再開"
+                          onClick={() => onResume(job)}
+                        >
+                          {busyId === job.id ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="mr-1 h-3 w-3" />
+                          )}
+                          再開
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                    {formatDateTime(job.createdAt)}
+                  </td>
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                    {formatDateTime(job.finishedAt)}
+                  </td>
+                </tr>
+                {children.length > 0 && isOpen && (
+                  <tr className="border-b border-gray-100 bg-slate-50/60">
+                    <td colSpan={6} className="px-3 py-2">
+                      <ol id={`job-children-${job.id}`} className="ml-4 border-l border-slate-200 pl-3">
+                        {children.map((child) => {
+                          const page = child.knowledgePage;
+                          const label = page
+                            ? `${page.pageKind === 'PPTX_SLIDE' ? 'スライド' : 'ページ'} ${page.pageNumber}`
+                            : typeLabel(child.type);
+                          return (
+                            <li
+                              key={child.id}
+                              className="grid gap-1 border-b border-slate-200/70 py-2 last:border-0 sm:grid-cols-[minmax(100px,1fr)_auto_auto] sm:items-center sm:gap-3"
+                            >
+                              <div>
+                                <span className="text-sm font-medium text-gray-800">{label}</span>
+                                {child.error && (
+                                  <p className="mt-0.5 break-words text-xs text-red-600">
+                                    {child.error}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                <StatusBadge job={child} />
+                                <span>{child.progress}%</span>
+                                <span>{child.attempts} / {child.maxAttempts ?? '—'} 回</span>
+                              </div>
+                              {page?.status === 'FAILED' && child.status === 'FAILED' && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 justify-self-start px-2 text-xs sm:justify-self-end"
+                                  disabled={busyId !== null}
+                                  aria-label={`${label}を再試行`}
+                                  onClick={() => onRetryPage(child)}
+                                >
+                                  <RotateCw className="mr-1 h-3 w-3" />
+                                  再試行
+                                </Button>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>
@@ -202,6 +336,7 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [busyId, setBusyId] = useState<string | null>(null);
 
     const fetchJobs = useCallback(
       async (withSpinner: boolean) => {
@@ -224,6 +359,19 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
     }, [fetchJobs]);
 
     useImperativeHandle(ref, () => ({ refresh: () => void fetchJobs(false) }), [fetchJobs]);
+
+    const runAction = async (id: string, action: () => Promise<unknown>) => {
+      setBusyId(id);
+      setError(null);
+      try {
+        await action();
+        await fetchJobs(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'ジョブの再開に失敗しました');
+      } finally {
+        setBusyId(null);
+      }
+    };
 
     return (
       <Card className="bg-white border-gray-200">
@@ -264,7 +412,19 @@ export const BackgroundJobsPanel = forwardRef<BackgroundJobsPanelHandle, Backgro
               バックグラウンド処理の履歴はまだありません。
             </p>
           ) : (
-            <JobsTable jobs={jobs} />
+            <JobsTable
+              jobs={jobs}
+              busyId={busyId}
+              onResume={(job) =>
+                void runAction(job.id, () => resumeJob(projectId, job.id))
+              }
+              onRetryPage={(job) => {
+                const pageId = job.knowledgePage?.id;
+                if (pageId) {
+                  void runAction(job.id, () => retryKnowledgeDocumentPage(pageId));
+                }
+              }}
+            />
           )}
         </CardContent>
       </Card>

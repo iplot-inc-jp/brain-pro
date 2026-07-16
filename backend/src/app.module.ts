@@ -515,6 +515,7 @@ import {
   KnowledgeProjectController,
   KnowledgeNodeController,
   KnowledgeDocumentController,
+  KnowledgeDocumentPageController,
   KnowledgeRelationController,
 } from './presentation/controllers/knowledge.controller';
 import { KnowledgeSettingsController } from './presentation/controllers/knowledge-settings.controller';
@@ -681,6 +682,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     KnowledgeProjectController,
     KnowledgeNodeController,
     KnowledgeDocumentController,
+    KnowledgeDocumentPageController,
     KnowledgeRelationController,
     KnowledgeSettingsController,
     // Google Drive ソースアダプタ（Phase 3）

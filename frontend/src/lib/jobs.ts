@@ -41,6 +41,7 @@ export interface JobAttempt {
 /** バックグラウンドジョブ（GET /api/jobs/:id・一覧のレスポンス形）。 */
 export interface Job {
   id: string;
+  parentJobId?: string | null;
   type: string;
   status: JobStatus;
   /** 完了時の結果（type ごとに { kind, ... } 構造。未完了は null）。 */
@@ -63,6 +64,14 @@ export interface Job {
   payload?: Record<string, unknown> | null;
   /** 試行ごとの履歴（batch-jobs / getJob で同梱）。一覧 API では未同梱のことがある。 */
   attemptRecords?: JobAttempt[];
+  children?: Job[];
+  knowledgePage?: {
+    id: string;
+    pageNumber: number;
+    pageKind: 'PDF_PAGE' | 'PPTX_SLIDE';
+    status: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+    error: string | null;
+  } | null;
 }
 
 /** ジョブ起票レスポンス（POST /api/projects/:projectId/ai-jobs）。 */
@@ -214,6 +223,16 @@ export async function listJobs(projectId: string, limit?: number): Promise<Job[]
   if (!res.ok) {
     await throwApiError(res, 'ジョブ一覧の取得に失敗しました');
   }
+  return res.json();
+}
+
+/** ページ資料のrootを、成功済みページを保ったまま再開する。 */
+export async function resumeJob(projectId: string, id: string): Promise<Job> {
+  const res = await fetch(
+    `${API_URL}/api/projects/${projectId}/jobs/${id}/resume`,
+    { method: 'POST', headers: headers() },
+  );
+  if (!res.ok) await throwApiError(res, '親ジョブの再開に失敗しました');
   return res.json();
 }
 

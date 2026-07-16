@@ -8,7 +8,7 @@
 // API は frontend/src/lib/knowledge.ts に node-detail / search が無いため、ここで raw fetch する
 // （token=localStorage 'accessToken'、API_URL と '/api...' を結合：既存 lib 慣習）。
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   X,
   Loader2,
@@ -18,12 +18,19 @@ import {
   ExternalLink,
   ArrowRight,
   ArrowLeft,
+  RotateCw,
+  AlertCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type {
   KnowledgeNode,
   KnowledgeDocument,
+  KnowledgeDocumentPage,
+} from '@/lib/knowledge'
+import {
+  getKnowledgeDocumentPages,
+  retryKnowledgeDocumentPage,
 } from '@/lib/knowledge'
 import {
   ENTITY_KIND_COLOR,
@@ -159,6 +166,13 @@ export function NodeDetailPanel({
   const [detail, setDetail] = useState<KnowledgeNodeDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pages, setPages] = useState<KnowledgeDocumentPage[]>([])
+  const [pagesLoading, setPagesLoading] = useState(false)
+  const [pagesError, setPagesError] = useState<string | null>(null)
+  const [retryingPageId, setRetryingPageId] = useState<string | null>(null)
+  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set())
+  const activeDocumentId = useRef<string | null>(selectedDocument?.id ?? null)
+  activeDocumentId.current = selectedDocument?.id ?? null
 
   useEffect(() => {
     if (!selectedNode) {
@@ -184,6 +198,58 @@ export function NodeDetailPanel({
       cancelled = true
     }
   }, [selectedNode])
+
+  const loadPages = async (documentId: string, cancelled?: () => boolean) => {
+    setPagesLoading(true)
+    setPagesError(null)
+    try {
+      const result = await getKnowledgeDocumentPages(documentId)
+      if (!cancelled?.() && activeDocumentId.current === documentId) {
+        setPages(result)
+      }
+    } catch (e) {
+      if (!cancelled?.() && activeDocumentId.current === documentId) {
+        setPagesError(
+          e instanceof Error ? e.message : 'ページ抽出結果の取得に失敗しました',
+        )
+        setPages([])
+      }
+    } finally {
+      if (!cancelled?.() && activeDocumentId.current === documentId) {
+        setPagesLoading(false)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedDocument) {
+      setPages([])
+      setPagesError(null)
+      return
+    }
+    let cancelled = false
+    setExpandedPages(new Set())
+    void loadPages(selectedDocument.id, () => cancelled)
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDocument?.id])
+
+  const retryPage = async (page: KnowledgeDocumentPage) => {
+    if (!selectedDocument || page.status !== 'FAILED') return
+    setRetryingPageId(page.id)
+    setPagesError(null)
+    try {
+      await retryKnowledgeDocumentPage(page.id)
+      await loadPages(selectedDocument.id)
+    } catch (e) {
+      setPagesError(
+        e instanceof Error ? e.message : 'ページの再試行に失敗しました',
+      )
+    } finally {
+      setRetryingPageId(null)
+    }
+  }
 
   // ---- 文書詳細 ----
   if (selectedDocument) {
@@ -232,6 +298,118 @@ export function NodeDetailPanel({
             <p className="text-sm text-muted-foreground">
               原本リンクがありません。
             </p>
+          )}
+        </Section>
+
+        <Section title="ページごとの抽出内容">
+          {pagesLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              読み込み中…
+            </div>
+          ) : pagesError ? (
+            <p className="text-xs text-destructive">{pagesError}</p>
+          ) : pages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              ページ単位の抽出結果はありません。
+            </p>
+          ) : (
+            <ol className="space-y-2">
+              {pages.map((page) => {
+                const label = `${
+                  page.pageKind === 'PPTX_SLIDE' ? 'スライド' : 'ページ'
+                } ${page.pageNumber}`
+                const text = page.contentText?.trim() ?? ''
+                const isLong = text.length > 320
+                const expanded = expandedPages.has(page.id)
+                return (
+                  <li
+                    key={page.id}
+                    className="rounded-md border border-border bg-slate-50/50 p-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-foreground">
+                        {label}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-[10px] font-medium',
+                          page.status === 'FAILED'
+                            ? 'text-destructive'
+                            : page.status === 'SUCCEEDED'
+                              ? 'text-emerald-700'
+                              : 'text-muted-foreground',
+                        )}
+                      >
+                        {page.status === 'FAILED'
+                          ? '失敗'
+                          : page.status === 'SUCCEEDED'
+                            ? '抽出済み'
+                            : '処理中'}
+                      </span>
+                    </div>
+                    {page.summary?.trim() && (
+                      <p className="mt-1.5 text-xs text-foreground/80 whitespace-pre-wrap">
+                        {page.summary}
+                      </p>
+                    )}
+                    {page.status === 'FAILED' ? (
+                      <div className="mt-2 space-y-2">
+                        {page.error && (
+                          <p className="flex items-start gap-1 text-xs text-destructive">
+                            <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                            <span>{page.error}</span>
+                          </p>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          disabled={retryingPageId === page.id}
+                          onClick={() => void retryPage(page)}
+                          aria-label={`${label}を再試行`}
+                        >
+                          {retryingPageId === page.id ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="mr-1 h-3 w-3" />
+                          )}
+                          再試行
+                        </Button>
+                      </div>
+                    ) : text ? (
+                      <div className="mt-2">
+                        <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                          {isLong && !expanded ? `${text.slice(0, 320)}…` : text}
+                        </p>
+                        {isLong && (
+                          <button
+                            type="button"
+                            className="mt-1 text-xs font-medium text-primary hover:underline"
+                            aria-expanded={expanded}
+                            onClick={() =>
+                              setExpandedPages((current) => {
+                                const next = new Set(current)
+                                if (next.has(page.id)) next.delete(page.id)
+                                else next.add(page.id)
+                                return next
+                              })
+                            }
+                          >
+                            {expanded ? '折りたたむ' : '全文を表示'}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        抽出内容なし
+                      </p>
+                    )}
+                  </li>
+                )
+              })}
+            </ol>
           )}
         </Section>
       </PanelShell>

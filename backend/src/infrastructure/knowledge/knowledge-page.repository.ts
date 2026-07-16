@@ -85,6 +85,11 @@ export interface KnowledgePagesForDocumentInput {
   knowledgeDocumentId: string;
 }
 
+export interface KnowledgePagesForBatchInput {
+  projectId: string;
+  batchId: string;
+}
+
 export class KnowledgePageNotFoundError extends Error {
   constructor(id: string, projectId: string) {
     super(`Knowledge page ${id} was not found in project ${projectId}`);
@@ -261,6 +266,19 @@ export class KnowledgePageRepository {
         knowledgeDocumentId: input.knowledgeDocumentId,
       },
       orderBy: { pageNumber: 'asc' },
+    });
+  }
+
+  listForBatch(input: KnowledgePagesForBatchInput) {
+    return this.prisma.knowledgeDocumentPage.findMany({
+      where: {
+        projectId: input.projectId,
+        ingestionFile: {
+          batchId: input.batchId,
+          projectId: input.projectId,
+        },
+      },
+      orderBy: [{ ingestionFileId: 'asc' }, { pageNumber: 'asc' }],
     });
   }
 

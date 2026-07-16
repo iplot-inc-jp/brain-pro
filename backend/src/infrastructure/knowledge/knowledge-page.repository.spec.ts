@@ -556,6 +556,22 @@ describe('KnowledgePageRepository', () => {
     });
   });
 
+  it('loads all page progress for a batch in one project-scoped query', async () => {
+    const prisma = makePrisma({ rows: [pageRow] });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.listForBatch({ projectId: 'p1', batchId: 'batch-1' }),
+    ).resolves.toEqual([pageRow]);
+    expect(prisma.knowledgeDocumentPage.findMany).toHaveBeenCalledWith({
+      where: {
+        projectId: 'p1',
+        ingestionFile: { batchId: 'batch-1', projectId: 'p1' },
+      },
+      orderBy: [{ ingestionFileId: 'asc' }, { pageNumber: 'asc' }],
+    });
+  });
+
   it.each([
     [
       'file',
