@@ -45,6 +45,11 @@ export class RetryFileUseCase {
       'edit',
     );
 
+    // 成功済み資料は確定成果物を保持する。再試行で新rootや再課金を発生させない。
+    if (file.status === 'SUCCEEDED') {
+      return toIngestionFileOutput(file);
+    }
+
     file.requeue();
     await this.fileRepository.save(file);
 

@@ -64,12 +64,14 @@ export interface ProcessingKnowledgePageInput
 
 export interface SucceededKnowledgePageInput
   extends ScopedKnowledgePageInput {
+  jobId: string;
   contentText: string;
   summary: string;
   extractionResult: Prisma.InputJsonValue;
 }
 
 export interface FailedKnowledgePageInput extends ScopedKnowledgePageInput {
+  jobId: string;
   error: string;
 }
 
@@ -198,7 +200,7 @@ export class KnowledgePageRepository {
     );
   }
 
-  async markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
+  async markProcessing(input: ProcessingKnowledgePageInput): Promise<boolean> {
     const job = await this.prisma.backgroundJob.findFirst({
       where: { id: input.jobId, projectId: input.projectId },
       select: { id: true },
@@ -206,29 +208,40 @@ export class KnowledgePageRepository {
     if (!job) {
       throw new KnowledgePageJobNotFoundError(input.jobId, input.projectId);
     }
-    await this.updateScoped(input.id, input.projectId, {
-      status: 'PROCESSING',
-      jobId: input.jobId,
-      error: null,
-    });
+    return this.updateScoped(
+      input.id,
+      input.projectId,
+      { jobId: input.jobId, status: { in: ['PENDING', 'FAILED'] } },
+      { status: 'PROCESSING', error: null },
+    );
   }
 
-  markSucceeded(input: SucceededKnowledgePageInput): Promise<void> {
-    return this.updateScoped(input.id, input.projectId, {
-      status: 'SUCCEEDED',
-      contentText: input.contentText,
-      summary: input.summary,
-      extractionResult: input.extractionResult,
-      error: null,
-    });
+  markSucceeded(input: SucceededKnowledgePageInput): Promise<boolean> {
+    return this.updateScoped(
+      input.id,
+      input.projectId,
+      { jobId: input.jobId, status: 'PROCESSING' },
+      {
+        status: 'SUCCEEDED',
+        contentText: input.contentText,
+        summary: input.summary,
+        extractionResult: input.extractionResult,
+        error: null,
+      },
+    );
   }
 
-  markFailed(input: FailedKnowledgePageInput): Promise<void> {
-    return this.updateScoped(input.id, input.projectId, {
-      status: 'FAILED',
-      attempts: { increment: 1 },
-      error: input.error,
-    });
+  markFailed(input: FailedKnowledgePageInput): Promise<boolean> {
+    return this.updateScoped(
+      input.id,
+      input.projectId,
+      { jobId: input.jobId, status: 'PROCESSING' },
+      {
+        status: 'FAILED',
+        attempts: { increment: 1 },
+        error: input.error,
+      },
+    );
   }
 
   listForFile(input: KnowledgePagesForFileInput) {
@@ -273,15 +286,17 @@ export class KnowledgePageRepository {
   private async updateScoped(
     id: string,
     projectId: string,
+    expected: Pick<
+      Prisma.KnowledgeDocumentPageWhereInput,
+      'jobId' | 'status'
+    >,
     data: Prisma.KnowledgeDocumentPageUncheckedUpdateManyInput,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { count } = await this.prisma.knowledgeDocumentPage.updateMany({
-      where: { id, projectId },
+      where: { id, projectId, ...expected },
       data,
     });
-    if (count !== 1) {
-      throw new KnowledgePageNotFoundError(id, projectId);
-    }
+    return count === 1;
   }
 
   private assertPageParent(

@@ -62,6 +62,7 @@ describe('AnthropicTransport', () => {
       text: 'hello',
       model: 'claude-sonnet-4-6',
       usage: { input_tokens: 1, output_tokens: 2 },
+      stopReason: undefined,
     });
   });
 
@@ -109,6 +110,7 @@ describe('IproBotTransport', () => {
     expect(res).toEqual({
       text: 'T',
       model: 'claude-opus-4-8',
+      stopReason: null,
       usage: {
         input_tokens: 5,
         output_tokens: 6,

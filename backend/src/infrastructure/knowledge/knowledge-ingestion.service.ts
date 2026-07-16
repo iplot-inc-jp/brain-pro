@@ -250,7 +250,11 @@ export class KnowledgeIngestionService {
     bytes: Buffer,
     kind: 'pdf' | 'presentation',
     parentJobId: string,
-  ): Promise<{ knowledgeDocumentId: string; deferred: true; pages: number }> {
+  ): Promise<{
+    knowledgeDocumentId: string;
+    deferred: boolean;
+    pages: number;
+  }> {
     const title = file.displayName || file.filename;
     const document = await this.prisma.knowledgeDocument.upsert({
       where: { ingestionFileId: file.id },
@@ -272,33 +276,11 @@ export class KnowledgeIngestionService {
       select: { id: true },
     });
 
-    const prepared =
-      kind === 'pdf'
-        ? (await splitPdfPages(bytes)).map((page) => ({
-            pageNumber: page.pageNumber,
-            pageKind: 'PDF_PAGE' as const,
-            sourceText: null,
-            bytes: Buffer.from(page.bytes),
-            mimeType: 'application/pdf',
-            suffix: 'pdf',
-          }))
-        : readPptxSlides(bytes).map((slide) => ({
-            pageNumber: slide.pageNumber,
-            pageKind: 'PPTX_SLIDE' as const,
-            sourceText: slide.sourceText,
-            bytes: Buffer.from(
-              JSON.stringify({
-                version: 1,
-                images: slide.images.map((image) => ({
-                  mimeType: image.mimeType,
-                  base64: Buffer.from(image.bytes).toString('base64'),
-                })),
-              }),
-              'utf8',
-            ),
-            mimeType: 'application/json',
-            suffix: 'json',
-          }));
+    const prepared = await this.preparePageInputs(bytes, kind);
+
+    if (prepared.length === 0) {
+      return this.completeEmptyPagedFile(file, kind, parentJobId);
+    }
 
     const existingPages = await this.pageRepository.listForFile({
       projectId: file.projectId,
@@ -348,11 +330,78 @@ export class KnowledgeIngestionService {
     };
   }
 
+  private async preparePageInputs(
+    bytes: Buffer,
+    kind: 'pdf' | 'presentation',
+  ) {
+    return kind === 'pdf'
+      ? (await splitPdfPages(bytes)).map((page) => ({
+            pageNumber: page.pageNumber,
+            pageKind: 'PDF_PAGE' as const,
+            sourceText: null,
+            bytes: Buffer.from(page.bytes),
+            mimeType: 'application/pdf',
+            suffix: 'pdf',
+          }))
+      : readPptxSlides(bytes).map((slide) => ({
+            pageNumber: slide.pageNumber,
+            pageKind: 'PPTX_SLIDE' as const,
+            sourceText: slide.sourceText,
+            bytes: Buffer.from(
+              JSON.stringify({
+                version: 1,
+                images: slide.images.map((image) => ({
+                  mimeType: image.mimeType,
+                  base64: Buffer.from(image.bytes).toString('base64'),
+                })),
+              }),
+              'utf8',
+            ),
+            mimeType: 'application/json',
+            suffix: 'json',
+          }));
+  }
+
+  private async completeEmptyPagedFile(
+    file: IngestionFile,
+    kind: 'pdf' | 'presentation',
+    parentJobId: string,
+  ): Promise<{
+    knowledgeDocumentId: string;
+    deferred: false;
+    pages: 0;
+  }> {
+    const empty = {
+      ...this.emptyExtraction(),
+      summary: '内容なし',
+      fullText: '',
+    };
+    const knowledgeDocumentId = await this.merge(file, empty, {
+      kind,
+      mimeType: file.mimeType,
+      contentText: '',
+    });
+    file.update({
+      status: 'SUCCEEDED',
+      step: '完了（0ページ）',
+      progress: 100,
+      extractedText: '',
+      extractionResult: empty,
+      knowledgeDocumentId,
+      error: null,
+      finishedAt: new Date(),
+    });
+    await this.fileRepository.save(file);
+    await this.refreshBatch(file.batchId);
+    await this.setParentState(parentJobId, file.projectId, 'SUCCEEDED', 100);
+    return { knowledgeDocumentId, deferred: false, pages: 0 };
+  }
+
   /** ページ子ジョブを実行する。pageId は実行ジョブの projectId で必ずスコープする。 */
   async processPage(
     pageId: string,
     childJobId: string,
-  ): Promise<{ mergeQueued: boolean }> {
+  ): Promise<{ mergeQueued: boolean; obsolete?: boolean }> {
     const child = await this.prisma.backgroundJob.findUnique({
       where: { id: childJobId },
       select: { id: true, projectId: true, parentJobId: true },
@@ -367,36 +416,42 @@ export class KnowledgeIngestionService {
       projectId: child.projectId,
     });
     if (!page || page.jobId !== childJobId) {
-      throw new Error(
-        `Knowledge page ${pageId} is not assigned to job ${childJobId}`,
-      );
+      return { mergeQueued: false, obsolete: true };
+    }
+    if (page.status === 'SUCCEEDED') {
+      return this.continueAfterPageSuccess(page, child.parentJobId);
     }
 
-    await this.pageRepository.markProcessing({
+    const claimed = await this.pageRepository.markProcessing({
       id: page.id,
       projectId: page.projectId,
       jobId: childJobId,
     });
-    const siblingsAtStart = await this.pageRepository.listForFile({
-      projectId: page.projectId,
-      ingestionFileId: page.ingestionFileId,
-    });
-    await this.setParentState(
-      child.parentJobId,
-      page.projectId,
-      siblingsAtStart.some((sibling) => sibling.status === 'FAILED')
-        ? 'FAILED'
-        : 'RUNNING',
-    );
+    if (!claimed) {
+      const current = await this.pageRepository.findById({
+        id: pageId,
+        projectId: child.projectId,
+      });
+      if (current?.jobId === childJobId && current.status === 'SUCCEEDED') {
+        return this.continueAfterPageSuccess(current, child.parentJobId);
+      }
+      return { mergeQueued: false, obsolete: true };
+    }
+    await this.setParentState(child.parentJobId, page.projectId, 'RUNNING');
 
+    let file: IngestionFile;
+    let batch: IngestionBatch | null;
     try {
-      const file = await this.fileRepository.findById(page.ingestionFileId);
-      if (!file || file.projectId !== page.projectId) {
+      const foundFile = await this.fileRepository.findById(
+        page.ingestionFileId,
+      );
+      if (!foundFile || foundFile.projectId !== page.projectId) {
         throw new Error(
           `IngestionFile ${page.ingestionFileId} not found in project ${page.projectId}`,
         );
       }
-      const batch = await this.batchRepository.findById(file.batchId);
+      file = foundFile;
+      batch = await this.batchRepository.findById(file.batchId);
       const gate = await this.resolveGate(file.projectId, batch);
       const input = await this.buildPageExtractInput(page, file.filename);
       const emptySlide =
@@ -419,7 +474,7 @@ export class KnowledgeIngestionService {
             'Anthropic APIキーが未設定です（会社設定・個人設定・環境変数のいずれにも見つかりません）',
           );
         }
-        const result = await this.claude.extractKnowledge(
+        const result = await this.claude.extractPageKnowledge(
           input,
           apiKey,
           gate.model ?? undefined,
@@ -439,46 +494,70 @@ export class KnowledgeIngestionService {
         };
       }
 
-      await this.pageRepository.markSucceeded({
+      const persisted = await this.pageRepository.markSucceeded({
         id: page.id,
         projectId: page.projectId,
+        jobId: childJobId,
         contentText: extraction.fullText ?? '',
         summary: extraction.summary || (emptySlide ? '内容なし' : ''),
         extractionResult: extraction as unknown as Prisma.InputJsonValue,
       });
+      if (!persisted) return { mergeQueued: false, obsolete: true };
 
-      // 成功で空いた1枠を補充する。file単位 advisory lock が同時完了を直列化する。
-      await this.fillPageWorkerWindow(file, child.parentJobId);
-
-      const allSucceeded = await this.pageRepository.allSucceeded({
-        projectId: page.projectId,
-        ingestionFileId: page.ingestionFileId,
-      });
-      if (!allSucceeded) {
-        await this.settleFailedPagedFileIfIdle(file, child.parentJobId);
-        return { mergeQueued: false };
-      }
-
-      await this.jobService.enqueue(
-        'KG_MERGE_INGEST_FILE',
-        { fileId: page.ingestionFileId },
-        {
-          projectId: page.projectId,
-          createdById: batch?.createdById ?? null,
-          parentJobId: child.parentJobId,
-          dedupeId: this.mergeJobId(page.ingestionFileId),
-        },
-      );
-      return { mergeQueued: true };
     } catch (error) {
       const message = (error as Error)?.message ?? String(error);
       await this.pageRepository.markFailed({
         id: page.id,
         projectId: page.projectId,
+        jobId: childJobId,
         error: message,
       });
       throw error instanceof Error ? error : new Error(message);
     }
+
+    // ここから先は課金済み結果のorchestrationだけ。失敗してもpageをFAILEDへ戻さず、
+    // 同じ子jobの再試行がSUCCEEDED fast-pathから安全に再開する。
+    return this.continueAfterPageSuccess(page, child.parentJobId, file, batch);
+  }
+
+  private async continueAfterPageSuccess(
+    page: KnowledgeDocumentPage,
+    parentJobId: string,
+    knownFile?: IngestionFile,
+    knownBatch?: IngestionBatch | null,
+  ): Promise<{ mergeQueued: boolean }> {
+    const file =
+      knownFile ?? (await this.fileRepository.findById(page.ingestionFileId));
+    if (!file || file.projectId !== page.projectId) {
+      throw new Error(
+        `IngestionFile ${page.ingestionFileId} not found in project ${page.projectId}`,
+      );
+    }
+    const batch =
+      knownBatch === undefined
+        ? await this.batchRepository.findById(file.batchId)
+        : knownBatch;
+    await this.fillPageWorkerWindow(file, parentJobId);
+    if (
+      !(await this.pageRepository.allSucceeded({
+        projectId: page.projectId,
+        ingestionFileId: page.ingestionFileId,
+      }))
+    ) {
+      await this.settleFailedPagedFileIfIdle(file, parentJobId);
+      return { mergeQueued: false };
+    }
+    await this.jobService.enqueue(
+      'KG_MERGE_INGEST_FILE',
+      { fileId: page.ingestionFileId },
+      {
+        projectId: page.projectId,
+        createdById: batch?.createdById ?? null,
+        parentJobId,
+        dedupeId: this.mergeJobId(page.ingestionFileId),
+      },
+    );
+    return { mergeQueued: true };
   }
 
   /** JobService が自動試行上限到達を確定した後だけ呼ぶ。失敗で空いたslotを補充する。 */
@@ -532,6 +611,8 @@ export class KnowledgeIngestionService {
         await this.jobService.startReserved(existingMerge.id);
       } else if (existingMerge?.status === 'FAILED') {
         await this.jobService.retry(existingMerge.id);
+      } else if (existingMerge?.status === 'RUNNING') {
+        await this.jobService.recoverStaleRunning(existingMerge.id);
       } else if (!existingMerge) {
         const batch = await this.batchRepository.findById(file.batchId);
         await this.jobService.enqueue(
@@ -663,10 +744,10 @@ export class KnowledgeIngestionService {
         page.job.updatedAt.getTime() < staleBefore;
       const active = pages.filter(
         (page) =>
-          (page.status === 'PENDING' || page.status === 'PROCESSING') &&
           page.job &&
           (page.job.status === 'QUEUED' ||
-            (page.job.status === 'RUNNING' && !jobIsStale(page))),
+            (page.job.status === 'RUNNING' &&
+              (!recoverQueued || !jobIsStale(page)))),
       );
       const available = Math.max(0, 2 - active.length);
       const candidates = pages.filter((page) => {
@@ -775,11 +856,31 @@ export class KnowledgeIngestionService {
       projectId: file.projectId,
       ingestionFileId: file.id,
     });
-    const hasFailed = pages.some((page) => page.status === 'FAILED');
-    const hasUnfinished = pages.some(
-      (page) => page.status === 'PENDING' || page.status === 'PROCESSING',
+    const failedJobIds = pages
+      .filter((page) => page.status === 'FAILED' && page.jobId)
+      .map((page) => page.jobId!);
+    const failedJobs = failedJobIds.length
+      ? await this.prisma.backgroundJob.findMany({
+          where: { id: { in: failedJobIds } },
+          select: { id: true, status: true },
+        })
+      : [];
+    const statusByJob = new Map(failedJobs.map((job) => [job.id, job.status]));
+    const hasPermanentFailure = pages.some(
+      (page) =>
+        page.status === 'FAILED' &&
+        !!page.jobId &&
+        statusByJob.get(page.jobId) === 'FAILED',
     );
-    if (!hasFailed || hasUnfinished) return;
+    const hasUnfinished = pages.some(
+      (page) =>
+        page.status === 'PENDING' ||
+        page.status === 'PROCESSING' ||
+        (page.status === 'FAILED' &&
+          !!page.jobId &&
+          ['QUEUED', 'RUNNING'].includes(statusByJob.get(page.jobId) ?? '')),
+    );
+    if (!hasPermanentFailure || hasUnfinished) return;
     file.update({
       status: 'FAILED',
       step: 'ページ抽出に失敗',
@@ -814,9 +915,7 @@ export class KnowledgeIngestionService {
       where: {
         id: parentJobId,
         projectId,
-        ...(status === 'RUNNING'
-          ? { status: { in: ['RUNNING', 'FAILED'] } }
-          : {}),
+        status: 'RUNNING',
       },
       data: {
         status,

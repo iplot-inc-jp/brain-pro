@@ -19,6 +19,7 @@ export interface LlmRunResult {
   text: string;
   model: string;
   usage: AnthropicUsageLike | null;
+  stopReason?: string | null;
 }
 
 export interface LlmTransport {
@@ -50,7 +51,12 @@ export class AnthropicTransport implements LlmTransport {
       .filter((c): c is Anthropic.TextBlock => c.type === 'text')
       .map((c) => c.text)
       .join('');
-    return { text, model: req.model, usage: (response as any).usage ?? null };
+    return {
+      text,
+      model: req.model,
+      usage: (response as any).usage ?? null,
+      stopReason: response.stop_reason,
+    };
   }
 }
 
@@ -106,10 +112,12 @@ export class IproBotTransport implements LlmTransport {
           cacheReadInputTokens?: number;
           cacheCreationInputTokens?: number;
         };
+        stopReason?: string | null;
       };
       return {
         text: data.text,
         model: data.model,
+        stopReason: data.stopReason ?? null,
         usage: data.usage
           ? {
               input_tokens: data.usage.inputTokens ?? 0,

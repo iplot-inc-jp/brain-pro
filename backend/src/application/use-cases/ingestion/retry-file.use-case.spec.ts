@@ -19,6 +19,36 @@ function pagedFile() {
 }
 
 describe('RetryFileUseCase paged hierarchy', () => {
+  it('is a no-op for a successful file and never creates another root', async () => {
+    const file = pagedFile();
+    file.update({ status: 'SUCCEEDED', progress: 100 });
+    const files = {
+      findById: jest.fn(async () => file),
+      save: jest.fn(),
+      setJobId: jest.fn(),
+    };
+    const jobs = {
+      resumeIngestionParent: jest.fn(),
+      enqueue: jest.fn(),
+    };
+    const useCase = new RetryFileUseCase(
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      jobs as never,
+    );
+
+    const result = await useCase.execute({
+      id: 'file-1',
+      userId: 'u1',
+      principal: { id: 'u1' },
+    });
+
+    expect(result.status).toBe('SUCCEEDED');
+    expect(files.save).not.toHaveBeenCalled();
+    expect(jobs.resumeIngestionParent).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
   it('resumes the existing PDF parent and keeps its child hierarchy', async () => {
     const file = pagedFile();
     const files = {

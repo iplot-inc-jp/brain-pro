@@ -345,17 +345,21 @@ describe('KnowledgePageRepository', () => {
         projectId: 'p1',
         jobId: 'child-job-1',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
 
     expect(prisma.backgroundJob.findFirst).toHaveBeenCalledWith({
       where: { id: 'child-job-1', projectId: 'p1' },
       select: { id: true },
     });
     expect(prisma.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith({
-      where: { id: 'page-1', projectId: 'p1' },
+      where: {
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'child-job-1',
+        status: { in: ['PENDING', 'FAILED'] },
+      },
       data: {
         status: 'PROCESSING',
-        jobId: 'child-job-1',
         error: null,
       },
     });
@@ -393,14 +397,20 @@ describe('KnowledgePageRepository', () => {
       repo.markSucceeded({
         id: 'page-1',
         projectId: 'p1',
+        jobId: 'child-job-1',
         contentText: '抽出したページ本文',
         summary: 'ページ要約',
         extractionResult,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
 
     expect(prisma.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith({
-      where: { id: 'page-1', projectId: 'p1' },
+      where: {
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'child-job-1',
+        status: 'PROCESSING',
+      },
       data: {
         status: 'SUCCEEDED',
         contentText: '抽出したページ本文',
@@ -419,12 +429,18 @@ describe('KnowledgePageRepository', () => {
       repo.markFailed({
         id: 'page-1',
         projectId: 'p1',
+        jobId: 'child-job-1',
         error: 'Claude timed out',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
 
     expect(prisma.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith({
-      where: { id: 'page-1', projectId: 'p1' },
+      where: {
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'child-job-1',
+        status: 'PROCESSING',
+      },
       data: {
         status: 'FAILED',
         attempts: { increment: 1 },
@@ -449,6 +465,7 @@ describe('KnowledgePageRepository', () => {
         repo.markSucceeded({
           id: 'page-1',
           projectId: 'other-project',
+          jobId: 'child-job-1',
           contentText: 'text',
           summary: 'summary',
           extractionResult: {},
@@ -460,20 +477,54 @@ describe('KnowledgePageRepository', () => {
         repo.markFailed({
           id: 'page-1',
           projectId: 'other-project',
+          jobId: 'child-job-1',
           error: 'failed',
         }),
     ],
-  ])('%s rejects a missing or cross-project page', async (_name, mutate) => {
+  ])('%s ignores a missing, stale, or cross-project page', async (_name, mutate) => {
     const prisma = makePrisma({ updateCount: 0 });
     const repo = new KnowledgePageRepository(prisma);
 
-    await expect(mutate(repo)).rejects.toThrow(
-      'Knowledge page page-1 was not found in project other-project',
-    );
+    await expect(mutate(repo)).resolves.toBe(false);
     expect(prisma.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'page-1', projectId: 'other-project' },
+        where: expect.objectContaining({
+          id: 'page-1',
+          projectId: 'other-project',
+          jobId: 'child-job-1',
+        }),
       }),
+    );
+  });
+
+  it('fences stale worker success and failure by current job and PROCESSING status', async () => {
+    const prisma = makePrisma({ updateCount: 0 });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.markSucceeded({
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'old-child',
+        contentText: 'stale text',
+        summary: 'stale summary',
+        extractionResult: {},
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      repo.markFailed({
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'old-child',
+        error: 'stale failure',
+      }),
+    ).resolves.toBe(false);
+
+    expect(prisma.knowledgeDocumentPage.updateMany.mock.calls[0][0].where).toEqual(
+      expect.objectContaining({ jobId: 'old-child', status: 'PROCESSING' }),
+    );
+    expect(prisma.knowledgeDocumentPage.updateMany.mock.calls[1][0].where).toEqual(
+      expect.objectContaining({ jobId: 'old-child', status: 'PROCESSING' }),
     );
   });
 

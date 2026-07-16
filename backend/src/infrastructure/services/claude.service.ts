@@ -730,6 +730,163 @@ ${description}`,
   }
 
   /**
+   * 1ページの全文書き起こしと小さな構造化抽出を分離する。
+   * 長い全文を4096-token JSONへ同居させず、全文は継続可能なplain text、
+   * metadataは40k文字ごとのJSONとして取得するため途中切れを成功扱いしない。
+   */
+  async extractPageKnowledge(
+    input: ExtractInput,
+    apiKey: string,
+    model?: string,
+    usage?: LlmUsageContext,
+  ): Promise<KnowledgeExtraction> {
+    const hasVisual = !!input.pdfBase64 || (input.images?.length ?? 0) > 0;
+    if (!hasVisual) return this.extractKnowledge(input, apiKey, model, usage);
+
+    const visualText = await this.transcribePage(
+      input,
+      apiKey,
+      model || this.defaultModel(),
+      usage,
+    );
+    // PPTXのテキスト層はモデルに再生成させず、原文を先頭にそのまま保持する。
+    const fullText = [input.text ?? '', visualText]
+      .filter((part) => part.length > 0)
+      .join('\n\n');
+    const chunks = this.chunkText(fullText, 40_000);
+    const metadata = chunks.length
+      ? await Promise.all(
+          chunks.map((text, index) =>
+            this.extractKnowledge(
+              {
+                text,
+                filename: `${input.filename}#metadata=${index + 1}/${chunks.length}`,
+              },
+              apiKey,
+              model,
+              usage,
+            ),
+          ),
+        )
+      : [];
+    const unique = <T>(rows: T[], key: (row: T) => string): T[] => {
+      const seen = new Set<string>();
+      return rows.filter((row) => {
+        const value = key(row);
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      });
+    };
+    return {
+      summary: metadata
+        .map((row) => row.summary.trim())
+        .filter(Boolean)
+        .join('\n'),
+      fullText,
+      tags: unique(
+        metadata.flatMap((row) => row.tags),
+        (tag) => tag,
+      ),
+      entities: unique(
+        metadata.flatMap((row) => row.entities),
+        (entity) => `${entity.kind}\0${entity.label}`,
+      ),
+      relations: unique(
+        metadata.flatMap((row) => row.relations),
+        (relation) =>
+          `${relation.from}\0${relation.to}\0${relation.label ?? ''}`,
+      ),
+    };
+  }
+
+  private async transcribePage(
+    input: ExtractInput,
+    apiKey: string,
+    model: string,
+    usage?: LlmUsageContext,
+  ): Promise<string> {
+    const maxChunks = 16;
+    const maxChars = 1_000_000;
+    const marker = '[[PAGE_COMPLETE]]';
+    let result = '';
+    for (let part = 0; part < maxChunks; part += 1) {
+      const content: any[] = [];
+      if (input.pdfBase64) {
+        content.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: 'application/pdf',
+            data: input.pdfBase64,
+          },
+        });
+      }
+      for (const image of input.images ?? []) {
+        content.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: image.mimeType,
+            data: image.base64,
+          },
+        });
+      }
+      const tail = result.slice(-2_000);
+      content.push({
+        type: 'text',
+        text:
+          part === 0
+            ? `「${input.filename}」の視覚情報に含まれる文字を、省略・要約せず読み順どおりplain textで全文書き起こしてください。JSONやコードフェンスは使わず、完了時だけ末尾に ${marker} を付けてください。`
+            : `同じページの書き起こしを、前回出力の直後から省略なく続けてください。重複を避け、完了時だけ末尾に ${marker} を付けてください。前回末尾:\n${tail}`,
+      });
+      const run = await this.runLlm({
+        apiKey,
+        model,
+        maxTokens: 8192,
+        system:
+          'あなたはページ全文の忠実な転記担当です。要約・JSON化・省略をしません。',
+        messages: [{ role: 'user', content }],
+        usage,
+      });
+      if (usage) await this.usageRecorder.record(usage, run.model, run.usage);
+      if (!run.text) throw new Error('ページ全文書き起こしの応答が空です');
+      const markerAt = run.text.lastIndexOf(marker);
+      const piece = markerAt >= 0 ? run.text.slice(0, markerAt) : run.text;
+      result = this.appendContinuation(result, piece);
+      if (result.length > maxChars) {
+        throw new Error(`ページ全文書き起こしが上限(${maxChars}文字)を超えました`);
+      }
+      if (markerAt >= 0) return result;
+      if (run.stopReason !== 'max_tokens') {
+        throw new Error(
+          `ページ全文書き起こしが完了マーカーなしで終了しました (stopReason=${run.stopReason ?? 'unknown'})`,
+        );
+      }
+    }
+    throw new Error(`ページ全文書き起こしが継続上限(${maxChunks}回)に達しました`);
+  }
+
+  private appendContinuation(current: string, next: string): string {
+    if (!current) return next;
+    const limit = Math.min(2_000, current.length, next.length);
+    for (let overlap = limit; overlap >= 32; overlap -= 1) {
+      if (current.endsWith(next.slice(0, overlap))) {
+        return current + next.slice(overlap);
+      }
+    }
+    return current + next;
+  }
+
+  private chunkText(text: string, maxChars: number): string[] {
+    const chunks: string[] = [];
+    for (let offset = 0; offset < text.length; offset += maxChars) {
+      chunks.push(text.slice(offset, offset + maxChars));
+    }
+    return chunks;
+  }
+
+  /**
    * 文書（PDF / 画像 / テキスト）から、ナレッジグラフ要素（要約・自動タグ・実体・関係）を多モーダルで抽出する。
    * バッチ取り込みパイプラインの EXTRACT ステップ（spec §6）から呼ばれる。
    * 既存メソッドと同様、1回呼び出し＋コードフェンス除去＋JSON.parse。解析失敗時は throw（リトライは呼び出し側＝Job）。

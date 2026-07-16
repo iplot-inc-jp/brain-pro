@@ -95,6 +95,7 @@ function makeService(
     },
     backgroundJob: {
       findUnique: jest.fn(async () => backgroundJob()),
+      findMany: jest.fn(async () => []),
       updateMany: jest.fn(async () => ({ count: 1 })),
       update: jest.fn(async () => backgroundJob()),
     },
@@ -120,19 +121,22 @@ function makeService(
     classify: jest.fn(() => (file.filename.endsWith('.pdf') ? 'pdf' : 'presentation')),
     extractText: jest.fn(),
   };
-  const claude = {
-    extractKnowledge: jest.fn(async () => ({
+  const extractPageKnowledge = jest.fn(async () => ({
       summary: '要約',
       fullText: '本文',
       tags: [],
       entities: [],
       relations: [],
-    })),
+    }));
+  const claude = {
+    extractKnowledge: extractPageKnowledge,
+    extractPageKnowledge,
   };
   const companyKey = { resolveForProject: jest.fn(async () => 'api-key') };
   const jobService = {
     startReserved: jest.fn(async (id: string) => backgroundJob({ id })),
     retry: jest.fn(async (id: string) => backgroundJob({ id })),
+    recoverStaleRunning: jest.fn(async (id: string) => backgroundJob({ id })),
     enqueue: jest.fn(async () => backgroundJob({ id: 'merge-1', type: 'KG_MERGE_INGEST_FILE' })),
   };
   const fileRepository = {
@@ -155,9 +159,9 @@ function makeService(
   const pageRepository = {
     upsertPending: jest.fn(async (input: { pageNumber: number }) => pageRow(input.pageNumber)),
     findById: jest.fn(async () => pages[0] ?? null),
-    markProcessing: jest.fn(async () => undefined),
-    markSucceeded: jest.fn(async () => undefined),
-    markFailed: jest.fn(async () => undefined),
+    markProcessing: jest.fn(async () => true),
+    markSucceeded: jest.fn(async () => true),
+    markFailed: jest.fn(async () => true),
     allSucceeded: jest.fn(async () => true),
     listForFile: jest.fn(async () => pages),
   };
@@ -189,6 +193,44 @@ function makeService(
 }
 
 describe('KnowledgeIngestionService paged documents', () => {
+  it('completes a zero-slide PPTX through processFile and keeps its document shell', async () => {
+    const fixture = makeService({ file: makeFile('empty.pptx'), pages: [] });
+    jest
+      .spyOn(
+        fixture.service as unknown as {
+          preparePageInputs(bytes: Buffer, kind: string): Promise<unknown[]>;
+        },
+        'preparePageInputs',
+      )
+      .mockResolvedValue([]);
+    const merge = jest
+      .spyOn(
+        fixture.service as unknown as {
+          merge: (...args: unknown[]) => Promise<string>;
+        },
+        'merge',
+      )
+      .mockResolvedValue('doc-1');
+
+    await expect(
+      fixture.service.processFile('file-1', 'parent-1'),
+    ).resolves.toEqual({
+      knowledgeDocumentId: 'doc-1',
+      deferred: false,
+      pages: 0,
+    });
+
+    expect(fixture.prisma.knowledgeDocument.upsert).toHaveBeenCalled();
+    expect(merge).toHaveBeenCalledWith(
+      fixture.file,
+      expect.objectContaining({ summary: '内容なし', fullText: '' }),
+      expect.objectContaining({ contentText: '' }),
+    );
+    expect(fixture.file.status).toBe('SUCCEEDED');
+    expect(fixture.tx.backgroundJob.create).not.toHaveBeenCalled();
+    expect(fixture.jobService.startReserved).not.toHaveBeenCalled();
+  });
+
   it('creates every PDF page input but reserves only two child jobs initially', async () => {
     const pages = [pageRow(1), pageRow(2), pageRow(3)];
     const fixture = makeService({ bytes: await pdfWithPages(3), pages });
@@ -251,7 +293,7 @@ describe('KnowledgeIngestionService paged documents', () => {
       id: 'page-1',
       projectId: 'p1',
     });
-    expect(fixture.claude.extractKnowledge).not.toHaveBeenCalled();
+    expect(fixture.claude.extractPageKnowledge).not.toHaveBeenCalled();
     expect(fixture.companyKey.resolveForProject).not.toHaveBeenCalled();
     expect(fixture.pageRepository.markSucceeded).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -281,16 +323,53 @@ describe('KnowledgeIngestionService paged documents', () => {
       bytes: Buffer.from('one-page-pdf'),
       pages: [failed],
     });
-    fixture.claude.extractKnowledge.mockRejectedValueOnce(new Error('LLM down'));
+    fixture.claude.extractPageKnowledge.mockRejectedValueOnce(new Error('LLM down'));
 
     await expect(fixture.service.processPage('page-2', 'child-1')).rejects.toThrow('LLM down');
 
     expect(fixture.pageRepository.markFailed).toHaveBeenCalledWith({
       id: 'page-2',
       projectId: 'p1',
+      jobId: 'child-1',
       error: 'LLM down',
     });
     expect(fixture.fileRepository.save).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'FAILED' }));
+    expect(fixture.prisma.backgroundJob.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'FAILED' }) }),
+    );
+  });
+
+  it('does not recharge Claude when orchestration fails after the page result is persisted', async () => {
+    const page = pageRow(1, { jobId: 'child-1' });
+    const fixture = makeService({ pages: [page] });
+    fixture.jobService.enqueue.mockRejectedValueOnce(new Error('publish failed'));
+
+    await expect(
+      fixture.service.processPage('page-1', 'child-1'),
+    ).rejects.toThrow('publish failed');
+    expect(fixture.pageRepository.markFailed).not.toHaveBeenCalled();
+
+    page.status = 'SUCCEEDED';
+    page.contentText = '本文';
+    await expect(
+      fixture.service.processPage('page-1', 'child-1'),
+    ).resolves.toEqual({ mergeQueued: true });
+
+    expect(fixture.claude.extractPageKnowledge).toHaveBeenCalledTimes(1);
+    expect(fixture.pageRepository.markSucceeded).toHaveBeenCalledTimes(1);
+    expect(fixture.pageRepository.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('treats a reassigned page worker as obsolete without mutating the page', async () => {
+    const fixture = makeService({
+      pages: [pageRow(1, { jobId: 'new-child' })],
+    });
+
+    await expect(
+      fixture.service.processPage('page-1', 'child-1'),
+    ).resolves.toEqual({ mergeQueued: false, obsolete: true });
+    expect(fixture.pageRepository.markProcessing).not.toHaveBeenCalled();
+    expect(fixture.claude.extractPageKnowledge).not.toHaveBeenCalled();
   });
 
   it('serializes simultaneous replenishment so no more than two pages are active', async () => {
@@ -351,6 +430,27 @@ describe('KnowledgeIngestionService paged documents', () => {
     expect(
       pages.filter((page) => page.job && (page.job.status === 'QUEUED' || page.job.status === 'RUNNING')),
     ).toHaveLength(2);
+  });
+
+  it('counts a FAILED page with a requeued child job as an active slot', async () => {
+    const pages = [
+      Object.assign(pageRow(1, { status: 'PROCESSING', jobId: 'running-1' }), {
+        job: { id: 'running-1', status: 'RUNNING', updatedAt: now },
+      }),
+      Object.assign(pageRow(2, { status: 'FAILED', jobId: 'queued-2' }), {
+        job: { id: 'queued-2', status: 'QUEUED', updatedAt: now },
+      }),
+      Object.assign(pageRow(3), { job: null }),
+    ];
+    const fixture = makeService({ pages });
+    const scheduler = fixture.service as unknown as {
+      fillPageWorkerWindow(file: IngestionFile, parentJobId: string): Promise<void>;
+    };
+
+    await scheduler.fillPageWorkerWindow(fixture.file, 'parent-1');
+
+    expect(fixture.tx.backgroundJob.create).not.toHaveBeenCalled();
+    expect(fixture.tx.knowledgeDocumentPage.updateMany).not.toHaveBeenCalled();
   });
 
   it('drains untouched pages without auto-recharging a permanent failure, then explicit resume retries it once', async () => {
@@ -503,5 +603,66 @@ describe('KnowledgeIngestionService paged documents', () => {
       'stable-merge',
     );
     expect(fixture.jobService.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('recovers a stale RUNNING merge on parent resume', async () => {
+    const fixture = makeService({
+      pages: [pageRow(1, { status: 'SUCCEEDED' })],
+    });
+    fixture.prisma.backgroundJob.findUnique
+      .mockResolvedValueOnce(backgroundJob({ id: 'parent-1' }))
+      .mockResolvedValueOnce(
+        backgroundJob({
+          id: 'stable-merge',
+          type: 'KG_MERGE_INGEST_FILE',
+          status: 'RUNNING',
+        }),
+      );
+
+    await fixture.service.resumePagedFile('file-1', 'parent-1');
+
+    expect(fixture.jobService.recoverStaleRunning).toHaveBeenCalledWith(
+      'stable-merge',
+    );
+    expect(fixture.jobService.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('cannot demote a succeeded parent from a stale terminal callback', async () => {
+    const fixture = makeService();
+    const parentState = fixture.service as unknown as {
+      setParentState(
+        parentJobId: string,
+        projectId: string,
+        status: 'FAILED',
+      ): Promise<void>;
+    };
+
+    await parentState.setParentState('parent-1', 'p1', 'FAILED');
+
+    expect(fixture.prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'parent-1', projectId: 'p1', status: 'RUNNING' },
+        data: expect.objectContaining({ status: 'FAILED' }),
+      }),
+    );
+  });
+
+  it('does not settle a transient FAILED page while its child is QUEUED', async () => {
+    const page = pageRow(1, { status: 'FAILED', jobId: 'child-1' });
+    const fixture = makeService({ pages: [page] });
+    fixture.prisma.backgroundJob.findMany.mockResolvedValueOnce([
+      { id: 'child-1', status: 'QUEUED' },
+    ] as never);
+    const settle = fixture.service as unknown as {
+      settleFailedPagedFileIfIdle(
+        file: IngestionFile,
+        parentJobId: string,
+      ): Promise<void>;
+    };
+
+    await settle.settleFailedPagedFileIfIdle(fixture.file, 'parent-1');
+
+    expect(fixture.fileRepository.save).not.toHaveBeenCalled();
+    expect(fixture.prisma.backgroundJob.updateMany).not.toHaveBeenCalled();
   });
 });

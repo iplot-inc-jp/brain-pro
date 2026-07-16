@@ -248,4 +248,86 @@ describe('JobService page ingestion jobs', () => {
     expect(result?.id).toBe('parent-1');
     expect(retry).toHaveBeenCalledWith('parent-1');
   });
+
+  it.each([true, false])(
+    'atomically lets only one concurrent retry start (QStash=%s)',
+    async (publishEnabled) => {
+      const { service, prisma, qstash } = makeService();
+      qstash.publishEnabled = publishEnabled;
+      let state = jobRow({ id: 'failed-1', status: 'FAILED', attempts: 4 });
+      prisma.backgroundJob.findUnique.mockImplementation(async () => ({ ...state }));
+      prisma.backgroundJob.updateMany.mockImplementation((async ({ where, data }: {
+        where: { status?: string };
+        data: Partial<BackgroundJob>;
+      }) => {
+        if (where.status !== state.status) return { count: 0 };
+        state = { ...state, ...data, status: 'QUEUED' } as BackgroundJob;
+        return { count: 1 };
+      }) as never);
+      const runInline = jest
+        .spyOn(service as unknown as { runInline(id: string): Promise<BackgroundJob> }, 'runInline')
+        .mockResolvedValue(jobRow({ id: 'failed-1', status: 'SUCCEEDED' }));
+
+      await Promise.all([service.retry('failed-1'), service.retry('failed-1')]);
+
+      if (publishEnabled) {
+        expect(qstash.publishJob).toHaveBeenCalledTimes(1);
+        expect(runInline).not.toHaveBeenCalled();
+      } else {
+        expect(runInline).toHaveBeenCalledTimes(1);
+        expect(qstash.publishJob).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('recovers only the exact stale RUNNING merge lease', async () => {
+    const { service, prisma } = makeService();
+    const startedAt = new Date('2026-07-16T00:00:00.000Z');
+    prisma.backgroundJob.findUnique.mockResolvedValueOnce(
+      jobRow({ id: 'merge-1', type: 'KG_MERGE_INGEST_FILE', status: 'RUNNING', startedAt }),
+    );
+    const startReserved = jest
+      .spyOn(service, 'startReserved')
+      .mockResolvedValue(jobRow({ id: 'merge-1', status: 'QUEUED' }));
+
+    await service.recoverStaleRunning('merge-1', 1);
+
+    expect(prisma.backgroundJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'merge-1', status: 'RUNNING', startedAt },
+        data: expect.objectContaining({ status: 'QUEUED', startedAt: null }),
+      }),
+    );
+    expect(startReserved).toHaveBeenCalledWith('merge-1');
+  });
+
+  it('fences completion with the exact RUNNING claim timestamp', async () => {
+    const { service, prisma, knowledgeIngestion } = makeService();
+    const queued = jobRow({
+      id: 'merge-1',
+      type: 'KG_MERGE_INGEST_FILE',
+      payload: { fileId: 'file-1' },
+    });
+    prisma.backgroundJob.findUnique
+      .mockResolvedValueOnce(queued)
+      .mockResolvedValueOnce(jobRow({ ...queued, status: 'SUCCEEDED' }));
+    knowledgeIngestion.mergePagedFile.mockResolvedValueOnce({ knowledgeDocumentId: 'doc-1' });
+
+    await service.runJob('merge-1');
+
+    const claim = (prisma.backgroundJob.updateMany.mock.calls as unknown as Array<[
+      { data: { startedAt: Date } },
+    ]>)[0][0];
+    expect(prisma.backgroundJob.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          id: 'merge-1',
+          status: 'RUNNING',
+          startedAt: claim.data.startedAt,
+        },
+        data: expect.objectContaining({ status: 'SUCCEEDED' }),
+      }),
+    );
+  });
 });

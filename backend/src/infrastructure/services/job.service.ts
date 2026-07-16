@@ -226,14 +226,18 @@ export class JobService {
     if (!job) {
       throw new Error(`Job ${id} not found`);
     }
+    if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+      // 並行retryの敗者は、勝者が作った実行可能/実行中状態をそのまま返す。
+      return job;
+    }
     if (job.status !== 'FAILED') {
       throw new Error(`Job ${id} is ${job.status}; only FAILED jobs can be retried`);
     }
 
     // QUEUED へ戻す。attempts は保持し、maxAttempts に再試行余地を足す
     // （自動リトライ上限を使い切った FAILED でも、手動再起票後に自動リトライが効く）。
-    const requeued = await this.prisma.backgroundJob.update({
-      where: { id },
+    const requeued = await this.prisma.backgroundJob.updateMany({
+      where: { id, status: 'FAILED' },
       data: {
         status: 'QUEUED',
         maxAttempts: job.attempts + JobService.MAX_ATTEMPTS,
@@ -244,13 +248,53 @@ export class JobService {
         finishedAt: null,
       },
     });
+    if (requeued.count !== 1) {
+      const current = await this.prisma.backgroundJob.findUnique({ where: { id } });
+      if (!current) throw new Error(`Job ${id} not found`);
+      return current;
+    }
 
     if (this.qstash.publishEnabled) {
-      await this.qstash.publishJob(requeued.id);
-      return requeued;
+      await this.qstash.publishJob(id);
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ??
+        { ...job, status: 'QUEUED' }
+      );
     }
     // ローカル/QStash無: その場で終端まで実行して完了 job を返す。
-    return this.runInline(requeued.id);
+    return this.runInline(id);
+  }
+
+  /** stale RUNNING のleaseだけを同じjob idで回収し、再実行する。 */
+  async recoverStaleRunning(
+    id: string,
+    staleMs = 10 * 60 * 1000,
+  ): Promise<BackgroundJob> {
+    const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
+    if (!job) throw new Error(`Job ${id} not found`);
+    if (
+      job.status !== 'RUNNING' ||
+      !job.startedAt ||
+      job.startedAt.getTime() > Date.now() - staleMs
+    ) {
+      return job;
+    }
+    const recovered = await this.prisma.backgroundJob.updateMany({
+      where: { id, status: 'RUNNING', startedAt: job.startedAt },
+      data: {
+        status: 'QUEUED',
+        progress: 0,
+        startedAt: null,
+        finishedAt: null,
+        error: 'stale RUNNING lease recovered',
+      },
+    });
+    if (recovered.count !== 1) {
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ?? job
+      );
+    }
+    return this.startReserved(id);
   }
 
   /**
@@ -302,9 +346,10 @@ export class JobService {
     //  上の findUnique では両者とも QUEUED を読みうる）で二重 dispatch されるため、
     //  QUEUED→RUNNING の遷移を条件付き updateMany で原子的に行い、
     //  count===1（＝この呼び出しが遷移を勝ち取った）時だけ実行する。
+    const claimStartedAt = new Date();
     const claimed = await this.prisma.backgroundJob.updateMany({
       where: { id, status: 'QUEUED' },
-      data: { status: 'RUNNING', startedAt: new Date(), progress: 10 },
+      data: { status: 'RUNNING', startedAt: claimStartedAt, progress: 10 },
     });
     if (claimed.count !== 1) {
       // 別の並行実行が先に QUEUED→RUNNING を確定させた。二重 dispatch しない。
@@ -333,7 +378,7 @@ export class JobService {
         // ページ子ジョブがinlineで即完了/失敗し、すでに親を終端した可能性がある。
         // RUNNING 条件付き更新にして、その終端状態を外側のorchestrator完了で巻き戻さない。
         await this.prisma.backgroundJob.updateMany({
-          where: { id, status: 'RUNNING' },
+          where: { id, status: 'RUNNING', startedAt: claimStartedAt },
           data: {
             result: result as Prisma.InputJsonValue,
             progress: 50,
@@ -344,8 +389,8 @@ export class JobService {
         });
         return current ?? job;
       }
-      return this.prisma.backgroundJob.update({
-        where: { id },
+      const completed = await this.prisma.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: claimStartedAt },
         data: {
           status: 'SUCCEEDED',
           result: (result ?? Prisma.JsonNull) as Prisma.InputJsonValue,
@@ -354,6 +399,16 @@ export class JobService {
           finishedAt: new Date(),
         },
       });
+      const current = await this.prisma.backgroundJob.findUnique({ where: { id } });
+      return current ??
+        (completed.count === 1
+          ? ({ ...job,
+              status: 'SUCCEEDED',
+              result: (result ?? Prisma.JsonNull) as Prisma.JsonValue,
+              progress: 100,
+              error: null,
+            } as BackgroundJob)
+          : job);
     } catch (err) {
       const message = (err as Error)?.message ?? String(err);
       // エラーは（スタック含め）全文記録する。秘匿値は payload に入れない方針のため
@@ -379,8 +434,8 @@ export class JobService {
         this.logger.warn(
           `Job ${id} (${job.type}) failed (attempt ${attemptsAfter}/${job.maxAttempts}), requeueing for retry: ${message}`,
         );
-        await this.prisma.backgroundJob.update({
-          where: { id },
+        const requeueClaim = await this.prisma.backgroundJob.updateMany({
+          where: { id, status: 'RUNNING', startedAt: claimStartedAt },
           data: {
             status: 'QUEUED',
             error: errorText,
@@ -389,6 +444,12 @@ export class JobService {
             startedAt: null,
           },
         });
+
+        if (requeueClaim.count !== 1) {
+          return (
+            (await this.prisma.backgroundJob.findUnique({ where: { id } })) ?? job
+          );
+        }
 
         if (opts.throwOnFailure === true) {
           // ワーカー経路: 例外を再 throw → ワーカーが非2xx を返し QStash 自動リトライが発火。
@@ -405,8 +466,8 @@ export class JobService {
       this.logger.error(
         `Job ${id} (${job.type}) failed permanently (attempt ${attemptsAfter}/${job.maxAttempts}): ${message}`,
       );
-      const failed = await this.prisma.backgroundJob.update({
-        where: { id },
+      const failed = await this.prisma.backgroundJob.updateMany({
+        where: { id, status: 'RUNNING', startedAt: claimStartedAt },
         data: {
           status: 'FAILED',
           error: errorText,
@@ -414,7 +475,7 @@ export class JobService {
           finishedAt: new Date(),
         },
       });
-      if (job.type === 'KG_INGEST_PAGE') {
+      if (failed.count === 1 && job.type === 'KG_INGEST_PAGE') {
         const payload = (job.payload ?? {}) as Record<string, unknown>;
         const pageId =
           typeof payload.pageId === 'string' ? payload.pageId : null;
@@ -431,7 +492,16 @@ export class JobService {
           }
         }
       }
-      return failed;
+      return (
+        (await this.prisma.backgroundJob.findUnique({ where: { id } })) ??
+        (failed.count === 1
+          ? ({ ...job,
+              status: 'FAILED',
+              error: errorText,
+              attempts: attemptsAfter,
+            } as BackgroundJob)
+          : job)
+      );
     }
   }
 
