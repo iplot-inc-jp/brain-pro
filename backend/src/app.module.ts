@@ -507,6 +507,7 @@ import { FileExtractionService } from './infrastructure/knowledge/file-extractio
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
 import { KnowledgePageRepository } from './infrastructure/knowledge/knowledge-page.repository';
 import { KnowledgeFolderService } from './infrastructure/knowledge-library/knowledge-folder.service';
+import { KnowledgeLibraryService } from './infrastructure/knowledge-library/knowledge-library.service';
 import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
@@ -1153,6 +1154,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     KnowledgeIngestionService,
     KnowledgePageRepository,
     KnowledgeFolderService,
+    KnowledgeLibraryService,
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,
