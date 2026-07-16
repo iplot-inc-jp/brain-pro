@@ -55,6 +55,7 @@ import {
   Image as ImageIcon,
   Search,
   Loader2,
+  DatabaseZap,
   type LucideIcon,
 } from 'lucide-react'
 import { useState, useMemo, useEffect, useRef } from 'react'
@@ -1182,6 +1183,7 @@ export default function DashboardLayout({
             ],
           },
           { name: 'ナレッジ設定', href: `${base}/knowledge/settings`, icon: Settings },
+          { name: 'RAG索引', href: `${base}/rag`, icon: DatabaseZap },
         ],
       },
       {
