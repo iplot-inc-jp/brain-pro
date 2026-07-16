@@ -30,6 +30,13 @@ interface BackgroundJobReservation {
   status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 }
 
+export class PageJobLeaseLostError extends Error {
+  constructor(jobId: string) {
+    super(`Page job lease lost: ${jobId}`);
+    this.name = 'PageJobLeaseLostError';
+  }
+}
+
 /**
  * 1ファイルの取り込みパイプライン（FETCH→PREPROCESS→EXTRACT→MERGE）と、
  * アーカイブ（ZIP）の展開（EXPAND）を担う実行サービス。
@@ -404,7 +411,12 @@ export class KnowledgeIngestionService {
   ): Promise<{ mergeQueued: boolean; obsolete?: boolean }> {
     const child = await this.prisma.backgroundJob.findUnique({
       where: { id: childJobId },
-      select: { id: true, projectId: true, parentJobId: true },
+      select: {
+        id: true,
+        projectId: true,
+        parentJobId: true,
+        startedAt: true,
+      },
     });
     if (!child?.projectId || !child.parentJobId) {
       throw new Error(
@@ -483,7 +495,7 @@ export class KnowledgeIngestionService {
             area: 'KNOWLEDGE_EXTRACTION',
             userId: batch?.createdById ?? null,
           },
-          () => this.heartbeatPageJob(page, childJobId),
+          () => this.heartbeatPageJob(page, childJobId, child.startedAt),
         );
         extraction = {
           ...result,
@@ -564,6 +576,7 @@ export class KnowledgeIngestionService {
   private async heartbeatPageJob(
     page: KnowledgeDocumentPage,
     childJobId: string,
+    startedAt: Date | null,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const owned = await tx.knowledgeDocumentPage.findFirst({
@@ -575,15 +588,17 @@ export class KnowledgeIngestionService {
         },
         select: { id: true },
       });
-      if (!owned) return;
-      await tx.backgroundJob.updateMany({
+      if (!owned || !startedAt) throw new PageJobLeaseLostError(childJobId);
+      const updated = await tx.backgroundJob.updateMany({
         where: {
           id: childJobId,
           projectId: page.projectId,
           status: 'RUNNING',
+          startedAt,
         },
         data: { updatedAt: new Date() },
       });
+      if (updated.count !== 1) throw new PageJobLeaseLostError(childJobId);
     });
   }
 
@@ -622,7 +637,7 @@ export class KnowledgeIngestionService {
   }
 
   /** RUNNING parentのcrash復旧: 予約済みQUEUED子を再publishし、空きslotも同じrootへ補充する。 */
-  async resumePagedFile(fileId: string, parentJobId: string): Promise<void> {
+  async resumePagedFile(fileId: string, parentJobId: string): Promise<boolean> {
     const file = await this.fileRepository.findById(fileId);
     if (!file) throw new Error(`IngestionFile ${fileId} not found`);
     if (file.status !== 'SUCCEEDED') {
@@ -638,6 +653,7 @@ export class KnowledgeIngestionService {
     await this.fillPageWorkerWindow(file, parentJobId, true);
 
     // 全ページ成功後、merge job作成〜publish間で落ちたケースも同じstable IDから回収する。
+    let recoveryTriggered = false;
     if (
       await this.pageRepository.allSucceeded({
         projectId: file.projectId,
@@ -650,10 +666,15 @@ export class KnowledgeIngestionService {
       });
       if (existingMerge?.status === 'QUEUED') {
         await this.jobService.startReserved(existingMerge.id);
+        recoveryTriggered = true;
       } else if (existingMerge?.status === 'FAILED') {
         await this.jobService.retry(existingMerge.id);
+        recoveryTriggered = true;
       } else if (existingMerge?.status === 'RUNNING') {
-        await this.jobService.recoverStaleRunning(existingMerge.id);
+        const recovered = await this.jobService.recoverStaleRunning(
+          existingMerge.id,
+        );
+        recoveryTriggered = recovered.recoveryTriggered === true;
       } else if (existingMerge?.status === 'SUCCEEDED') {
         await this.setParentState(parentJobId, file.projectId, 'SUCCEEDED', 100);
       } else if (!existingMerge) {
@@ -668,8 +689,10 @@ export class KnowledgeIngestionService {
             dedupeId: stableMergeJobId,
           },
         );
+        recoveryTriggered = true;
       }
     }
+    return recoveryTriggered;
   }
 
   /** 全ページ結果を既存 merge semantics で文書/グラフへ一度だけ集約する。 */
@@ -815,7 +838,10 @@ export class KnowledgeIngestionService {
         if (page.status === 'PENDING' && !page.job) return true;
         if (!recoverQueued) return false;
         return (
-          page.status === 'FAILED' ||
+          (page.status === 'FAILED' &&
+            (!page.job ||
+              page.job.status === 'FAILED' ||
+              jobIsStale(page))) ||
           ((page.status === 'PENDING' || page.status === 'PROCESSING') &&
             (page.job?.status === 'FAILED' || jobIsStale(page)))
         );

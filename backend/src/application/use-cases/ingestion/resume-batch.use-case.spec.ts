@@ -27,7 +27,10 @@ describe('ResumeBatchUseCase paged hierarchy', () => {
       setJobId: jest.fn(),
     };
     const jobs = {
-      resumeIngestionParent: jest.fn(async () => ({ id: 'parent-1' })),
+      resumeIngestionParent: jest.fn(async () => ({
+        id: 'parent-1',
+        recoveryTriggered: true,
+      })),
       enqueue: jest.fn(),
     };
     const useCase = new ResumeBatchUseCase(
@@ -47,6 +50,51 @@ describe('ResumeBatchUseCase paged hierarchy', () => {
     );
     expect(files.save).not.toHaveBeenCalled();
     expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(batch.status).toBe('RUNNING');
+    expect(batches.save).toHaveBeenCalled();
+  });
+
+  it('preserves a fully SUCCEEDED batch when reconciliation is a no-op', async () => {
+    const batch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const file = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    file.setJobId('parent-1');
+    const batches = {
+      findById: jest.fn(async () => batch),
+      save: jest.fn(),
+    };
+    const files = {
+      findByBatchId: jest.fn(async () => [file]),
+      save: jest.fn(),
+      setJobId: jest.fn(),
+    };
+    const useCase = new ResumeBatchUseCase(
+      batches as never,
+      files as never,
+      { assertPrincipalAccess: jest.fn(async () => undefined) } as never,
+      {
+        resumeIngestionParent: jest.fn(async () => ({
+          id: 'parent-1',
+          recoveryTriggered: false,
+        })),
+        enqueue: jest.fn(),
+      } as never,
+    );
+
+    await useCase.execute({ id: batch.id, userId: 'u1', principal: { id: 'u1' } });
+
+    expect(batch.status).toBe('SUCCEEDED');
+    expect(batches.save).not.toHaveBeenCalled();
   });
 
   it('keeps a failed PDF on its existing parent while resuming the batch', async () => {

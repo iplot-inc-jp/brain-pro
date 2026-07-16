@@ -3,6 +3,7 @@ import {
   IproBotTransport,
   hasNonTextContent,
 } from './llm-transport';
+import Anthropic from '@anthropic-ai/sdk';
 
 // AnthropicTransport は SDK をモック（default export をクラスとして差し替え）
 const mockCreate = jest.fn();
@@ -61,6 +62,10 @@ describe('AnthropicTransport', () => {
       },
       { timeout: 240_000 },
     );
+    expect(Anthropic).toHaveBeenCalledWith({
+      apiKey: 'sk-test',
+      maxRetries: 0,
+    });
     expect(res).toEqual({
       text: 'hello',
       model: 'claude-sonnet-4-6',

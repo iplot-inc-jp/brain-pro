@@ -40,7 +40,7 @@ export class AnthropicTransport implements LlmTransport {
   constructor(private readonly apiKey: string) {}
 
   async run(req: LlmRunRequest): Promise<LlmRunResult> {
-    const client = new Anthropic({ apiKey: this.apiKey });
+    const client = new Anthropic({ apiKey: this.apiKey, maxRetries: 0 });
     const response = await client.messages.create(
       {
         model: req.model,

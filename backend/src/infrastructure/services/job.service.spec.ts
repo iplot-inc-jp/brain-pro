@@ -35,6 +35,7 @@ function makeService() {
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
     $transaction: jest.fn(async (callback: (tx: unknown) => unknown) => callback(prisma)),
+    $executeRawUnsafe: jest.fn(async () => 1),
   };
   const qstash = {
     publishEnabled: true,
@@ -45,7 +46,7 @@ function makeService() {
     processPage: jest.fn(async () => ({ merged: false })),
     mergePagedFile: jest.fn(async () => ({ knowledgeDocumentId: 'doc-1' })),
     handlePageJobTerminalFailure: jest.fn(async () => undefined),
-    resumePagedFile: jest.fn(async () => undefined),
+    resumePagedFile: jest.fn(async () => false),
     expandArchive: jest.fn(),
   };
   const service = new JobService(
@@ -281,6 +282,29 @@ describe('JobService page ingestion jobs', () => {
     expect(knowledgeIngestion.processFile).not.toHaveBeenCalled();
   });
 
+  it('reconciles a completed file when its parent is already SUCCEEDED', async () => {
+    const { service, prisma, knowledgeIngestion } = makeService();
+    const parent = jobRow({
+      id: 'parent-1',
+      type: 'KG_INGEST_FILE',
+      status: 'SUCCEEDED',
+      payload: { fileId: 'file-1' },
+    });
+    prisma.backgroundJob.findUnique.mockResolvedValueOnce(parent);
+    knowledgeIngestion.resumePagedFile.mockResolvedValueOnce(true);
+
+    const result = await service.resumeIngestionParent(
+      'parent-1', 'file-1', 'p1', true,
+    );
+
+    expect(knowledgeIngestion.resumePagedFile).toHaveBeenCalledWith('file-1', 'parent-1');
+    expect(result).toEqual(expect.objectContaining({
+      status: 'SUCCEEDED',
+      recoveryTriggered: true,
+    }));
+    expect(knowledgeIngestion.processFile).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])(
     'atomically lets only one concurrent retry start (QStash=%s)',
     async (publishEnabled) => {
@@ -316,7 +340,13 @@ describe('JobService page ingestion jobs', () => {
     const { service, prisma } = makeService();
     const startedAt = new Date('2026-07-16T00:00:00.000Z');
     prisma.backgroundJob.findUnique.mockResolvedValueOnce(
-      jobRow({ id: 'merge-1', type: 'KG_MERGE_INGEST_FILE', status: 'RUNNING', startedAt }),
+      jobRow({
+        id: 'merge-1',
+        type: 'KG_MERGE_INGEST_FILE',
+        status: 'RUNNING',
+        startedAt,
+        payload: { fileId: 'file-1' },
+      }),
     );
     const startReserved = jest
       .spyOn(service, 'startReserved')
@@ -337,6 +367,10 @@ describe('JobService page ingestion jobs', () => {
       }),
     );
     expect(startReserved).toHaveBeenCalledWith('merge-1');
+    expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      'knowledge-merge:file-1',
+    );
   });
 
   it('keeps attempt numbers and retry budget advancing across repeated stale recoveries', async () => {

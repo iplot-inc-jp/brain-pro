@@ -10,6 +10,49 @@ function makeService() {
 }
 
 describe('ClaudeService page extraction', () => {
+  it('heartbeats before and after a text-only page LLM call', async () => {
+    const { service } = makeService();
+    jest.spyOn(service as never, 'runLlm' as never).mockResolvedValueOnce({
+      text: JSON.stringify({ summary: 's', tags: [], entities: [], relations: [] }),
+      model: 'm',
+      usage: null,
+    } as never);
+    const heartbeat = jest.fn(async () => undefined);
+
+    await service.extractPageKnowledge(
+      { filename: 'slide.pptx', text: 'text only' },
+      'sk',
+      'm',
+      undefined,
+      heartbeat,
+    );
+
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops before the next paid continuation when heartbeat reports lease loss', async () => {
+    const { service } = makeService();
+    const runLlm = jest.spyOn(service as never, 'runLlm' as never)
+      .mockResolvedValueOnce({
+        text: 'partial',
+        model: 'm',
+        usage: null,
+        stopReason: 'max_tokens',
+      } as never);
+    const heartbeat = jest.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('lease lost'));
+
+    await expect(service.extractPageKnowledge(
+      { filename: 'a.pdf', pdfBase64: 'AAAA' },
+      'sk',
+      'm',
+      undefined,
+      heartbeat,
+    )).rejects.toThrow('lease lost');
+    expect(runLlm).toHaveBeenCalledTimes(1);
+  });
+
   it('continues dense visual transcription and extracts metadata from bounded text chunks', async () => {
     const { service, usageRecorder } = makeService();
     const dense = '資料'.repeat(25_000);

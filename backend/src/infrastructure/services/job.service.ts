@@ -149,7 +149,7 @@ export class JobService {
     fileId: string,
     projectId: string,
     fileSucceeded = false,
-  ): Promise<BackgroundJob | null> {
+  ): Promise<(BackgroundJob & { recoveryTriggered?: boolean }) | null> {
     const parent = await this.prisma.backgroundJob.findUnique({
       where: { id: parentJobId },
     });
@@ -179,21 +179,28 @@ export class JobService {
           startedAt: parent.startedAt ?? new Date(),
         },
       });
-      await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
       return (
-        (await this.prisma.backgroundJob.findUnique({ where: { id: parent.id } })) ??
-        parent
+        { ...((await this.prisma.backgroundJob.findUnique({ where: { id: parent.id } })) ?? parent), recoveryTriggered }
       );
     }
     if (parent.status === 'FAILED') return this.retry(parent.id);
     if (parent.status === 'QUEUED') return this.startReserved(parent.id);
     if (parent.status === 'RUNNING') {
-      await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
-      return (
-        (await this.prisma.backgroundJob.findUnique({
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(fileId, parent.id);
+      return {
+        ...((await this.prisma.backgroundJob.findUnique({
           where: { id: parent.id },
-        })) ?? parent
+        })) ?? parent),
+        recoveryTriggered,
+      };
+    }
+    if (fileSucceeded && parent.status === 'SUCCEEDED') {
+      const recoveryTriggered = await this.knowledgeIngestion.resumePagedFile(
+        fileId,
+        parent.id,
       );
+      return { ...parent, recoveryTriggered };
     }
     return null;
   }
@@ -292,7 +299,7 @@ export class JobService {
   async recoverStaleRunning(
     id: string,
     staleMs = 10 * 60 * 1000,
-  ): Promise<BackgroundJob> {
+  ): Promise<BackgroundJob & { recoveryTriggered?: boolean }> {
     const job = await this.prisma.backgroundJob.findUnique({ where: { id } });
     if (!job) throw new Error(`Job ${id} not found`);
     if (
@@ -300,10 +307,20 @@ export class JobService {
       !job.startedAt ||
       job.startedAt.getTime() > Date.now() - staleMs
     ) {
-      return job;
+      return { ...job, recoveryTriggered: false };
     }
     const reason = 'stale RUNNING lease recovered';
     const recovered = await this.prisma.$transaction(async (tx) => {
+      const payload = (job.payload ?? {}) as Record<string, unknown>;
+      if (
+        job.type === 'KG_MERGE_INGEST_FILE' &&
+        typeof payload.fileId === 'string'
+      ) {
+        await tx.$executeRawUnsafe(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          `knowledge-merge:${payload.fileId}`,
+        );
+      }
       const claim = await tx.backgroundJob.updateMany({
         where: { id, status: 'RUNNING', startedAt: job.startedAt },
         data: {
@@ -334,7 +351,7 @@ export class JobService {
         (await this.prisma.backgroundJob.findUnique({ where: { id } })) ?? job
       );
     }
-    return this.startReserved(id);
+    return { ...(await this.startReserved(id)), recoveryTriggered: true };
   }
 
   /**

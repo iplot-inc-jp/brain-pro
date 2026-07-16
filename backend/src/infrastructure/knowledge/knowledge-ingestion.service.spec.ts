@@ -462,6 +462,26 @@ describe('KnowledgeIngestionService paged documents', () => {
     expect(fixture.tx.knowledgeDocumentPage.updateMany).not.toHaveBeenCalled();
   });
 
+  it('does not replace a transient FAILED page when another slot is available', async () => {
+    const pages = [
+      Object.assign(pageRow(1, { status: 'FAILED', jobId: 'queued-1' }), {
+        job: { id: 'queued-1', status: 'QUEUED', updatedAt: now, startedAt: null },
+      }),
+      Object.assign(pageRow(2), { job: null }),
+    ];
+    const fixture = makeService({ pages });
+    const scheduler = fixture.service as unknown as {
+      fillPageWorkerWindow(file: IngestionFile, parentJobId: string, recover: boolean): Promise<void>;
+    };
+
+    await scheduler.fillPageWorkerWindow(fixture.file, 'parent-1', true);
+
+    expect(fixture.tx.knowledgeDocumentPage.updateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'page-2' }) }),
+    );
+  });
+
   it('frees both just-succeeded RUNNING child slots and steadily reserves the next two pages', async () => {
     const pages = [
       Object.assign(pageRow(1, { status: 'SUCCEEDED', jobId: 'child-1' }), {
@@ -810,6 +830,23 @@ describe('KnowledgeIngestionService paged documents', () => {
       }),
     );
     expect(fixture.tx.backgroundJob.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws a dedicated lease-lost error when heartbeat no longer owns the RUNNING job', async () => {
+    const page = pageRow(1, { status: 'PROCESSING', jobId: 'child-1' });
+    const fixture = makeService({ pages: [page] });
+    fixture.tx.backgroundJob.updateMany.mockResolvedValueOnce({ count: 0 });
+    const heartbeat = fixture.service as unknown as {
+      heartbeatPageJob(
+        page: KnowledgeDocumentPage,
+        childJobId: string,
+        startedAt: Date,
+      ): Promise<void>;
+    };
+
+    await expect(
+      heartbeat.heartbeatPageJob(page, 'child-1', now),
+    ).rejects.toMatchObject({ name: 'PageJobLeaseLostError' });
   });
 
   it('rejects an obsolete merge lease before graph side effects', async () => {

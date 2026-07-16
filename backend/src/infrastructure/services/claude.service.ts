@@ -742,7 +742,12 @@ ${description}`,
     heartbeat?: () => Promise<void>,
   ): Promise<KnowledgeExtraction> {
     const hasVisual = !!input.pdfBase64 || (input.images?.length ?? 0) > 0;
-    if (!hasVisual) return this.extractKnowledge(input, apiKey, model, usage);
+    if (!hasVisual) {
+      await heartbeat?.();
+      const result = await this.extractKnowledge(input, apiKey, model, usage);
+      await heartbeat?.();
+      return result;
+    }
 
     const visualText = await this.transcribePage(
       input,

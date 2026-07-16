@@ -74,6 +74,7 @@ export class ResumeBatchUseCase {
 
     const files = await this.fileRepository.findByBatchId(batch.id);
     const now = Date.now();
+    let didResume = false;
 
     for (const file of files) {
       if (
@@ -81,15 +82,17 @@ export class ResumeBatchUseCase {
         this.isPaged(file) &&
         file.jobId
       ) {
-        await this.jobService.resumeIngestionParent(
+        const resumed = await this.jobService.resumeIngestionParent(
           file.jobId,
           file.id,
           file.projectId,
           true,
         );
+        didResume ||= resumed?.recoveryTriggered === true;
         continue;
       }
       if (!this.isResumable(file, now)) continue;
+      didResume = true;
       file.requeue();
       await this.fileRepository.save(file);
       if (this.isPaged(file) && file.jobId) {
@@ -112,8 +115,14 @@ export class ResumeBatchUseCase {
     }
 
     // バッチを RUNNING へ（CANCELLED から再開する場合も含め進行中扱い）。
-    batch.markStarted();
-    await this.batchRepository.save(batch);
+    if (didResume) {
+      batch.update({
+        status: 'RUNNING',
+        startedAt: batch.startedAt ?? new Date(),
+        finishedAt: null,
+      });
+      await this.batchRepository.save(batch);
+    }
 
     const updated = await this.fileRepository.findByBatchId(batch.id);
     return {
