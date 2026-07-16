@@ -402,6 +402,7 @@ import {
   FeatureIoSchemaController,
   JwtAuthGuard,
   DomainExceptionFilter,
+  IproWebhookSourceController,
 } from './presentation';
 import { ChangeLogInterceptor } from './presentation/interceptors/change-log.interceptor';
 import { HealthController } from './presentation/controllers/health.controller';
@@ -663,6 +664,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     // 外部トラッカー（Backlog/Jira）移行・同期
     TrackerConnectionController,
     IproBotConnectionController,
+    IproWebhookSourceController,
     // 外部トラッカー Webhook 秘密の管理（admin）
     TrackerWebhookController,
     LlmUsageController,
