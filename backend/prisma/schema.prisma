@@ -34,6 +34,7 @@ model User {
   createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
   generatedRagDocuments RagDocument[] @relation("RagDocumentGeneratedBy")
   createdRagPromptVersions RagPromptVersion[] @relation("RagPromptVersionCreatedBy")
+  createdKnowledgeFolderTemplates KnowledgeFolderTemplate[] @relation("KnowledgeFolderTemplateCreatedBy")
 
   @@map("users")
 }
@@ -204,6 +205,7 @@ model Organization {
   projects Project[]
   iproBotConnection IproBotConnection?
   apiKeys  ApiKey[]
+  knowledgeFolderTemplates KnowledgeFolderTemplate[]
 
   @@map("organizations")
 }
@@ -350,6 +352,7 @@ model Project {
   iproActivityRooms       IproActivityRoom[]
   iproActivityMessages    IproActivityMessage[]
   iproActivityDocuments   IproActivityDocument[]
+  knowledgeFolders        KnowledgeFolder[]
 
   @@unique([organizationId, slug])
   @@map("projects")
@@ -375,6 +378,19 @@ enum RagFeatureType {
 enum RagScopeLevel {
   OVERVIEW
   COMPONENT
+}
+
+enum KnowledgeLibraryItemType {
+  RAG
+  KNOWLEDGE_DOCUMENT
+  KNOWLEDGE_NODE
+  CHAT
+  RESOURCE
+}
+
+enum RagSourceReferenceKind {
+  FILE
+  EXTERNAL
 }
 
 // brain-pro の構造化データを Claude で検索向けに圧縮した索引。
@@ -407,6 +423,7 @@ model RagDocument {
 
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   generatedBy User?   @relation("RagDocumentGeneratedBy", fields: [generatedById], references: [id], onDelete: SetNull)
+  sourceReferences RagSourceReference[]
 
   @@unique([projectId, featureType, scopeLevel, sourceKey], map: "rag_docs_project_feature_scope_source_key")
   @@index([projectId, featureType, targetKey], map: "rag_docs_project_feature_target_idx")
@@ -432,6 +449,95 @@ model RagPromptVersion {
   @@unique([projectId, version], map: "rag_prompt_versions_project_version_key")
   @@index([projectId, isActive], map: "rag_prompt_versions_project_active_idx")
   @@map("rag_prompt_versions")
+}
+
+// RAG・ナレッジ・チャット・受信リソースを複数分類する階層フォルダ。
+model KnowledgeFolder {
+  id        String   @id @default(cuid())
+  projectId String   @map("project_id")
+  parentId  String?  @map("parent_id")
+  name      String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent   KnowledgeFolder?   @relation("KnowledgeFolderTree", fields: [parentId, projectId], references: [id, projectId], onDelete: Cascade)
+  children KnowledgeFolder[]  @relation("KnowledgeFolderTree")
+  items    KnowledgeFolderItem[]
+
+  @@unique([id, projectId])
+  @@index([projectId, parentId, order])
+  @@map("knowledge_folders")
+}
+
+// itemType + itemId はプロジェクト内の検索対象を指すpolymorphic参照。
+model KnowledgeFolderItem {
+  id        String                   @id @default(cuid())
+  folderId  String                   @map("folder_id")
+  projectId String                   @map("project_id")
+  itemType  KnowledgeLibraryItemType @map("item_type")
+  itemId    String                   @map("item_id")
+  createdAt DateTime                 @default(now()) @map("created_at")
+
+  folder KnowledgeFolder @relation(fields: [folderId, projectId], references: [id, projectId], onDelete: Cascade)
+
+  @@unique([folderId, itemType, itemId], map: "knowledge_folder_items_folder_type_item_key")
+  @@index([projectId, itemType, itemId])
+  @@map("knowledge_folder_items")
+}
+
+// 会社内の全プロジェクトで再利用できるフォルダテンプレート。
+model KnowledgeFolderTemplate {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization                  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?                         @relation("KnowledgeFolderTemplateCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  nodes        KnowledgeFolderTemplateNode[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, updatedAt])
+  @@map("knowledge_folder_templates")
+}
+
+model KnowledgeFolderTemplateNode {
+  id           String   @id @default(cuid())
+  templateId   String   @map("template_id")
+  parentNodeId String?  @map("parent_node_id")
+  name         String
+  order        Int      @default(0)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  template KnowledgeFolderTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent   KnowledgeFolderTemplateNode?  @relation("KnowledgeFolderTemplateTree", fields: [parentNodeId], references: [id], onDelete: Cascade)
+  children KnowledgeFolderTemplateNode[] @relation("KnowledgeFolderTemplateTree")
+
+  @@index([templateId, parentNodeId, order])
+  @@map("knowledge_folder_template_nodes")
+}
+
+// RAG生成結果から直接開ける元ファイル・外部文書。
+model RagSourceReference {
+  id            String                 @id @default(cuid())
+  ragDocumentId String                 @map("rag_document_id")
+  kind          RagSourceReferenceKind
+  label         String
+  url           String
+  filename      String?
+  mimeType      String?                @map("mime_type")
+  order         Int                    @default(0)
+  createdAt     DateTime               @default(now()) @map("created_at")
+
+  ragDocument RagDocument @relation(fields: [ragDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([ragDocumentId, url])
+  @@index([ragDocumentId, order])
+  @@map("rag_source_references")
 }
 
 // ===========================================
