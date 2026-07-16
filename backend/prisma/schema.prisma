@@ -2797,6 +2797,12 @@ model ExternalMaterialImport {
   sourceChannelId  String
   sourceMessageId  String
   sourceFileId     String
+  // 冪等キーが別の内容へ再利用されるのを Blob 保存前に拒否するための固定 fingerprint。
+  // nullable は Task 4 より前に作られた行を安全に段階移行するため。新規 API は必ず全項目を設定する。
+  filename         String?
+  mimeType         String?
+  size             Int?
+  contentSha256    String?
   status           ExternalMaterialImportStatus @default(PENDING)
   error            String?                      @db.Text
   createdAt        DateTime                     @default(now())

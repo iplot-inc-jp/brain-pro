@@ -51,6 +51,7 @@ export class BlobStorageService {
     key: string,
     bytes: Buffer | Uint8Array,
     contentType?: string,
+    options: { stable?: boolean } = {},
   ): Promise<{ url: string }> {
     const data = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
 
@@ -61,7 +62,10 @@ export class BlobStorageService {
         access: 'public',
         token: this.token,
         contentType,
-        addRandomSuffix: true,
+        // 外部システムの再送など、呼び出し側が DB 上の一意性と内容 fingerprint を
+        // 保証する場合だけ同じ pathname を上書きして crash retry の orphan を防ぐ。
+        addRandomSuffix: options.stable !== true,
+        allowOverwrite: options.stable === true,
       });
       return { url: res.url };
     }
@@ -93,13 +97,13 @@ export class BlobStorageService {
 
   /**
    * `file://` URL / 生パスを正規化した絶対パスにし、UPLOAD_DIR 配下かつ
-   * 取り込み専用領域（`ingestion` キー由来）であることを検証して返す。違反は throw。
+   * 取り込み専用領域（`ingestion` / `external-materials` キー由来）であることを検証して返す。違反は throw。
    *
    * - シンボリックリンク等での外抜けを防ぐため path.resolve 済みの前置一致で判定する。
-   * - 取り込み領域の限定: save() は key `ingestion/<projectId>/<id>/<name>` を
-   *   ディスク fallback では区切りを `_` に潰して `ingestion_<...>` という単一ファイル名にする
+   * - 取り込み領域の限定: save() は key `ingestion/<projectId>/<id>/<name>` または
+   *   `external-materials/<projectId>/<id>/<name>` をディスク fallback では区切りを `_` に潰す
    *   （Blob/将来のレイアウトでは segment 維持もありうる）。そのため
-   *   「いずれかのパスセグメントが `ingestion`」または「basename が `ingestion_` で始まる」
+   *   「許可済みパスセグメント」または対応する flattened basename で始まる
    *   のどちらかを満たすものだけ許可し、UPLOAD_DIR 内の他用途ファイル
    *   （添付の生ファイル等）を blobUrl 偽装で読み出されるのを防ぐ。
    */
@@ -113,14 +117,18 @@ export class BlobStorageService {
         `BlobStorageService.read: path is outside UPLOAD_DIR: ${rawPath}`,
       );
     }
-    // 取り込み領域に限定（segment `ingestion` か basename `ingestion_...`）。
+    // サーバが生成する取り込み領域だけに限定。external-materials は fingerprint を
+    // DB に先行保存する外部資料 API 専用で、任意 client path の許可には使わない。
     const segments = rel.split(/[/\\]+/);
     const basename = segments[segments.length - 1] ?? '';
     const isIngestion =
-      segments.includes('ingestion') || basename.startsWith('ingestion_');
+      segments.includes('ingestion') ||
+      basename.startsWith('ingestion_') ||
+      segments.includes('external-materials') ||
+      basename.startsWith('external-materials_');
     if (!isIngestion) {
       throw new Error(
-        `BlobStorageService.read: path is not under the ingestion area: ${rawPath}`,
+        `BlobStorageService.read: path is not under an allowed material area: ${rawPath}`,
       );
     }
     return resolved;

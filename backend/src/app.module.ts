@@ -259,6 +259,7 @@ import {
   CancelBatchUseCase,
   RetryFileUseCase,
   SkipFileUseCase,
+  ImportExternalMaterialUseCase,
   // Knowledge（ナレッジグラフ read + node/document/relation 編集）
   GetKnowledgeGraphUseCase,
   GetKnowledgeNodeUseCase,
@@ -508,6 +509,7 @@ import {
 } from './presentation/controllers/ingestion.controller';
 import { IngestionFileController } from './presentation/controllers/ingestion-file.controller';
 import { IngestionUploadController } from './presentation/controllers/ingestion-upload.controller';
+import { ExternalMaterialController } from './presentation/controllers/external-material.controller';
 import { IngestionSourceController } from './presentation/controllers/ingestion-source.controller';
 import {
   KnowledgeProjectController,
@@ -674,6 +676,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     MyIngestionBatchController,
     IngestionFileController,
     IngestionUploadController,
+    ExternalMaterialController,
     IngestionSourceController,
     KnowledgeProjectController,
     KnowledgeNodeController,
@@ -1076,6 +1079,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
     CancelBatchUseCase,
     RetryFileUseCase,
     SkipFileUseCase,
+    ImportExternalMaterialUseCase,
     // Knowledge（ナレッジグラフ read + node/document/relation 編集）
     GetKnowledgeGraphUseCase,
     GetKnowledgeNodeUseCase,
