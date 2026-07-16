@@ -22,6 +22,8 @@ export type DocumentPageParseErrorCode =
   | "ZIP_ENTRY_BYTES_EXCEEDED"
   | "ZIP_TOTAL_BYTES_EXCEEDED"
   | "ZIP_COMPRESSION_RATIO_EXCEEDED"
+  | "ZIP_INTEGRITY_ERROR"
+  | "INVALID_PROCESSING_LIMITS"
   | "UNSAFE_RELATIONSHIP_TARGET";
 
 const PRESENTATIONML_NAMESPACE =
@@ -46,7 +48,7 @@ export interface DocumentPageProcessingLimits {
 }
 
 export const DEFAULT_DOCUMENT_PAGE_LIMITS: Readonly<DocumentPageProcessingLimits> =
-  {
+  Object.freeze({
     maxInputBytes: 50 * 1024 * 1024,
     maxPdfPages: 500,
     maxPdfPageOutputBytes: 50 * 1024 * 1024,
@@ -56,7 +58,33 @@ export const DEFAULT_DOCUMENT_PAGE_LIMITS: Readonly<DocumentPageProcessingLimits
     maxZipEntryOutputBytes: 50 * 1024 * 1024,
     maxZipTotalOutputBytes: 200 * 1024 * 1024,
     maxZipCompressionRatio: 200,
-  };
+  });
+
+function resolveProcessingLimits(
+  format: "PDF" | "PPTX",
+  overrides: Partial<DocumentPageProcessingLimits>,
+): DocumentPageProcessingLimits {
+  const limits = { ...DEFAULT_DOCUMENT_PAGE_LIMITS };
+  for (const key of Object.keys(DEFAULT_DOCUMENT_PAGE_LIMITS) as Array<
+    keyof DocumentPageProcessingLimits
+  >) {
+    const value = overrides[key];
+    if (value === undefined) continue;
+    if (
+      !Number.isSafeInteger(value) ||
+      value <= 0 ||
+      value > DEFAULT_DOCUMENT_PAGE_LIMITS[key]
+    ) {
+      throw new DocumentPageParseError(
+        format,
+        "INVALID_PROCESSING_LIMITS",
+        new RangeError(`Invalid document page limit: ${key}`),
+      );
+    }
+    limits[key] = value;
+  }
+  return limits;
+}
 
 export class DocumentPageParseError extends Error {
   readonly cause?: unknown;
@@ -66,11 +94,15 @@ export class DocumentPageParseError extends Error {
     readonly code: DocumentPageParseErrorCode = "INVALID_DOCUMENT",
     cause?: unknown,
   ) {
-    super(
+    const detail =
       code === "INVALID_DOCUMENT"
-        ? `Unable to read ${format} pages: invalid or corrupt document`
-        : `Unable to read ${format} pages: resource limit exceeded (${code})`,
-    );
+        ? "invalid or corrupt document"
+        : code === "ZIP_INTEGRITY_ERROR"
+          ? "ZIP archive integrity check failed"
+          : code === "INVALID_PROCESSING_LIMITS"
+            ? "invalid processing limits"
+            : `resource limit exceeded (${code})`;
+    super(`Unable to read ${format} pages: ${detail}`);
     this.name = "DocumentPageParseError";
     this.cause = cause;
   }
@@ -99,7 +131,7 @@ export async function splitPdfPages(
   limitOverrides: Partial<DocumentPageProcessingLimits> = {},
 ): Promise<PdfPage[]> {
   try {
-    const limits = { ...DEFAULT_DOCUMENT_PAGE_LIMITS, ...limitOverrides };
+    const limits = resolveProcessingLimits("PDF", limitOverrides);
     if (bytes.byteLength > limits.maxInputBytes) {
       throw new DocumentPageParseError("PDF", "INPUT_BYTES_EXCEEDED");
     }
@@ -139,7 +171,7 @@ export function readPptxSlides(
   limitOverrides: Partial<DocumentPageProcessingLimits> = {},
 ): PptxSlide[] {
   try {
-    const limits = { ...DEFAULT_DOCUMENT_PAGE_LIMITS, ...limitOverrides };
+    const limits = resolveProcessingLimits("PPTX", limitOverrides);
     if (bytes.byteLength > limits.maxInputBytes) {
       throw new DocumentPageParseError("PPTX", "INPUT_BYTES_EXCEEDED");
     }
@@ -167,8 +199,7 @@ function orderedSlidePaths(files: Record<string, Uint8Array>): string[] {
     .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
     .sort((a, b) => slideNumber(a) - slideNumber(b));
   const presentation = files["ppt/presentation.xml"];
-  const presentationRelationships =
-    files["ppt/_rels/presentation.xml.rels"];
+  const presentationRelationships = files["ppt/_rels/presentation.xml.rels"];
   if (!presentation && !presentationRelationships) return fallbackPaths;
   if (!presentation || !presentationRelationships) {
     throw new Error("PPTX presentation relationship parts are incomplete");
@@ -206,6 +237,346 @@ function orderedSlidePaths(files: Record<string, Uint8Array>): string[] {
   });
 }
 
+const ZIP_LOCAL_FILE_SIGNATURE = 0x04034b50;
+const ZIP_CENTRAL_FILE_SIGNATURE = 0x02014b50;
+const ZIP_EOCD_SIGNATURE = 0x06054b50;
+const ZIP_EOCD_BYTES = 22;
+const ZIP_MAX_COMMENT_BYTES = 0xffff;
+
+interface ZipCentralEntry {
+  name: string;
+  flags: number;
+  compression: number;
+  crc32: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  localHeaderOffset: number;
+  dataOffset: number;
+  dataEnd: number;
+  recordEnd: number;
+}
+
+interface ZipArchiveDirectory {
+  entries: Map<string, ZipCentralEntry>;
+}
+
+function readZipUint16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readZipUint32(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)) >>>
+    0
+  );
+}
+
+function zipIntegrityError(message: string, cause?: unknown): never {
+  throw new DocumentPageParseError(
+    "PPTX",
+    "ZIP_INTEGRITY_ERROR",
+    cause ?? new Error(message),
+  );
+}
+
+function isPlausibleEocdCandidate(
+  bytes: Uint8Array,
+  eocdOffset: number,
+): boolean {
+  const diskNumber = readZipUint16(bytes, eocdOffset + 4);
+  const centralDirectoryDisk = readZipUint16(bytes, eocdOffset + 6);
+  const diskEntryCount = readZipUint16(bytes, eocdOffset + 8);
+  const entryCount = readZipUint16(bytes, eocdOffset + 10);
+  const centralDirectorySize = readZipUint32(bytes, eocdOffset + 12);
+  const centralDirectoryOffset = readZipUint32(bytes, eocdOffset + 16);
+  if (
+    diskNumber !== 0 ||
+    centralDirectoryDisk !== 0 ||
+    diskEntryCount !== entryCount ||
+    entryCount === 0xffff ||
+    centralDirectorySize === 0xffffffff ||
+    centralDirectoryOffset === 0xffffffff ||
+    centralDirectoryOffset + centralDirectorySize !== eocdOffset
+  ) {
+    return false;
+  }
+
+  let centralOffset = centralDirectoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      centralOffset + 46 > eocdOffset ||
+      readZipUint32(bytes, centralOffset) !== ZIP_CENTRAL_FILE_SIGNATURE
+    ) {
+      return false;
+    }
+    centralOffset +=
+      46 +
+      readZipUint16(bytes, centralOffset + 28) +
+      readZipUint16(bytes, centralOffset + 30) +
+      readZipUint16(bytes, centralOffset + 32);
+    if (centralOffset > eocdOffset) return false;
+  }
+  return centralOffset === eocdOffset;
+}
+
+function parseZipArchiveDirectory(
+  bytes: Uint8Array,
+  limits: DocumentPageProcessingLimits,
+): ZipArchiveDirectory {
+  if (bytes.byteLength < ZIP_EOCD_BYTES) {
+    return zipIntegrityError("ZIP EOCD is missing");
+  }
+
+  const minimumEocdOffset = Math.max(
+    0,
+    bytes.byteLength - ZIP_EOCD_BYTES - ZIP_MAX_COMMENT_BYTES,
+  );
+  let eocdOffset = -1;
+  let fallbackEocdOffset = -1;
+  for (
+    let offset = bytes.byteLength - ZIP_EOCD_BYTES;
+    offset >= minimumEocdOffset;
+    offset -= 1
+  ) {
+    const terminatesArchive =
+      readZipUint32(bytes, offset) === ZIP_EOCD_SIGNATURE &&
+      offset + ZIP_EOCD_BYTES + readZipUint16(bytes, offset + 20) ===
+        bytes.byteLength;
+    if (terminatesArchive) {
+      fallbackEocdOffset = offset;
+      if (!isPlausibleEocdCandidate(bytes, offset)) continue;
+      eocdOffset = offset;
+      break;
+    }
+  }
+  if (eocdOffset < 0 && fallbackEocdOffset >= 0) {
+    eocdOffset = fallbackEocdOffset;
+  }
+  if (eocdOffset < 0)
+    return zipIntegrityError("ZIP EOCD is missing or truncated");
+
+  const diskNumber = readZipUint16(bytes, eocdOffset + 4);
+  const centralDirectoryDisk = readZipUint16(bytes, eocdOffset + 6);
+  const diskEntryCount = readZipUint16(bytes, eocdOffset + 8);
+  const entryCount = readZipUint16(bytes, eocdOffset + 10);
+  const centralDirectorySize = readZipUint32(bytes, eocdOffset + 12);
+  const centralDirectoryOffset = readZipUint32(bytes, eocdOffset + 16);
+  if (
+    diskNumber !== 0 ||
+    centralDirectoryDisk !== 0 ||
+    diskEntryCount !== entryCount
+  ) {
+    return zipIntegrityError("Multi-disk ZIP archives are not supported");
+  }
+  if (
+    entryCount === 0xffff ||
+    centralDirectorySize === 0xffffffff ||
+    centralDirectoryOffset === 0xffffffff
+  ) {
+    return zipIntegrityError("ZIP64 archives are not supported");
+  }
+  if (entryCount > limits.maxZipEntries) {
+    throw new DocumentPageParseError("PPTX", "ZIP_ENTRY_COUNT_EXCEEDED");
+  }
+  const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+  if (
+    !Number.isSafeInteger(centralDirectoryEnd) ||
+    centralDirectoryOffset > eocdOffset ||
+    centralDirectoryEnd !== eocdOffset
+  ) {
+    return zipIntegrityError("ZIP central directory bounds are invalid");
+  }
+
+  const entries = new Map<string, ZipCentralEntry>();
+  const localHeaderOffsets = new Set<number>();
+  let centralOffset = centralDirectoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      centralOffset + 46 > centralDirectoryEnd ||
+      readZipUint32(bytes, centralOffset) !== ZIP_CENTRAL_FILE_SIGNATURE
+    ) {
+      return zipIntegrityError("ZIP central directory entry is truncated");
+    }
+    const flags = readZipUint16(bytes, centralOffset + 8);
+    const compression = readZipUint16(bytes, centralOffset + 10);
+    const crc32 = readZipUint32(bytes, centralOffset + 16);
+    const compressedSize = readZipUint32(bytes, centralOffset + 20);
+    const uncompressedSize = readZipUint32(bytes, centralOffset + 24);
+    const filenameBytes = readZipUint16(bytes, centralOffset + 28);
+    const extraBytes = readZipUint16(bytes, centralOffset + 30);
+    const commentBytes = readZipUint16(bytes, centralOffset + 32);
+    const startDisk = readZipUint16(bytes, centralOffset + 34);
+    const localHeaderOffset = readZipUint32(bytes, centralOffset + 42);
+    const centralEntryEnd =
+      centralOffset + 46 + filenameBytes + extraBytes + commentBytes;
+    if (centralEntryEnd > centralDirectoryEnd) {
+      return zipIntegrityError(
+        "ZIP central directory entry lengths are invalid",
+      );
+    }
+    if (
+      compressedSize === 0xffffffff ||
+      uncompressedSize === 0xffffffff ||
+      localHeaderOffset === 0xffffffff
+    ) {
+      return zipIntegrityError("ZIP64 entries are not supported");
+    }
+    if (startDisk !== 0) {
+      return zipIntegrityError("Multi-disk ZIP entries are not supported");
+    }
+    if ((flags & 0x0001) !== 0 || (compression !== 0 && compression !== 8)) {
+      return zipIntegrityError("Encrypted or unsupported ZIP entry");
+    }
+
+    const centralNameBytes = bytes.subarray(
+      centralOffset + 46,
+      centralOffset + 46 + filenameBytes,
+    );
+    let name: string;
+    try {
+      name = strFromU8(centralNameBytes, (flags & 0x0800) === 0);
+    } catch (error) {
+      return zipIntegrityError("ZIP entry name cannot be decoded", error);
+    }
+    if (!name || name.includes("\0") || entries.has(name)) {
+      return zipIntegrityError("ZIP entry names are empty or duplicated");
+    }
+    if (localHeaderOffsets.has(localHeaderOffset)) {
+      return zipIntegrityError("ZIP entries share a local header offset");
+    }
+    localHeaderOffsets.add(localHeaderOffset);
+
+    if (
+      localHeaderOffset + 30 > centralDirectoryOffset ||
+      readZipUint32(bytes, localHeaderOffset) !== ZIP_LOCAL_FILE_SIGNATURE
+    ) {
+      return zipIntegrityError(
+        "ZIP local header offset or signature is invalid",
+      );
+    }
+    const localFlags = readZipUint16(bytes, localHeaderOffset + 6);
+    const localCompression = readZipUint16(bytes, localHeaderOffset + 8);
+    const localCrc32 = readZipUint32(bytes, localHeaderOffset + 14);
+    const localCompressedSize = readZipUint32(bytes, localHeaderOffset + 18);
+    const localUncompressedSize = readZipUint32(bytes, localHeaderOffset + 22);
+    const localFilenameBytes = readZipUint16(bytes, localHeaderOffset + 26);
+    const localExtraBytes = readZipUint16(bytes, localHeaderOffset + 28);
+    const dataOffset =
+      localHeaderOffset + 30 + localFilenameBytes + localExtraBytes;
+    const dataEnd = dataOffset + compressedSize;
+    if (
+      localFlags !== flags ||
+      localCompression !== compression ||
+      localFilenameBytes !== filenameBytes ||
+      dataOffset > centralDirectoryOffset ||
+      dataEnd > centralDirectoryOffset
+    ) {
+      return zipIntegrityError("ZIP local and central metadata do not match");
+    }
+    const localNameBytes = bytes.subarray(
+      localHeaderOffset + 30,
+      localHeaderOffset + 30 + localFilenameBytes,
+    );
+    if (
+      localNameBytes.length !== centralNameBytes.length ||
+      localNameBytes.some(
+        (value, nameIndex) => value !== centralNameBytes[nameIndex],
+      )
+    ) {
+      return zipIntegrityError(
+        "ZIP local and central entry names do not match",
+      );
+    }
+    const usesDataDescriptor = (flags & 0x0008) !== 0;
+    if (
+      (!usesDataDescriptor &&
+        (localCrc32 !== crc32 ||
+          localCompressedSize !== compressedSize ||
+          localUncompressedSize !== uncompressedSize)) ||
+      (usesDataDescriptor &&
+        ((localCrc32 !== 0 && localCrc32 !== crc32) ||
+          (localCompressedSize !== 0 &&
+            localCompressedSize !== compressedSize) ||
+          (localUncompressedSize !== 0 &&
+            localUncompressedSize !== uncompressedSize)))
+    ) {
+      return zipIntegrityError(
+        "ZIP local sizes or CRC do not match central metadata",
+      );
+    }
+    let recordEnd = dataEnd;
+    if (usesDataDescriptor) {
+      let descriptorOffset = dataEnd;
+      if (
+        descriptorOffset + 4 <= centralDirectoryOffset &&
+        readZipUint32(bytes, descriptorOffset) === 0x08074b50
+      ) {
+        descriptorOffset += 4;
+      }
+      if (
+        descriptorOffset + 12 > centralDirectoryOffset ||
+        readZipUint32(bytes, descriptorOffset) !== crc32 ||
+        readZipUint32(bytes, descriptorOffset + 4) !== compressedSize ||
+        readZipUint32(bytes, descriptorOffset + 8) !== uncompressedSize
+      ) {
+        return zipIntegrityError(
+          "ZIP data descriptor does not match central metadata",
+        );
+      }
+      recordEnd = descriptorOffset + 12;
+    }
+
+    entries.set(name, {
+      name,
+      flags,
+      compression,
+      crc32,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset,
+      dataOffset,
+      dataEnd,
+      recordEnd,
+    });
+    centralOffset = centralEntryEnd;
+  }
+  if (centralOffset !== centralDirectoryEnd || entries.size !== entryCount) {
+    return zipIntegrityError("ZIP central directory count or end is invalid");
+  }
+
+  const entriesByOffset = [...entries.values()].sort(
+    (left, right) => left.localHeaderOffset - right.localHeaderOffset,
+  );
+  for (let index = 1; index < entriesByOffset.length; index += 1) {
+    if (
+      entriesByOffset[index - 1].recordEnd >
+      entriesByOffset[index].localHeaderOffset
+    ) {
+      return zipIntegrityError("ZIP local entry data overlaps another entry");
+    }
+  }
+  return { entries };
+}
+
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc & 1) !== 0 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return crc >>> 0;
+});
+
+function updateCrc32(crc: number, bytes: Uint8Array): number {
+  let next = crc;
+  for (const value of bytes) {
+    next = CRC32_TABLE[(next ^ value) & 0xff] ^ (next >>> 8);
+  }
+  return next >>> 0;
+}
+
 function extractPptxParts(
   bytes: Buffer | Uint8Array,
   limits: DocumentPageProcessingLimits,
@@ -214,7 +585,9 @@ function extractPptxParts(
     compressedBytes: number;
   }
 
+  const archive = parseZipArchiveDirectory(bytes, limits);
   const files: Record<string, Uint8Array> = Object.create(null);
+  const encounteredEntries = new Set<string>();
   const pendingCompressionStates = new Map<string, CompressionState[]>();
   let zipEntryCount = 0;
   let extractedEntryCount = 0;
@@ -249,6 +622,25 @@ function extractPptxParts(
       file.terminate();
       throw new DocumentPageParseError("PPTX", "ZIP_ENTRY_COUNT_EXCEEDED");
     }
+    const centralEntry = archive.entries.get(file.name);
+    if (!centralEntry || encounteredEntries.has(file.name)) {
+      file.terminate();
+      return zipIntegrityError(
+        "ZIP local entries do not match central metadata",
+      );
+    }
+    encounteredEntries.add(file.name);
+    if (
+      file.compression !== centralEntry.compression ||
+      (file.size !== undefined && file.size !== centralEntry.compressedSize) ||
+      (file.originalSize !== undefined &&
+        file.originalSize !== centralEntry.uncompressedSize)
+    ) {
+      file.terminate();
+      return zipIntegrityError(
+        "ZIP streamed entry metadata does not match central metadata",
+      );
+    }
     if (!isAllowedPptxPart(file.name)) {
       file.terminate();
       return;
@@ -262,7 +654,14 @@ function extractPptxParts(
         "ZIP_EXTRACTED_ENTRY_COUNT_EXCEEDED",
       );
     }
-    validateDeclaredZipBounds(file, limits);
+    validateDeclaredZipBounds(
+      {
+        originalSize: centralEntry.uncompressedSize,
+        size: centralEntry.compressedSize,
+        terminate: () => file.terminate(),
+      },
+      limits,
+    );
 
     const compressionState: CompressionState = { compressedBytes: 0 };
     if (file.compression === UnzipInflate.compression) {
@@ -272,14 +671,16 @@ function extractPptxParts(
     }
     const chunks: Uint8Array[] = [];
     let entryOutputBytes = 0;
+    let entryCrc32 = 0xffffffff;
     file.ondata = (error, chunk, final) => {
       if (error) {
         if (error instanceof DocumentPageParseError) throw error;
-        throw new DocumentPageParseError("PPTX", "INVALID_DOCUMENT", error);
+        return zipIntegrityError("ZIP entry decompression failed", error);
       }
 
       entryOutputBytes += chunk.byteLength;
       totalOutputBytes += chunk.byteLength;
+      entryCrc32 = updateCrc32(entryCrc32, chunk);
       if (entryOutputBytes > limits.maxZipEntryOutputBytes) {
         throw new DocumentPageParseError("PPTX", "ZIP_ENTRY_BYTES_EXCEEDED");
       }
@@ -287,12 +688,9 @@ function extractPptxParts(
         throw new DocumentPageParseError("PPTX", "ZIP_TOTAL_BYTES_EXCEEDED");
       }
       const compressedBytes =
-        file.size ??
-        (final
-          ? file.compression === 0
-            ? entryOutputBytes
-            : compressionState.compressedBytes
-          : undefined);
+        final && file.compression === UnzipInflate.compression
+          ? compressionState.compressedBytes
+          : centralEntry.compressedSize;
       if (
         compressedBytes !== undefined &&
         compressionRatio(entryOutputBytes, compressedBytes) >
@@ -305,7 +703,22 @@ function extractPptxParts(
       }
 
       if (chunk.byteLength > 0) chunks.push(chunk);
-      if (final) files[file.name] = joinChunks(chunks, entryOutputBytes);
+      if (final) {
+        const actualCompressedBytes =
+          file.compression === 0
+            ? entryOutputBytes
+            : compressionState.compressedBytes;
+        if (
+          actualCompressedBytes !== centralEntry.compressedSize ||
+          entryOutputBytes !== centralEntry.uncompressedSize ||
+          (entryCrc32 ^ 0xffffffff) >>> 0 !== centralEntry.crc32
+        ) {
+          return zipIntegrityError(
+            "ZIP entry CRC or size does not match central metadata",
+          );
+        }
+        files[file.name] = joinChunks(chunks, entryOutputBytes);
+      }
     };
     file.start();
   });
@@ -315,6 +728,14 @@ function extractPptxParts(
   for (let offset = 0; offset < bytes.byteLength; offset += inputChunkBytes) {
     const end = Math.min(offset + inputChunkBytes, bytes.byteLength);
     unzip.push(bytes.subarray(offset, end), end === bytes.byteLength);
+  }
+  if (
+    zipEntryCount !== archive.entries.size ||
+    encounteredEntries.size !== archive.entries.size
+  ) {
+    return zipIntegrityError(
+      "ZIP streamed entry set does not match central metadata",
+    );
   }
   return files;
 }
@@ -347,14 +768,14 @@ function validateDeclaredZipBounds(
       limits.maxZipCompressionRatio
   ) {
     file.terminate();
-    throw new DocumentPageParseError(
-      "PPTX",
-      "ZIP_COMPRESSION_RATIO_EXCEEDED",
-    );
+    throw new DocumentPageParseError("PPTX", "ZIP_COMPRESSION_RATIO_EXCEEDED");
   }
 }
 
-function compressionRatio(outputBytes: number, compressedBytes: number): number {
+function compressionRatio(
+  outputBytes: number,
+  compressedBytes: number,
+): number {
   if (outputBytes === 0) return 0;
   return outputBytes / Math.max(compressedBytes, 1);
 }
@@ -455,10 +876,7 @@ function resolvePartPath(directory: string, target: string): string {
     if (!part || part === ".") continue;
     if (part === "..") {
       if (resolved.length === 0) {
-        throw new DocumentPageParseError(
-          "PPTX",
-          "UNSAFE_RELATIONSHIP_TARGET",
-        );
+        throw new DocumentPageParseError("PPTX", "UNSAFE_RELATIONSHIP_TARGET");
       }
       resolved.pop();
       continue;
@@ -492,12 +910,7 @@ function slideNumber(path: string): number {
 
 function extractRunTexts(bytes: Uint8Array, partPath: string): string[] {
   const document = parseXml(bytes, partPath);
-  return elementsByNamespaceOrLegacy(
-    document,
-    DRAWINGML_NAMESPACE,
-    "t",
-    "a",
-  )
+  return elementsByNamespaceOrLegacy(document, DRAWINGML_NAMESPACE, "t", "a")
     .map((element) => element.textContent?.trim() ?? "")
     .filter(Boolean);
 }
@@ -505,7 +918,9 @@ function extractRunTexts(bytes: Uint8Array, partPath: string): string[] {
 function parseXml(bytes: Uint8Array, partPath: string): XmlDocument {
   const xml = strFromU8(bytes);
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
-    throw new Error(`DTD and entity declarations are not allowed in ${partPath}`);
+    throw new Error(
+      `DTD and entity declarations are not allowed in ${partPath}`,
+    );
   }
   const errors: string[] = [];
   const document = new DOMParser({
@@ -537,8 +952,7 @@ function elementsByNamespaceOrLegacy(
     elements.push(
       ...Array.from(document.getElementsByTagName("*"))
         .filter(
-          (element) =>
-            !element.namespaceURI && element.localName === localName,
+          (element) => !element.namespaceURI && element.localName === localName,
         )
         .filter((element) => !elements.includes(element)),
     );

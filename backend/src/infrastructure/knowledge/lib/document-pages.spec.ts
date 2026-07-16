@@ -1,6 +1,7 @@
 import { strToU8, Zip, ZipDeflate, zipSync } from "fflate";
 import { PDFDocument } from "pdf-lib";
 import {
+  DEFAULT_DOCUMENT_PAGE_LIMITS,
   DocumentPageParseError,
   readPptxSlides,
   splitPdfPages,
@@ -32,7 +33,34 @@ function makeStreamingPptx(path: string, contents: string): Buffer {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
 
+const CENTRAL_DIRECTORY_SIGNATURE = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+
+function mutateFirstCentralEntry(
+  source: Buffer,
+  mutate: (archive: Buffer, centralOffset: number) => void,
+): Buffer {
+  const archive = Buffer.from(source);
+  const centralOffset = archive.indexOf(CENTRAL_DIRECTORY_SIGNATURE);
+  if (centralOffset < 0) throw new Error("central directory not found");
+  mutate(archive, centralOffset);
+  return archive;
+}
+
+function expectPptxIntegrityError(bytes: Uint8Array): void {
+  expect(() => readPptxSlides(bytes)).toThrow(
+    expect.objectContaining({
+      name: "DocumentPageParseError",
+      code: "ZIP_INTEGRITY_ERROR",
+      cause: expect.anything(),
+    }),
+  );
+}
+
 describe("splitPdfPages", () => {
+  it("本番上限を runtime でも固定する", () => {
+    expect(Object.isFrozen(DEFAULT_DOCUMENT_PAGE_LIMITS)).toBe(true);
+  });
+
   it("PDF を元の順序どおり独立した 1 ページ PDF に分割する", async () => {
     const source = await PDFDocument.create();
     source.addPage([200, 300]);
@@ -100,16 +128,21 @@ describe("splitPdfPages", () => {
       limits: Record<string, number>,
     ) => ReturnType<typeof splitPdfPages>;
 
-    await expect(splitWithLimits(await source.save(), limits)).rejects.toMatchObject(
-      {
-        name: "DocumentPageParseError",
-        code,
-      },
-    );
+    await expect(
+      splitWithLimits(await source.save(), limits),
+    ).rejects.toMatchObject({
+      name: "DocumentPageParseError",
+      code,
+    });
   });
 });
 
 describe("readPptxSlides", () => {
+  const integrityFixture = () =>
+    makePptx({
+      "ppt/slides/slide1.xml": "<p:sld><a:t>integrity</a:t></p:sld>",
+    });
+
   it("スライド番号順で XML テキストをデコードし、空スライドも保持する", () => {
     const pptx = makePptx({
       "ppt/slides/slide10.xml": "<p:sld><a:t>ten</a:t></p:sld>",
@@ -263,10 +296,8 @@ describe("readPptxSlides", () => {
     });
   });
 
-  it("壊れた ZIP は明確な解析エラーにする", () => {
-    expect(() => readPptxSlides(Buffer.from("not a zip"))).toThrow(
-      new DocumentPageParseError("PPTX"),
-    );
+  it("壊れた ZIP は整合性コード付き解析エラーにする", () => {
+    expectPptxIntegrityError(Buffer.from("not a zip"));
   });
 
   it("スライド部品がない PPTX は明確な解析エラーにする", () => {
@@ -339,10 +370,127 @@ describe("readPptxSlides", () => {
       `<p:sld><a:t>${"z".repeat(10_000)}</a:t></p:sld>`,
     );
 
-    expect(() =>
-      readPptxSlides(pptx, { maxZipCompressionRatio: 2 }),
-    ).toThrow(
+    expect(() => readPptxSlides(pptx, { maxZipCompressionRatio: 2 })).toThrow(
       expect.objectContaining({ code: "ZIP_COMPRESSION_RATIO_EXCEEDED" }),
+    );
+  });
+
+  it("中央ディレクトリと EOCD がない ZIP を拒否する", () => {
+    const pptx = integrityFixture();
+    const centralOffset = pptx.indexOf(CENTRAL_DIRECTORY_SIGNATURE);
+
+    expectPptxIntegrityError(pptx.subarray(0, centralOffset));
+  });
+
+  it("EOCD が途中で切れた ZIP を拒否する", () => {
+    const pptx = integrityFixture();
+
+    expectPptxIntegrityError(pptx.subarray(0, pptx.byteLength - 1));
+  });
+
+  it("ZIP comment 内の偽 EOCD を飛ばして正規 EOCD を使う", () => {
+    const archive = makePptx({
+      "ppt/slides/slide1.xml": "<p:sld><a:t>real eocd</a:t></p:sld>",
+    });
+    const comment = Buffer.concat([
+      Buffer.from("comment!"),
+      Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+      Buffer.alloc(18),
+    ]);
+    archive.writeUInt16LE(comment.byteLength, archive.byteLength - 2);
+    const pptx = Buffer.concat([archive, comment]);
+
+    expect(readPptxSlides(pptx)[0].sourceText).toBe("real eocd");
+  });
+
+  it("data descriptor の CRC 不一致を拒否する", () => {
+    const pptx = makeStreamingPptx(
+      "ppt/slides/slide1.xml",
+      "<p:sld><a:t>descriptor</a:t></p:sld>",
+    );
+    const mutated = mutateFirstCentralEntry(pptx, (archive, centralOffset) => {
+      const localOffset = archive.readUInt32LE(centralOffset + 42);
+      const dataOffset =
+        localOffset +
+        30 +
+        archive.readUInt16LE(localOffset + 26) +
+        archive.readUInt16LE(localOffset + 28);
+      const descriptorOffset =
+        dataOffset + archive.readUInt32LE(centralOffset + 20);
+      const crcOffset =
+        archive.readUInt32LE(descriptorOffset) === 0x08074b50
+          ? descriptorOffset + 4
+          : descriptorOffset;
+      archive.writeUInt32LE(
+        (archive.readUInt32LE(crcOffset) + 1) >>> 0,
+        crcOffset,
+      );
+    });
+
+    expectPptxIntegrityError(mutated);
+  });
+
+  it.each([
+    [
+      "選択 entry の圧縮データ",
+      (archive: Buffer, centralOffset: number) => {
+        const localOffset = archive.readUInt32LE(centralOffset + 42);
+        const dataOffset =
+          localOffset +
+          30 +
+          archive.readUInt16LE(localOffset + 26) +
+          archive.readUInt16LE(localOffset + 28);
+        archive[dataOffset] ^= 0x01;
+      },
+    ],
+    [
+      "中央 CRC32",
+      (archive: Buffer, centralOffset: number) => {
+        archive.writeUInt32LE(
+          (archive.readUInt32LE(centralOffset + 16) + 1) >>> 0,
+          centralOffset + 16,
+        );
+      },
+    ],
+    [
+      "中央展開サイズ",
+      (archive: Buffer, centralOffset: number) => {
+        archive.writeUInt32LE(
+          archive.readUInt32LE(centralOffset + 24) + 1,
+          centralOffset + 24,
+        );
+      },
+    ],
+    [
+      "中央 entry 名",
+      (archive: Buffer, centralOffset: number) => {
+        archive[centralOffset + 46] ^= 0x01;
+      },
+    ],
+    [
+      "local header offset",
+      (archive: Buffer, centralOffset: number) => {
+        archive.writeUInt32LE(
+          archive.readUInt32LE(centralOffset + 42) + 1,
+          centralOffset + 42,
+        );
+      },
+    ],
+  ])("%s の不一致を整合性エラーにする", (_, mutate) => {
+    expectPptxIntegrityError(
+      mutateFirstCentralEntry(integrityFixture(), mutate),
+    );
+  });
+
+  it.each([
+    ["zero", { maxZipEntries: 0 }],
+    ["fraction", { maxZipEntries: 1.5 }],
+    ["NaN", { maxZipEntries: Number.NaN }],
+    ["Infinity", { maxZipEntries: Number.POSITIVE_INFINITY }],
+    ["hard maximum 超過", { maxZipEntries: 5_001 }],
+  ])("不正な limit override (%s) を拒否する", (_, limits) => {
+    expect(() => readPptxSlides(integrityFixture(), limits)).toThrow(
+      expect.objectContaining({ code: "INVALID_PROCESSING_LIMITS" }),
     );
   });
 });
