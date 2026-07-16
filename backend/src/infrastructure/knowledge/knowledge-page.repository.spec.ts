@@ -32,6 +32,8 @@ interface MockOptions {
   updateCount?: number;
   ingestionFileExists?: boolean;
   knowledgeDocumentExists?: boolean;
+  knowledgeDocumentIngestionFileId?: string;
+  backgroundJobExists?: boolean;
   totalCount?: number;
   remainingCount?: number;
   rows?: KnowledgeDocumentPage[];
@@ -45,6 +47,8 @@ function makePrisma({
   updateCount = 1,
   ingestionFileExists = true,
   knowledgeDocumentExists = true,
+  knowledgeDocumentIngestionFileId = 'f1',
+  backgroundJobExists = true,
   totalCount = 1,
   remainingCount = 0,
   rows = [],
@@ -88,7 +92,18 @@ function makePrisma({
       findFirst: jest.fn<
         Promise<{ id: string } | null>,
         [Prisma.KnowledgeDocumentFindFirstArgs]
-      >(async () => (knowledgeDocumentExists ? { id: 'd1' } : null)),
+      >(async (args) =>
+        knowledgeDocumentExists &&
+        args.where?.ingestionFileId === knowledgeDocumentIngestionFileId
+          ? { id: 'd1' }
+          : null,
+      ),
+    },
+    backgroundJob: {
+      findFirst: jest.fn<
+        Promise<{ id: string } | null>,
+        [Prisma.BackgroundJobFindFirstArgs]
+      >(async () => (backgroundJobExists ? { id: 'child-job-1' } : null)),
     },
   };
 }
@@ -123,7 +138,7 @@ describe('KnowledgePageRepository', () => {
       select: { id: true },
     });
     expect(prisma.knowledgeDocument.findFirst).toHaveBeenCalledWith({
-      where: { id: 'd1', projectId: 'p1' },
+      where: { id: 'd1', projectId: 'p1', ingestionFileId: 'f1' },
       select: { id: true },
     });
     expect(prisma.knowledgeDocumentPage.create).toHaveBeenCalledWith({
@@ -186,6 +201,23 @@ describe('KnowledgePageRepository', () => {
       expect(existingPage.jobId).not.toBeNull();
     },
   );
+
+  it('rejects a same-project document that belongs to another ingestion file', async () => {
+    const prisma = makePrisma({
+      existingPage: null,
+      knowledgeDocumentIngestionFileId: 'f2',
+    });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(repo.upsertPending(pendingInput)).rejects.toThrow(
+      'Knowledge page f1:2 was not found in project p1',
+    );
+    expect(prisma.knowledgeDocument.findFirst).toHaveBeenCalledWith({
+      where: { id: 'd1', projectId: 'p1', ingestionFileId: 'f1' },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeDocumentPage.create).not.toHaveBeenCalled();
+  });
 
   it.each([
     ['ingestion file', false, true],
@@ -299,6 +331,10 @@ describe('KnowledgePageRepository', () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(prisma.backgroundJob.findFirst).toHaveBeenCalledWith({
+      where: { id: 'child-job-1', projectId: 'p1' },
+      select: { id: true },
+    });
     expect(prisma.knowledgeDocumentPage.updateMany).toHaveBeenCalledWith({
       where: { id: 'page-1', projectId: 'p1' },
       data: {
@@ -307,6 +343,26 @@ describe('KnowledgePageRepository', () => {
         error: null,
       },
     });
+  });
+
+  it('rejects a missing or cross-project child job before updating the page', async () => {
+    const prisma = makePrisma({ backgroundJobExists: false });
+    const repo = new KnowledgePageRepository(prisma);
+
+    await expect(
+      repo.markProcessing({
+        id: 'page-1',
+        projectId: 'p1',
+        jobId: 'child-job-1',
+      }),
+    ).rejects.toThrow(
+      'Background job child-job-1 was not found in project p1',
+    );
+    expect(prisma.backgroundJob.findFirst).toHaveBeenCalledWith({
+      where: { id: 'child-job-1', projectId: 'p1' },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeDocumentPage.updateMany).not.toHaveBeenCalled();
   });
 
   it('scopes success state and all extraction fields by project', async () => {

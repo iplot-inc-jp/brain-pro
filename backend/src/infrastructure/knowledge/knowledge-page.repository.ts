@@ -32,6 +32,11 @@ export interface KnowledgePagePrismaClient {
       args: Prisma.KnowledgeDocumentFindFirstArgs,
     ): Promise<{ id: string } | null>;
   };
+  backgroundJob: {
+    findFirst(
+      args: Prisma.BackgroundJobFindFirstArgs,
+    ): Promise<{ id: string } | null>;
+  };
 }
 
 export interface UpsertPendingKnowledgePageInput {
@@ -79,6 +84,13 @@ export class KnowledgePageNotFoundError extends Error {
   constructor(id: string, projectId: string) {
     super(`Knowledge page ${id} was not found in project ${projectId}`);
     this.name = 'KnowledgePageNotFoundError';
+  }
+}
+
+export class KnowledgePageJobNotFoundError extends Error {
+  constructor(id: string, projectId: string) {
+    super(`Background job ${id} was not found in project ${projectId}`);
+    this.name = 'KnowledgePageJobNotFoundError';
   }
 }
 
@@ -145,7 +157,11 @@ export class KnowledgePageRepository {
         select: { id: true },
       }),
       this.prisma.knowledgeDocument.findFirst({
-        where: { id: input.knowledgeDocumentId, projectId: input.projectId },
+        where: {
+          id: input.knowledgeDocumentId,
+          projectId: input.projectId,
+          ingestionFileId: input.ingestionFileId,
+        },
         select: { id: true },
       }),
     ]);
@@ -173,8 +189,15 @@ export class KnowledgePageRepository {
     );
   }
 
-  markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
-    return this.updateScoped(input.id, input.projectId, {
+  async markProcessing(input: ProcessingKnowledgePageInput): Promise<void> {
+    const job = await this.prisma.backgroundJob.findFirst({
+      where: { id: input.jobId, projectId: input.projectId },
+      select: { id: true },
+    });
+    if (!job) {
+      throw new KnowledgePageJobNotFoundError(input.jobId, input.projectId);
+    }
+    await this.updateScoped(input.id, input.projectId, {
       status: 'PROCESSING',
       jobId: input.jobId,
       error: null,
