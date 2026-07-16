@@ -28,6 +28,14 @@ describe('knowledge library client', () => {
     )
   })
 
+  it('serializes RAG feature and scope filters for federated search', () => {
+    const query = buildKnowledgeLibrarySearchParams({
+      ragFeatureType: 'BUSINESS_FLOW',
+      ragScopeLevel: 'OVERVIEW',
+    })
+    expect(query.toString()).toBe('ragFeatureType=BUSINESS_FLOW&ragScopeLevel=OVERVIEW')
+  })
+
   it('encodes project/item ids and sends auth when replacing memberships', async () => {
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ folderIds: ['f1'] }) })
     await knowledgeLibraryApi.replaceItemFolders('project/1', 'RAG', 'rag/1', ['f1'])

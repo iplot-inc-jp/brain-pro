@@ -1,3 +1,5 @@
+import type { RagFeatureType, RagScopeLevel } from './rag'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5021'
 
 export const KNOWLEDGE_LIBRARY_ITEM_TYPES = [
@@ -35,6 +37,8 @@ export interface KnowledgeLibrarySearchInput {
   folderId?: string
   unclassified?: boolean
   limit?: number
+  ragFeatureType?: RagFeatureType
+  ragScopeLevel?: RagScopeLevel
 }
 
 export interface KnowledgeLibrarySearchResult {
@@ -93,6 +97,8 @@ export function buildKnowledgeLibrarySearchParams(
   if (input.folderId) query.set('folderId', input.folderId)
   if (input.unclassified !== undefined) query.set('unclassified', String(input.unclassified))
   if (input.limit) query.set('limit', String(input.limit))
+  if (input.ragFeatureType) query.set('ragFeatureType', input.ragFeatureType)
+  if (input.ragScopeLevel) query.set('ragScopeLevel', input.ragScopeLevel)
   return query
 }
 

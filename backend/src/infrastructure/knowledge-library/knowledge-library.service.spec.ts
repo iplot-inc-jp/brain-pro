@@ -82,6 +82,24 @@ describe('KnowledgeLibraryService', () => {
     expect(unclassified.items.map((item) => item.itemId)).toEqual(['r2']);
   });
 
+  it('passes RAG feature and scope filters to the RAG source only', async () => {
+    await service.search('p1', {
+      ragFeatureType: 'BUSINESS_FLOW',
+      ragScopeLevel: 'OVERVIEW',
+    });
+
+    expect(prisma.ragDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        projectId: 'p1',
+        featureType: 'BUSINESS_FLOW',
+        scopeLevel: 'OVERVIEW',
+      }),
+    }));
+    expect(prisma.knowledgeDocument.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { projectId: 'p1' },
+    }));
+  });
+
   it('returns available sources with warnings when one source fails', async () => {
     prisma.ragDocument.findMany.mockRejectedValue(new Error('rag temporarily unavailable'));
     prisma.knowledgeDocument.findMany.mockResolvedValue([
@@ -94,4 +112,3 @@ describe('KnowledgeLibraryService', () => {
     expect(result.warnings).toEqual([{ source: 'RAG', message: 'rag temporarily unavailable' }]);
   });
 });
-

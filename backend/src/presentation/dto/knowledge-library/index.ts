@@ -14,7 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { KnowledgeLibraryItemType } from '@prisma/client';
+import { KnowledgeLibraryItemType, RagFeatureType, RagScopeLevel } from '@prisma/client';
 
 export class SearchKnowledgeLibraryDto {
   @IsOptional()
@@ -46,6 +46,14 @@ export class SearchKnowledgeLibraryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  @IsOptional()
+  @IsEnum(RagFeatureType)
+  ragFeatureType?: RagFeatureType;
+
+  @IsOptional()
+  @IsEnum(RagScopeLevel)
+  ragScopeLevel?: RagScopeLevel;
 }
 
 export class CreateKnowledgeFolderDto {
@@ -110,4 +118,3 @@ export class KnowledgeFolderTemplateNameDto {
   @MaxLength(120)
   name!: string;
 }
-

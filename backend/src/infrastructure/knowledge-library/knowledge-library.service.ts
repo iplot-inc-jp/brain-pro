@@ -53,6 +53,8 @@ export class KnowledgeLibraryService {
           const rows = await this.prisma.ragDocument.findMany({
             where: {
               projectId,
+              ...(input.ragFeatureType ? { featureType: input.ragFeatureType } : {}),
+              ...(input.ragScopeLevel ? { scopeLevel: input.ragScopeLevel } : {}),
               ...(textFilter
                 ? { OR: [{ title: textFilter }, { summary: textFilter }, { searchText: textFilter }] }
                 : {}),

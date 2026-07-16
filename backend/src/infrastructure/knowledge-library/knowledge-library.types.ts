@@ -1,4 +1,8 @@
-import { KnowledgeLibraryItemType } from '@prisma/client';
+import {
+  KnowledgeLibraryItemType,
+  RagFeatureType,
+  RagScopeLevel,
+} from '@prisma/client';
 
 export interface KnowledgeLibrarySourceFile {
   label: string;
@@ -25,6 +29,8 @@ export interface KnowledgeLibrarySearchInput {
   folderId?: string;
   unclassified?: boolean;
   limit?: number;
+  ragFeatureType?: RagFeatureType;
+  ragScopeLevel?: RagScopeLevel;
 }
 
 export interface KnowledgeLibrarySearchWarning {
@@ -37,4 +43,3 @@ export interface KnowledgeLibrarySearchResult {
   warnings: KnowledgeLibrarySearchWarning[];
   totals: Record<KnowledgeLibraryItemType | 'all', number>;
 }
-
