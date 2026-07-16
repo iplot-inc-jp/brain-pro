@@ -76,11 +76,17 @@ export class KnowledgeFolderService {
     });
   }
 
-  async move(projectId: string, folderId: string, parentId: string | null, order = 0) {
+  async move(
+    projectId: string,
+    folderId: string,
+    parentId: string | null | undefined,
+    order = 0,
+  ) {
     const folder = await this.requireFolder(projectId, folderId);
-    if (parentId === folderId) throw new BadRequestException('folder cannot be its own parent');
-    if (parentId) {
-      let candidate: KnowledgeFolder | null = await this.requireFolder(projectId, parentId, true);
+    const nextParentId = parentId === undefined ? folder.parentId : parentId;
+    if (nextParentId === folderId) throw new BadRequestException('folder cannot be its own parent');
+    if (nextParentId) {
+      let candidate: KnowledgeFolder | null = await this.requireFolder(projectId, nextParentId, true);
       while (candidate) {
         if (candidate.id === folder.id || candidate.parentId === folder.id) {
           throw new BadRequestException('folder move would create a cycle');
@@ -95,7 +101,7 @@ export class KnowledgeFolderService {
     }
     return this.prisma.knowledgeFolder.update({
       where: { id: folderId },
-      data: { parentId, order },
+      data: { parentId: nextParentId, order },
     });
   }
 
@@ -230,6 +236,18 @@ export class KnowledgeFolderService {
     });
     if (!template) throw new NotFoundException('folder template not found');
     return this.prisma.knowledgeFolderTemplate.delete({ where: { id: templateId } });
+  }
+
+  async renameTemplate(projectId: string, templateId: string, name: string) {
+    const project = await this.requireProject(projectId);
+    const template = await this.prisma.knowledgeFolderTemplate.findFirst({
+      where: { id: templateId, organizationId: project.organizationId },
+    });
+    if (!template) throw new NotFoundException('folder template not found');
+    return this.prisma.knowledgeFolderTemplate.update({
+      where: { id: templateId },
+      data: { name: this.requireName(name) },
+    });
   }
 
   async applyTemplate(projectId: string, templateId: string) {
