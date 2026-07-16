@@ -3,12 +3,7 @@ import {
   type Document as XmlDocument,
   type Element as XmlElement,
 } from "@xmldom/xmldom";
-import {
-  type AsyncFlateStreamHandler,
-  strFromU8,
-  Unzip,
-  UnzipInflate,
-} from "fflate";
+import { Inflate, strFromU8 } from "fflate";
 import { PDFDocument } from "pdf-lib";
 
 export type DocumentPageParseErrorCode =
@@ -509,24 +504,23 @@ function parseZipArchiveDirectory(
     }
     let recordEnd = dataEnd;
     if (usesDataDescriptor) {
-      let descriptorOffset = dataEnd;
-      if (
-        descriptorOffset + 4 <= centralDirectoryOffset &&
-        readZipUint32(bytes, descriptorOffset) === 0x08074b50
-      ) {
-        descriptorOffset += 4;
-      }
-      if (
-        descriptorOffset + 12 > centralDirectoryOffset ||
-        readZipUint32(bytes, descriptorOffset) !== crc32 ||
-        readZipUint32(bytes, descriptorOffset + 4) !== compressedSize ||
-        readZipUint32(bytes, descriptorOffset + 8) !== uncompressedSize
-      ) {
+      const unsignedDescriptorMatches =
+        dataEnd + 12 <= centralDirectoryOffset &&
+        readZipUint32(bytes, dataEnd) === crc32 &&
+        readZipUint32(bytes, dataEnd + 4) === compressedSize &&
+        readZipUint32(bytes, dataEnd + 8) === uncompressedSize;
+      const signedDescriptorMatches =
+        dataEnd + 16 <= centralDirectoryOffset &&
+        readZipUint32(bytes, dataEnd) === 0x08074b50 &&
+        readZipUint32(bytes, dataEnd + 4) === crc32 &&
+        readZipUint32(bytes, dataEnd + 8) === compressedSize &&
+        readZipUint32(bytes, dataEnd + 12) === uncompressedSize;
+      if (!unsignedDescriptorMatches && !signedDescriptorMatches) {
         return zipIntegrityError(
           "ZIP data descriptor does not match central metadata",
         );
       }
-      recordEnd = descriptorOffset + 12;
+      recordEnd = dataEnd + (unsignedDescriptorMatches ? 12 : 16);
     }
 
     entries.set(name, {
@@ -550,13 +544,26 @@ function parseZipArchiveDirectory(
   const entriesByOffset = [...entries.values()].sort(
     (left, right) => left.localHeaderOffset - right.localHeaderOffset,
   );
+  if (
+    (entriesByOffset.length === 0 && centralDirectoryOffset !== 0) ||
+    (entriesByOffset.length > 0 && entriesByOffset[0].localHeaderOffset !== 0)
+  ) {
+    return zipIntegrityError("ZIP local entry sequence start is invalid");
+  }
   for (let index = 1; index < entriesByOffset.length; index += 1) {
     if (
-      entriesByOffset[index - 1].recordEnd >
+      entriesByOffset[index - 1].recordEnd !==
       entriesByOffset[index].localHeaderOffset
     ) {
-      return zipIntegrityError("ZIP local entry data overlaps another entry");
+      return zipIntegrityError("ZIP local entry sequence has a gap or overlap");
     }
+  }
+  if (
+    entriesByOffset.length > 0 &&
+    entriesByOffset[entriesByOffset.length - 1].recordEnd !==
+      centralDirectoryOffset
+  ) {
+    return zipIntegrityError("ZIP local entry sequence end is invalid");
   }
   return { entries };
 }
@@ -581,103 +588,35 @@ function extractPptxParts(
   bytes: Buffer | Uint8Array,
   limits: DocumentPageProcessingLimits,
 ): Record<string, Uint8Array> {
-  interface CompressionState {
-    compressedBytes: number;
-  }
-
   const archive = parseZipArchiveDirectory(bytes, limits);
   const files: Record<string, Uint8Array> = Object.create(null);
-  const encounteredEntries = new Set<string>();
-  const pendingCompressionStates = new Map<string, CompressionState[]>();
-  let zipEntryCount = 0;
-  let extractedEntryCount = 0;
+  const extractedEntries = [...archive.entries.values()].filter((entry) =>
+    isAllowedPptxPart(entry.name),
+  );
+  if (extractedEntries.length > limits.maxZipExtractedEntries) {
+    throw new DocumentPageParseError(
+      "PPTX",
+      "ZIP_EXTRACTED_ENTRY_COUNT_EXCEEDED",
+    );
+  }
   let totalOutputBytes = 0;
 
-  class CountingUnzipInflate {
-    static readonly compression = UnzipInflate.compression;
-    ondata: AsyncFlateStreamHandler = () => undefined;
-    private readonly decoder = new UnzipInflate();
-    private readonly state: CompressionState;
-
-    constructor(filename: string) {
-      const states = pendingCompressionStates.get(filename);
-      const state = states?.shift();
-      if (!state) throw new Error("Missing ZIP compression state");
-      if (states?.length === 0) pendingCompressionStates.delete(filename);
-      this.state = state;
-      this.decoder.ondata = (error, chunk, final) => {
-        this.ondata(error, chunk, final);
-      };
-    }
-
-    push(chunk: Uint8Array, final: boolean): void {
-      this.state.compressedBytes += chunk.byteLength;
-      this.decoder.push(chunk, final);
-    }
-  }
-
-  const unzip = new Unzip((file) => {
-    zipEntryCount += 1;
-    if (zipEntryCount > limits.maxZipEntries) {
-      file.terminate();
-      throw new DocumentPageParseError("PPTX", "ZIP_ENTRY_COUNT_EXCEEDED");
-    }
-    const centralEntry = archive.entries.get(file.name);
-    if (!centralEntry || encounteredEntries.has(file.name)) {
-      file.terminate();
-      return zipIntegrityError(
-        "ZIP local entries do not match central metadata",
-      );
-    }
-    encounteredEntries.add(file.name);
-    if (
-      file.compression !== centralEntry.compression ||
-      (file.size !== undefined && file.size !== centralEntry.compressedSize) ||
-      (file.originalSize !== undefined &&
-        file.originalSize !== centralEntry.uncompressedSize)
-    ) {
-      file.terminate();
-      return zipIntegrityError(
-        "ZIP streamed entry metadata does not match central metadata",
-      );
-    }
-    if (!isAllowedPptxPart(file.name)) {
-      file.terminate();
-      return;
-    }
-
-    extractedEntryCount += 1;
-    if (extractedEntryCount > limits.maxZipExtractedEntries) {
-      file.terminate();
-      throw new DocumentPageParseError(
-        "PPTX",
-        "ZIP_EXTRACTED_ENTRY_COUNT_EXCEEDED",
-      );
-    }
+  for (const entry of extractedEntries) {
     validateDeclaredZipBounds(
       {
-        originalSize: centralEntry.uncompressedSize,
-        size: centralEntry.compressedSize,
-        terminate: () => file.terminate(),
+        originalSize: entry.uncompressedSize,
+        size: entry.compressedSize,
+        terminate: () => undefined,
       },
       limits,
     );
 
-    const compressionState: CompressionState = { compressedBytes: 0 };
-    if (file.compression === UnzipInflate.compression) {
-      const states = pendingCompressionStates.get(file.name) ?? [];
-      states.push(compressionState);
-      pendingCompressionStates.set(file.name, states);
-    }
     const chunks: Uint8Array[] = [];
     let entryOutputBytes = 0;
     let entryCrc32 = 0xffffffff;
-    file.ondata = (error, chunk, final) => {
-      if (error) {
-        if (error instanceof DocumentPageParseError) throw error;
-        return zipIntegrityError("ZIP entry decompression failed", error);
-      }
-
+    let compressedInputBytes = 0;
+    let reachedFinalOutput = false;
+    const onOutput = (chunk: Uint8Array, final: boolean): void => {
       entryOutputBytes += chunk.byteLength;
       totalOutputBytes += chunk.byteLength;
       entryCrc32 = updateCrc32(entryCrc32, chunk);
@@ -687,14 +626,9 @@ function extractPptxParts(
       if (totalOutputBytes > limits.maxZipTotalOutputBytes) {
         throw new DocumentPageParseError("PPTX", "ZIP_TOTAL_BYTES_EXCEEDED");
       }
-      const compressedBytes =
-        final && file.compression === UnzipInflate.compression
-          ? compressionState.compressedBytes
-          : centralEntry.compressedSize;
       if (
-        compressedBytes !== undefined &&
-        compressionRatio(entryOutputBytes, compressedBytes) >
-          limits.maxZipCompressionRatio
+        compressionRatio(entryOutputBytes, entry.compressedSize) >
+        limits.maxZipCompressionRatio
       ) {
         throw new DocumentPageParseError(
           "PPTX",
@@ -703,39 +637,53 @@ function extractPptxParts(
       }
 
       if (chunk.byteLength > 0) chunks.push(chunk);
-      if (final) {
-        const actualCompressedBytes =
-          file.compression === 0
-            ? entryOutputBytes
-            : compressionState.compressedBytes;
-        if (
-          actualCompressedBytes !== centralEntry.compressedSize ||
-          entryOutputBytes !== centralEntry.uncompressedSize ||
-          (entryCrc32 ^ 0xffffffff) >>> 0 !== centralEntry.crc32
-        ) {
-          return zipIntegrityError(
-            "ZIP entry CRC or size does not match central metadata",
-          );
-        }
-        files[file.name] = joinChunks(chunks, entryOutputBytes);
-      }
+      if (final) reachedFinalOutput = true;
     };
-    file.start();
-  });
-  unzip.register(CountingUnzipInflate);
 
-  const inputChunkBytes = 64 * 1024;
-  for (let offset = 0; offset < bytes.byteLength; offset += inputChunkBytes) {
-    const end = Math.min(offset + inputChunkBytes, bytes.byteLength);
-    unzip.push(bytes.subarray(offset, end), end === bytes.byteLength);
-  }
-  if (
-    zipEntryCount !== archive.entries.size ||
-    encounteredEntries.size !== archive.entries.size
-  ) {
-    return zipIntegrityError(
-      "ZIP streamed entry set does not match central metadata",
-    );
+    try {
+      const inputChunkBytes = 64 * 1024;
+      if (entry.compression === 0) {
+        if (entry.compressedSize === 0) onOutput(new Uint8Array(), true);
+        for (
+          let offset = entry.dataOffset;
+          offset < entry.dataEnd;
+          offset += inputChunkBytes
+        ) {
+          const end = Math.min(offset + inputChunkBytes, entry.dataEnd);
+          const chunk = bytes.subarray(offset, end);
+          compressedInputBytes += chunk.byteLength;
+          onOutput(chunk, end === entry.dataEnd);
+        }
+      } else {
+        const inflate = new Inflate(onOutput);
+        for (
+          let offset = entry.dataOffset;
+          offset < entry.dataEnd;
+          offset += inputChunkBytes
+        ) {
+          const end = Math.min(offset + inputChunkBytes, entry.dataEnd);
+          const chunk = bytes.subarray(offset, end);
+          compressedInputBytes += chunk.byteLength;
+          inflate.push(chunk, end === entry.dataEnd);
+        }
+      }
+    } catch (error) {
+      if (error instanceof DocumentPageParseError) throw error;
+      return zipIntegrityError("ZIP entry decompression failed", error);
+    }
+
+    const actualCrc32 = (entryCrc32 ^ 0xffffffff) >>> 0;
+    if (
+      !reachedFinalOutput ||
+      compressedInputBytes !== entry.compressedSize ||
+      entryOutputBytes !== entry.uncompressedSize ||
+      actualCrc32 !== entry.crc32
+    ) {
+      return zipIntegrityError(
+        "ZIP entry CRC or size does not match central metadata",
+      );
+    }
+    files[entry.name] = joinChunks(chunks, entryOutputBytes);
   }
   return files;
 }

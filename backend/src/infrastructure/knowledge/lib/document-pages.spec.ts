@@ -21,14 +21,23 @@ function makePptx(files: Record<string, string | Uint8Array>): Buffer {
 }
 
 function makeStreamingPptx(path: string, contents: string): Buffer {
+  return makeStreamingPptxEntries([[path, strToU8(contents)]]);
+}
+
+function makeStreamingPptxEntries(
+  entries: Array<[path: string, contents: Uint8Array]>,
+  level: 0 | 9 = 9,
+): Buffer {
   const chunks: Uint8Array[] = [];
   const zip = new Zip((error, chunk) => {
     if (error) throw error;
     chunks.push(chunk);
   });
-  const file = new ZipDeflate(path, { level: 9 });
-  zip.add(file);
-  file.push(strToU8(contents), true);
+  for (const [path, contents] of entries) {
+    const file = new ZipDeflate(path, { level });
+    zip.add(file);
+    file.push(contents, true);
+  }
   zip.end();
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
@@ -44,6 +53,42 @@ function mutateFirstCentralEntry(
   if (centralOffset < 0) throw new Error("central directory not found");
   mutate(archive, centralOffset);
   return archive;
+}
+
+function findCentralEntry(source: Buffer, expectedName: string): number {
+  let offset = source.indexOf(CENTRAL_DIRECTORY_SIGNATURE);
+  while (offset >= 0) {
+    const filenameBytes = source.readUInt16LE(offset + 28);
+    const extraBytes = source.readUInt16LE(offset + 30);
+    const commentBytes = source.readUInt16LE(offset + 32);
+    const name = source
+      .subarray(offset + 46, offset + 46 + filenameBytes)
+      .toString();
+    if (name === expectedName) return offset;
+    offset += 46 + filenameBytes + extraBytes + commentBytes;
+    if (
+      !source.subarray(offset, offset + 4).equals(CENTRAL_DIRECTORY_SIGNATURE)
+    ) {
+      break;
+    }
+  }
+  throw new Error(`central entry not found: ${expectedName}`);
+}
+
+function compressedDataRange(
+  source: Buffer,
+  centralOffset: number,
+): { dataOffset: number; dataEnd: number } {
+  const localOffset = source.readUInt32LE(centralOffset + 42);
+  const dataOffset =
+    localOffset +
+    30 +
+    source.readUInt16LE(localOffset + 26) +
+    source.readUInt16LE(localOffset + 28);
+  return {
+    dataOffset,
+    dataEnd: dataOffset + source.readUInt32LE(centralOffset + 20),
+  };
 }
 
 function expectPptxIntegrityError(bytes: Uint8Array): void {
@@ -373,6 +418,70 @@ describe("readPptxSlides", () => {
     expect(() => readPptxSlides(pptx, { maxZipCompressionRatio: 2 })).toThrow(
       expect.objectContaining({ code: "ZIP_COMPRESSION_RATIO_EXCEEDED" }),
     );
+  });
+
+  it("DEFLATE payload 内の data descriptor signature を境界扱いしない", () => {
+    const marker = Buffer.from([0x50, 0x4b, 0x07, 0x08]);
+    const pptx = makeStreamingPptxEntries(
+      [
+        [
+          "ppt/media/marker.png",
+          Buffer.concat([Buffer.from([1, 2]), marker, Buffer.from([3, 4])]),
+        ],
+        [
+          "ppt/slides/slide1.xml",
+          strToU8("<p:sld><a:t>exact range</a:t></p:sld>"),
+        ],
+      ],
+      0,
+    );
+    const markerCentralOffset = findCentralEntry(pptx, "ppt/media/marker.png");
+    const { dataOffset, dataEnd } = compressedDataRange(
+      pptx,
+      markerCentralOffset,
+    );
+    expect(pptx.subarray(dataOffset, dataEnd).includes(marker)).toBe(true);
+
+    expect(readPptxSlides(pptx)[0].sourceText).toBe("exact range");
+  });
+
+  it("CRC が signature と同値の署名なし data descriptor を受理する", () => {
+    const mediaPath = "ppt/media/crc.png";
+    const archive = makeStreamingPptxEntries(
+      [
+        [
+          "ppt/slides/slide1.xml",
+          strToU8("<p:sld><a:t>unsigned descriptor</a:t></p:sld>"),
+        ],
+        [mediaPath, new Uint8Array([172, 10, 122, 213])],
+      ],
+      0,
+    );
+    const mediaCentralOffset = findCentralEntry(archive, mediaPath);
+    expect(archive.readUInt32LE(mediaCentralOffset + 16)).toBe(0x08074b50);
+    const { dataEnd: descriptorOffset } = compressedDataRange(
+      archive,
+      mediaCentralOffset,
+    );
+    expect(archive.readUInt32LE(descriptorOffset)).toBe(0x08074b50);
+
+    const pptx = Buffer.concat([
+      archive.subarray(0, descriptorOffset),
+      archive.subarray(descriptorOffset + 4),
+    ]);
+    const eocdOffset = pptx.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    pptx.writeUInt32LE(pptx.readUInt32LE(eocdOffset + 16) - 4, eocdOffset + 16);
+
+    expect(readPptxSlides(pptx)[0].sourceText).toBe("unsigned descriptor");
+  });
+
+  it("ZIP64 sentinel を安定した整合性コードで拒否する", () => {
+    const pptx = integrityFixture();
+    const eocdOffset = pptx.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    pptx.writeUInt16LE(0xffff, eocdOffset + 8);
+    pptx.writeUInt16LE(0xffff, eocdOffset + 10);
+
+    expectPptxIntegrityError(pptx);
   });
 
   it("中央ディレクトリと EOCD がない ZIP を拒否する", () => {
