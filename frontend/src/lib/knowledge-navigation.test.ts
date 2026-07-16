@@ -12,12 +12,22 @@ describe('buildKnowledgeNavigation', () => {
     expect(navigation.knowledge.items.map((item) => item.name)).toEqual([
       'チャット履歴',
       'リソース履歴',
+      'フォルダ',
       'ナレッジ取り込み',
       'ナレッジグラフ',
       'ナレッジ一覧編集',
       'RAG索引',
       'ナレッジ設定',
     ])
+  })
+
+  it('places the folder workspace after resource history', () => {
+    const items = buildKnowledgeNavigation('project-1').knowledge.items
+    const resourceIndex = items.findIndex((item) => item.name === 'リソース履歴')
+    expect(items[resourceIndex + 1]).toMatchObject({
+      name: 'フォルダ',
+      href: '/dashboard/projects/project-1/knowledge/folders',
+    })
   })
 
   it('scopes every navigation target to the selected project', () => {
