@@ -69,12 +69,30 @@ describe('ResumeBatchUseCase paged hierarchy', () => {
       status: 'SUCCEEDED',
     }, 'file-1');
     file.setJobId('parent-1');
+    const completedBatch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const completedFile = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    completedFile.setJobId('parent-1');
     const batches = {
-      findById: jest.fn(async () => batch),
+      findById: jest.fn()
+        .mockResolvedValueOnce(batch)
+        .mockResolvedValueOnce(completedBatch),
       save: jest.fn(),
     };
     const files = {
-      findByBatchId: jest.fn(async () => [file]),
+      findByBatchId: jest.fn()
+        .mockResolvedValueOnce([file])
+        .mockResolvedValueOnce([completedFile]),
       save: jest.fn(),
       setJobId: jest.fn(),
     };
@@ -112,19 +130,35 @@ describe('ResumeBatchUseCase paged hierarchy', () => {
       status: 'FAILED',
     }, 'file-1');
     file.setJobId('parent-1');
+    const completedBatch = IngestionBatch.create(
+      { projectId: 'p1', name: 'batch', status: 'SUCCEEDED' },
+      'batch-1',
+    );
+    const completedFile = IngestionFile.create({
+      batchId: batch.id,
+      projectId: 'p1',
+      sourceType: 'UPLOAD',
+      filename: 'deck.pdf',
+      mimeType: 'application/pdf',
+      blobUrl: 'blob://original',
+      status: 'SUCCEEDED',
+    }, 'file-1');
+    completedFile.setJobId('parent-1');
     const batches = {
-      findById: jest.fn(async () => batch),
+      findById: jest.fn()
+        .mockResolvedValueOnce(batch)
+        .mockResolvedValueOnce(completedBatch),
       save: jest.fn(),
     };
     const files = {
-      findByBatchId: jest.fn(async () => [file]),
+      findByBatchId: jest.fn()
+        .mockResolvedValueOnce([file])
+        .mockResolvedValueOnce([completedFile]),
       save: jest.fn(async () => undefined),
       setJobId: jest.fn(),
     };
     const jobs = {
       resumeIngestionParent: jest.fn(async () => {
-        file.update({ status: 'SUCCEEDED', progress: 100 });
-        batch.update({ status: 'SUCCEEDED', finishedAt: new Date() });
         return { id: 'parent-1', status: 'SUCCEEDED', recoveryTriggered: false };
       }),
       enqueue: jest.fn(),
@@ -144,6 +178,7 @@ describe('ResumeBatchUseCase paged hierarchy', () => {
 
     expect(result.status).toBe('SUCCEEDED');
     expect(result.files[0].status).toBe('SUCCEEDED');
+    expect(batch.status).toBe('FAILED');
     expect(batches.save).not.toHaveBeenCalled();
     expect(jobs.enqueue).not.toHaveBeenCalled();
   });

@@ -130,9 +130,10 @@ export class ResumeBatchUseCase {
       await this.batchRepository.save(batch);
     }
 
+    const refreshedBatch = await this.batchRepository.findById(batch.id);
     const updated = await this.fileRepository.findByBatchId(batch.id);
     return {
-      ...toIngestionBatchOutput(batch),
+      ...toIngestionBatchOutput(refreshedBatch ?? batch),
       files: updated.map((f) => toIngestionFileOutput(f)),
     };
   }
