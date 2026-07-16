@@ -528,6 +528,7 @@ import { LiveblocksTokenService } from './infrastructure/services/liveblocks-tok
 import { RagController } from './presentation/controllers/rag.controller';
 import { RagSourceService } from './infrastructure/rag/rag-source.service';
 import { RagIndexService } from './infrastructure/rag/rag-index.service';
+import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
 
 @Module({
   imports: [
@@ -1135,6 +1136,7 @@ import { RagIndexService } from './infrastructure/rag/rag-index.service';
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,
+    RagPromptService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
     // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）
