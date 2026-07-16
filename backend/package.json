@@ -41,6 +41,7 @@
     "@upstash/qstash": "^2.11.0",
     "@upstash/redis": "^1.38.0",
     "@vercel/blob": "^2.4.0",
+    "@xmldom/xmldom": "^0.9.10",
     "bcrypt": "^5.1.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",

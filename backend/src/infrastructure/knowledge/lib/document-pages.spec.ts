@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from "fflate";
+import { strToU8, Zip, ZipDeflate, zipSync } from "fflate";
 import { PDFDocument } from "pdf-lib";
 import {
   DocumentPageParseError,
@@ -17,6 +17,19 @@ function makePptx(files: Record<string, string | Uint8Array>): Buffer {
       ),
     ),
   );
+}
+
+function makeStreamingPptx(path: string, contents: string): Buffer {
+  const chunks: Uint8Array[] = [];
+  const zip = new Zip((error, chunk) => {
+    if (error) throw error;
+    chunks.push(chunk);
+  });
+  const file = new ZipDeflate(path, { level: 9 });
+  zip.add(file);
+  file.push(strToU8(contents), true);
+  zip.end();
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
 }
 
 describe("splitPdfPages", () => {
@@ -41,6 +54,59 @@ describe("splitPdfPages", () => {
       new DocumentPageParseError("PDF"),
     );
   });
+
+  it("ページ数上限を超える PDF をリソース制限エラーにする", async () => {
+    const source = await PDFDocument.create();
+    source.addPage();
+    source.addPage();
+    const splitWithLimits = splitPdfPages as (
+      bytes: Uint8Array,
+      limits: { maxPdfPages: number },
+    ) => ReturnType<typeof splitPdfPages>;
+
+    await expect(
+      splitWithLimits(await source.save(), { maxPdfPages: 1 }),
+    ).rejects.toMatchObject({
+      name: "DocumentPageParseError",
+      code: "PDF_PAGE_COUNT_EXCEEDED",
+    });
+  });
+
+  it("分割後 PDF の合計出力上限を超えたら中断する", async () => {
+    const source = await PDFDocument.create();
+    source.addPage();
+    source.addPage();
+    const splitWithLimits = splitPdfPages as (
+      bytes: Uint8Array,
+      limits: { maxPdfTotalOutputBytes: number },
+    ) => ReturnType<typeof splitPdfPages>;
+
+    await expect(
+      splitWithLimits(await source.save(), { maxPdfTotalOutputBytes: 1 }),
+    ).rejects.toMatchObject({
+      name: "DocumentPageParseError",
+      code: "PDF_TOTAL_OUTPUT_BYTES_EXCEEDED",
+    });
+  });
+
+  it.each([
+    ["入力", { maxInputBytes: 1 }, "INPUT_BYTES_EXCEEDED"],
+    ["1ページ出力", { maxPdfPageOutputBytes: 1 }, "PDF_PAGE_BYTES_EXCEEDED"],
+  ])("PDF の%s上限を強制する", async (_, limits, code) => {
+    const source = await PDFDocument.create();
+    source.addPage();
+    const splitWithLimits = splitPdfPages as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof splitPdfPages>;
+
+    await expect(splitWithLimits(await source.save(), limits)).rejects.toMatchObject(
+      {
+        name: "DocumentPageParseError",
+        code,
+      },
+    );
+  });
 });
 
 describe("readPptxSlides", () => {
@@ -54,13 +120,69 @@ describe("readPptxSlides", () => {
 
     const slides = readPptxSlides(pptx);
 
-    expect(slides.map((slide) => slide.pageNumber)).toEqual([2, 3, 10]);
+    expect(slides.map((slide) => slide.pageNumber)).toEqual([1, 2, 3]);
+    expect(slides.map((slide) => slide.sourcePartNumber)).toEqual([2, 3, 10]);
     expect(slides.map((slide) => slide.sourceText)).toEqual([
       `A & B <tag>\nA B "Q" 'P'`,
       "",
       "ten",
     ]);
     expect(slides.map((slide) => slide.images)).toEqual([[], [], []]);
+  });
+
+  it("presentation.xml のスライド一覧を正規順序として使う", () => {
+    const pptx = makePptx({
+      "ppt/presentation.xml": `
+        <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+          <p:sldIdLst>
+            <p:sldId id="256" r:id="rIdTen" />
+            <p:sldId id="257" r:id="rIdTwo" />
+          </p:sldIdLst>
+        </p:presentation>`,
+      "ppt/_rels/presentation.xml.rels": `
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rIdTwo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml" />
+          <Relationship Id="rIdTen" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide10.xml" />
+        </Relationships>`,
+      "ppt/slides/slide2.xml": "<p:sld><a:t>two</a:t></p:sld>",
+      "ppt/slides/slide10.xml": "<p:sld><a:t>ten</a:t></p:sld>",
+    });
+
+    const slides = readPptxSlides(pptx);
+
+    expect(slides.map((slide) => slide.pageNumber)).toEqual([1, 2]);
+    expect(slides.map((slide) => slide.sourceText)).toEqual(["ten", "two"]);
+    expect(slides.map((slide) => slide.sourcePartNumber)).toEqual([10, 2]);
+  });
+
+  it("名前空間 URI で代替接頭辞と CDATA のテキストを抽出する", () => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml": `
+        <x:sld xmlns:x="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:d="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <d:t><![CDATA[A < B & C]]></d:t>
+        </x:sld>`,
+    });
+
+    expect(readPptxSlides(pptx)[0].sourceText).toBe("A < B & C");
+  });
+
+  it("不正なスライド XML を解析エラーにして原因を保持する", () => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml": `
+        <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+          <a:t>broken</p:sld>`,
+    });
+
+    expect(() => readPptxSlides(pptx)).toThrow(
+      expect.objectContaining({
+        name: "DocumentPageParseError",
+        code: "INVALID_DOCUMENT",
+        cause: expect.anything(),
+      }),
+    );
   });
 
   it("各スライド自身の画像リレーションだけを解決し、外部・欠損・非画像を無視する", () => {
@@ -107,6 +229,40 @@ describe("readPptxSlides", () => {
     ]);
   });
 
+  it.each([
+    "../../../../ppt/media/secret.png",
+    "%2e%2e/%2e%2e/%2e%2e/ppt/media/secret.png",
+  ])("パッケージルートを越える画像 Target %s を拒否する", (target) => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml": "<p:sld />",
+      "ppt/slides/_rels/slide1.xml.rels": `
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${target}" />
+        </Relationships>`,
+      "ppt/media/secret.png": new Uint8Array([1]),
+    });
+
+    expect(() => readPptxSlides(pptx)).toThrow(
+      expect.objectContaining({ code: "UNSAFE_RELATIONSHIP_TARGET" }),
+    );
+  });
+
+  it("パッケージ絶対パスの内部画像 Target を解決する", () => {
+    const pptx = makePptx({
+      "ppt/slides/slide1.xml": "<p:sld />",
+      "ppt/slides/_rels/slide1.xml.rels": `
+        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="/ppt/media/absolute.png" />
+        </Relationships>`,
+      "ppt/media/absolute.png": new Uint8Array([9]),
+    });
+
+    expect(readPptxSlides(pptx)[0].images[0]).toMatchObject({
+      mimeType: "image/png",
+      bytes: new Uint8Array([9]),
+    });
+  });
+
   it("壊れた ZIP は明確な解析エラーにする", () => {
     expect(() => readPptxSlides(Buffer.from("not a zip"))).toThrow(
       new DocumentPageParseError("PPTX"),
@@ -118,6 +274,75 @@ describe("readPptxSlides", () => {
 
     expect(() => readPptxSlides(pptx)).toThrow(
       new DocumentPageParseError("PPTX"),
+    );
+  });
+
+  it.each([
+    [
+      "ZIP 全エントリ数",
+      makePptx({
+        "ppt/slides/slide1.xml": "<p:sld />",
+        "ignored/1": "x",
+        "ignored/2": "x",
+      }),
+      { maxZipEntries: 2 },
+      "ZIP_ENTRY_COUNT_EXCEEDED",
+    ],
+    [
+      "展開対象エントリ数",
+      makePptx({
+        "ppt/slides/slide1.xml": "<p:sld />",
+        "ppt/slides/slide2.xml": "<p:sld />",
+      }),
+      { maxZipExtractedEntries: 1 },
+      "ZIP_EXTRACTED_ENTRY_COUNT_EXCEEDED",
+    ],
+    [
+      "単一エントリ出力",
+      makePptx({
+        "ppt/slides/slide1.xml": `<p:sld><a:t>${"x".repeat(512)}</a:t></p:sld>`,
+      }),
+      { maxZipEntryOutputBytes: 100 },
+      "ZIP_ENTRY_BYTES_EXCEEDED",
+    ],
+    [
+      "合計展開出力",
+      makePptx({
+        "ppt/slides/slide1.xml": `<p:sld><a:t>${"x".repeat(80)}</a:t></p:sld>`,
+        "ppt/slides/slide2.xml": `<p:sld><a:t>${"y".repeat(80)}</a:t></p:sld>`,
+      }),
+      { maxZipTotalOutputBytes: 150 },
+      "ZIP_TOTAL_BYTES_EXCEEDED",
+    ],
+    [
+      "圧縮率",
+      makePptx({
+        "ppt/slides/slide1.xml": `<p:sld><a:t>${"z".repeat(10_000)}</a:t></p:sld>`,
+      }),
+      { maxZipCompressionRatio: 2 },
+      "ZIP_COMPRESSION_RATIO_EXCEEDED",
+    ],
+  ])("%sの安全上限を強制する", (_, pptx, limits, code) => {
+    const readWithLimits = readPptxSlides as (
+      bytes: Uint8Array,
+      limits: Record<string, number>,
+    ) => ReturnType<typeof readPptxSlides>;
+
+    expect(() => readWithLimits(pptx, limits)).toThrow(
+      expect.objectContaining({ name: "DocumentPageParseError", code }),
+    );
+  });
+
+  it("data descriptor 形式でも実測圧縮率上限を強制する", () => {
+    const pptx = makeStreamingPptx(
+      "ppt/slides/slide1.xml",
+      `<p:sld><a:t>${"z".repeat(10_000)}</a:t></p:sld>`,
+    );
+
+    expect(() =>
+      readPptxSlides(pptx, { maxZipCompressionRatio: 2 }),
+    ).toThrow(
+      expect.objectContaining({ code: "ZIP_COMPRESSION_RATIO_EXCEEDED" }),
     );
   });
 });
