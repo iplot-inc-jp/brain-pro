@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next'
+import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { Toaster } from '@/components/ui/toaster'
@@ -48,6 +50,9 @@ export default function RootLayout({
           {children}
           <Toaster />
         </Providers>
+        {/* Vercel モニタリング（本番のみ計測。アクセス解析 + Core Web Vitals） */}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )
