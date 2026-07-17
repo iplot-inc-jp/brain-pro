@@ -506,6 +506,8 @@ import { BlobStorageService } from './infrastructure/services/blob-storage.servi
 import { FileExtractionService } from './infrastructure/knowledge/file-extraction.service';
 import { KnowledgeIngestionService } from './infrastructure/knowledge/knowledge-ingestion.service';
 import { KnowledgePageRepository } from './infrastructure/knowledge/knowledge-page.repository';
+import { KnowledgeFolderService } from './infrastructure/knowledge-library/knowledge-folder.service';
+import { KnowledgeLibraryService } from './infrastructure/knowledge-library/knowledge-library.service';
 import { KnowledgeDocumentExtractService } from './infrastructure/knowledge/knowledge-document-extract.service';
 import {
   IngestionBatchProjectController,
@@ -535,6 +537,7 @@ import { IssueLiveblocksTokenUseCase } from './application/use-cases/liveblocks/
 import { GetAllAccessibleIngestionBatchesUseCase } from './application/use-cases/ingestion/get-all-accessible-ingestion-batches.use-case';
 import { LiveblocksTokenService } from './infrastructure/services/liveblocks-token.service';
 import { RagController } from './presentation/controllers/rag.controller';
+import { KnowledgeLibraryController } from './presentation/controllers/knowledge-library.controller';
 import { RagSourceService } from './infrastructure/rag/rag-source.service';
 import { RagIndexService } from './infrastructure/rag/rag-index.service';
 import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
@@ -698,6 +701,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     KnowledgeRelationController,
     KnowledgeSettingsController,
     RagController,
+    KnowledgeLibraryController,
     // Google Drive ソースアダプタ（Phase 3）
     DriveController,
     // Liveblocks リアルタイム・プレゼンス
@@ -1151,6 +1155,8 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     ExcelTaskImportService,
     KnowledgeIngestionService,
     KnowledgePageRepository,
+    KnowledgeFolderService,
+    KnowledgeLibraryService,
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,

@@ -133,7 +133,7 @@ export class RagIndexService {
           generatedById: input.userId ?? null,
           generatedAt,
         };
-        await tx.ragDocument.upsert({
+        const saved = await tx.ragDocument.upsert({
           where: {
             projectId_featureType_scopeLevel_sourceKey: {
               projectId: input.projectId,
@@ -145,6 +145,24 @@ export class RagIndexService {
           create: data,
           update: data,
         } as any);
+        await tx.ragSourceReference.deleteMany({
+          where: { ragDocumentId: saved.id },
+        });
+        const sourceFiles = source.sourceFiles ?? [];
+        if (sourceFiles.length > 0) {
+          await tx.ragSourceReference.createMany({
+            data: sourceFiles.map((file, order) => ({
+              ragDocumentId: saved.id,
+              kind: file.kind,
+              label: file.label,
+              url: file.url,
+              filename: file.filename ?? null,
+              mimeType: file.mimeType ?? null,
+              order,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       await tx.ragDocument.deleteMany({

@@ -13,12 +13,21 @@ export const RAG_FEATURE_TYPES = [
 
 export type RagFeatureType = (typeof RAG_FEATURE_TYPES)[number];
 
+export interface RagSourceFile {
+  kind: 'FILE' | 'EXTERNAL';
+  label: string;
+  url: string;
+  filename?: string | null;
+  mimeType?: string | null;
+}
+
 export interface RagSourceItem {
   sourceKey: string;
   sourceUrl: string;
   title: string;
   facts: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  sourceFiles?: RagSourceFile[];
 }
 
 export interface RagSourceBundle {

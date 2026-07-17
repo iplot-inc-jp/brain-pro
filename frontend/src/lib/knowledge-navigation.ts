@@ -2,6 +2,7 @@ import {
   Brain,
   DatabaseZap,
   FileStack,
+  FolderTree,
   Landmark,
   LibraryBig,
   ListTodo,
@@ -41,6 +42,7 @@ export function buildKnowledgeNavigation(projectId: string): {
       items: [
         { name: 'チャット履歴', href: `${base}/knowledge/chat-history`, icon: MessageSquareText },
         { name: 'リソース履歴', href: `${base}/knowledge/resource-history`, icon: LibraryBig },
+        { name: 'フォルダ', href: `${base}/knowledge/folders`, icon: FolderTree },
         { name: 'ナレッジ取り込み', href: `${base}/knowledge/ingestion`, icon: FileStack },
         { name: 'ナレッジグラフ', href: `${base}/knowledge/graph`, icon: Brain },
         {
