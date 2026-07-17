@@ -33,12 +33,8 @@ model User {
   projectMemberships  ProjectMember[]
   createdInvites      OrganizationInvite[] @relation("InviteCreatedBy")
   generatedRagDocuments RagDocument[] @relation("RagDocumentGeneratedBy")
-<<<<<<< Updated upstream
-  createdRagPromptVersions RagPromptVersion[] @relation("RagPromptVersionCreatedBy")
   createdKnowledgeFolderTemplates KnowledgeFolderTemplate[] @relation("KnowledgeFolderTemplateCreatedBy")
-=======
   createdPromptVersions PromptVersion[] @relation("PromptVersionCreatedBy")
->>>>>>> Stashed changes
 
   @@map("users")
 }
