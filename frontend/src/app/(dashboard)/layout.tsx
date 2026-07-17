@@ -1409,7 +1409,7 @@ export default function DashboardLayout({
         items: [
           { name: '処理状況', href: `${base}/jobs`, icon: Activity },
           { name: 'AI使用量', href: `${base}/ai-usage`, icon: BarChart3 },
-          { name: 'RAG設定', href: `${base}/rag/settings`, icon: SlidersHorizontal },
+          { name: 'プロンプト設定', href: `${base}/rag/settings`, icon: SlidersHorizontal },
           {
             name: '設定',
             href: `${base}/settings`,

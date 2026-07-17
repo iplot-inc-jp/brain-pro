@@ -1,10 +1,24 @@
 import { ClaudeService } from './claude.service';
+import { defaultModelFor, getPromptDefinition } from '../prompts/prompt-registry';
 
 function makeService() {
   const usageRecorder = { record: jest.fn(async () => undefined) };
+  // DBを使わずレジストリ既定値を返すPromptServiceスタブ
+  const prompts = {
+    resolve: jest.fn(async (key: string) => {
+      const def = getPromptDefinition(key);
+      if (!def) throw new Error(`unknown prompt key: ${key}`);
+      return {
+        model: defaultModelFor(def),
+        systemPrompt: def.defaultSystemPrompt,
+        promptVersionId: null,
+      };
+    }),
+  };
   const service = new ClaudeService(
     usageRecorder as never,
     { resolveForProject: jest.fn(async () => null) } as never,
+    prompts as never,
   );
   return { service, usageRecorder };
 }

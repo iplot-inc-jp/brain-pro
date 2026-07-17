@@ -10,7 +10,7 @@ import {
   RagSourceItem,
 } from './rag.types';
 import { RagSourceService } from './rag-source.service';
-import { RagPromptService } from './rag-prompt.service';
+import { PromptService } from '../prompts/prompt.service';
 
 export type RagIndexState = 'UNGENERATED' | 'FRESH' | 'STALE';
 
@@ -59,7 +59,7 @@ export class RagIndexService {
     private readonly prisma: PrismaService,
     private readonly sources: RagSourceService,
     private readonly claude: ClaudeService,
-    private readonly prompts: RagPromptService,
+    private readonly prompts: PromptService,
   ) {}
 
   async generate(input: RagGenerateInput): Promise<{
@@ -73,7 +73,7 @@ export class RagIndexService {
       input.featureType,
       input.targetId,
     );
-    const prompt = await this.prompts.getActive(input.projectId, input.userId);
+    const prompt = await this.prompts.getActive(input.projectId, 'rag', input.userId);
     await input.onProgress?.(20);
 
     const batches = [

@@ -1,4 +1,20 @@
 import { ClaudeService } from '../services/claude.service';
+import { defaultModelFor, getPromptDefinition } from '../prompts/prompt-registry';
+
+// DBを使わずレジストリ既定値を返すPromptServiceスタブ
+function makePromptStub() {
+  return {
+    resolve: jest.fn(async (key: string) => {
+      const def = getPromptDefinition(key);
+      if (!def) throw new Error(`unknown prompt key: ${key}`);
+      return {
+        model: defaultModelFor(def),
+        systemPrompt: def.defaultSystemPrompt,
+        promptVersionId: null,
+      };
+    }),
+  } as any;
+}
 
 const mockCreate = jest.fn();
 jest.mock('@anthropic-ai/sdk', () => ({
@@ -44,7 +60,7 @@ describe('ClaudeService.compressForRag', () => {
   it('既存LLM経路で圧縮し、使用モデルと検証済み文書を返す', async () => {
     const usageRecorder = { record: jest.fn(async () => {}) } as any;
     const gateway = { resolveForProject: jest.fn(async () => null) } as any;
-    const service = new ClaudeService(usageRecorder, gateway);
+    const service = new ClaudeService(usageRecorder, gateway, makePromptStub());
 
     const result = await (service.compressForRag as any)(items, 'sk-test', {
       model: 'claude-haiku-4-5',
@@ -73,6 +89,7 @@ describe('ClaudeService.compressForRag', () => {
     const service = new ClaudeService(
       { record: jest.fn(async () => {}) } as any,
       { resolveForProject: jest.fn(async () => null) } as any,
+      makePromptStub(),
     );
     await (service.compressForRag as any)(items, 'sk-test', {
       model: 'claude-sonnet-4-6',

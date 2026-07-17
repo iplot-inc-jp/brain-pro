@@ -537,10 +537,14 @@ import { IssueLiveblocksTokenUseCase } from './application/use-cases/liveblocks/
 import { GetAllAccessibleIngestionBatchesUseCase } from './application/use-cases/ingestion/get-all-accessible-ingestion-batches.use-case';
 import { LiveblocksTokenService } from './infrastructure/services/liveblocks-token.service';
 import { RagController } from './presentation/controllers/rag.controller';
+<<<<<<< Updated upstream
 import { KnowledgeLibraryController } from './presentation/controllers/knowledge-library.controller';
+=======
+import { PromptSettingsController } from './presentation/controllers/prompt-settings.controller';
+>>>>>>> Stashed changes
 import { RagSourceService } from './infrastructure/rag/rag-source.service';
 import { RagIndexService } from './infrastructure/rag/rag-index.service';
-import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
+import { PromptService } from './infrastructure/prompts/prompt.service';
 
 @Module({
   imports: [
@@ -701,7 +705,11 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     KnowledgeRelationController,
     KnowledgeSettingsController,
     RagController,
+<<<<<<< Updated upstream
     KnowledgeLibraryController,
+=======
+    PromptSettingsController,
+>>>>>>> Stashed changes
     // Google Drive ソースアダプタ（Phase 3）
     DriveController,
     // Liveblocks リアルタイム・プレゼンス
@@ -1160,7 +1168,7 @@ import { RagPromptService } from './infrastructure/rag/rag-prompt.service';
     KnowledgeDocumentExtractService,
     RagSourceService,
     RagIndexService,
-    RagPromptService,
+    PromptService,
     // Google Drive ソースアダプタ（Phase 3）
     DriveService,
     // KGブリッジ（ダイアグラムノード → KGエンティティ + 添付ドキュメント登録）

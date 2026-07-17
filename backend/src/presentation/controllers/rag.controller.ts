@@ -25,11 +25,11 @@ import {
   RagFeatureType,
 } from '../../infrastructure/rag/rag.types';
 import { RagIndexService } from '../../infrastructure/rag/rag-index.service';
-import { RagPromptService } from '../../infrastructure/rag/rag-prompt.service';
+import { PromptService } from '../../infrastructure/prompts/prompt.service';
 import {
-  RAG_ALLOWED_MODELS,
-  RAG_PROMPT_MAX_LENGTH,
-} from '../../infrastructure/rag/rag-prompt.defaults';
+  PROMPT_ALLOWED_MODELS,
+  PROMPT_MAX_LENGTH,
+} from '../../infrastructure/prompts/prompt-registry';
 import {
   CurrentUser,
   CurrentUserPayload,
@@ -49,14 +49,14 @@ class GenerateRagDto {
 }
 
 export class UpdateRagSettingsDto {
-  @ApiProperty({ enum: RAG_ALLOWED_MODELS, description: 'RAG圧縮に使うClaudeモデル' })
-  @IsIn(RAG_ALLOWED_MODELS)
+  @ApiProperty({ enum: PROMPT_ALLOWED_MODELS, description: 'RAG圧縮に使うClaudeモデル' })
+  @IsIn(PROMPT_ALLOWED_MODELS)
   model!: string;
 
-  @ApiProperty({ description: 'RAG圧縮用システムプロンプト', maxLength: RAG_PROMPT_MAX_LENGTH })
+  @ApiProperty({ description: 'RAG圧縮用システムプロンプト', maxLength: PROMPT_MAX_LENGTH })
   @IsString()
   @Matches(/\S/u, { message: 'systemPrompt を空にはできません' })
-  @MaxLength(RAG_PROMPT_MAX_LENGTH)
+  @MaxLength(PROMPT_MAX_LENGTH)
   systemPrompt!: string;
 }
 
@@ -72,7 +72,7 @@ export class RagController {
   constructor(
     private readonly jobs: JobService,
     private readonly index: RagIndexService,
-    private readonly prompts: RagPromptService,
+    private readonly prompts: PromptService,
   ) {}
 
   @Post('generate')
@@ -92,31 +92,40 @@ export class RagController {
   }
 
   @Get('settings')
-  @ApiOperation({ summary: 'RAGモデル・プロンプトの有効設定と変更履歴を取得' })
+  @ApiOperation({
+    summary: 'RAGモデル・プロンプトの有効設定と変更履歴を取得（非推奨: projects/:projectId/prompts/rag へ移行）',
+    deprecated: true,
+  })
   settings(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    return this.prompts.getSettings(projectId, user.id);
+    return this.prompts.getSettings(projectId, 'rag', user.id);
   }
 
   @Put('settings')
-  @ApiOperation({ summary: 'RAGモデル・プロンプトを新しい版として保存' })
+  @ApiOperation({
+    summary: 'RAGモデル・プロンプトを新しい版として保存（非推奨: projects/:projectId/prompts/rag へ移行）',
+    deprecated: true,
+  })
   updateSettings(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
     @Body() dto: UpdateRagSettingsDto,
   ) {
-    return this.prompts.update(projectId, dto, user.id);
+    return this.prompts.update(projectId, 'rag', dto, user.id);
   }
 
   @Post('settings/reset')
-  @ApiOperation({ summary: 'RAG設定を既定値の新しい版として復元' })
+  @ApiOperation({
+    summary: 'RAG設定を既定値の新しい版として復元（非推奨: projects/:projectId/prompts/rag へ移行）',
+    deprecated: true,
+  })
   resetSettings(
     @CurrentUser() user: CurrentUserPayload,
     @Param('projectId') projectId: string,
   ) {
-    return this.prompts.reset(projectId, user.id);
+    return this.prompts.reset(projectId, 'rag', user.id);
   }
 
   @Get('status')

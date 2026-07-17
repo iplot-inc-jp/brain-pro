@@ -4,6 +4,7 @@ import {
   LlmUsageRecorder,
   LlmUsageContext,
 } from './llm-usage-recorder.service';
+import { PromptService } from '../prompts/prompt.service';
 
 /**
  * 抽出結果の共通シェイプ（Build エージェント間で合意済み）。
@@ -36,48 +37,13 @@ export interface ExtractResult {
 export class CodeExtractionService {
   private readonly logger = new Logger(CodeExtractionService.name);
 
-  constructor(private readonly usageRecorder: LlmUsageRecorder) {}
+  constructor(
+    private readonly usageRecorder: LlmUsageRecorder,
+    private readonly prompts: PromptService,
+  ) {}
 
   private getClient(apiKey: string): Anthropic {
     return new Anthropic({ apiKey });
-  }
-
-  private model(): string {
-    return process.env.EXTRACTION_MODEL || 'claude-sonnet-4-6';
-  }
-
-  private systemPrompt(): string {
-    return `You are an expert software architect that reverse-engineers a codebase into a data/permission catalog.
-あなたはソースコードを読み解き、データ/権限カタログを逆算する専門家です。
-
-Analyze the provided source files and extract:
-以下を抽出してください：
-1. apis: HTTP API endpoints (controllers / routers / route definitions).
-   - method: HTTP method in UPPERCASE (GET/POST/PUT/PATCH/DELETE).
-   - path: route path (e.g. "/users/:id"). Combine controller prefix + handler path when possible.
-   - summary: short Japanese or English description if inferable.
-   - sourceFile: the file path where it is defined.
-2. tables: data models / DB tables (Prisma models, SQL tables, ORM entities).
-   - name: table/model name.
-   - displayName: human-readable name if inferable (optional).
-   - columns: array of { name, dataType } where dataType is one of
-     STRING|INTEGER|FLOAT|BOOLEAN|DATE|DATETIME|JSON|TEXT|UUID (best guess; default STRING).
-   - statuses: array of { value, label?, order? } if the model has an obvious status/state enum
-     (e.g. order_status with draft/approved). Empty array if none.
-3. roles: actor roles / permission roles found in the code (e.g. ADMIN, USER, system actors).
-   - name: role name.
-   - type: one of HUMAN|SYSTEM|OTHER (best guess; HUMAN for human users, SYSTEM for automated/services).
-
-RULES:
-- Output ONLY a single JSON object. No prose, no markdown, no explanation.
-- The JSON MUST match exactly this shape:
-{
-  "apis": [{ "method": "GET", "path": "/example", "summary": "...", "sourceFile": "..." }],
-  "tables": [{ "name": "User", "displayName": "ユーザー", "columns": [{ "name": "id", "dataType": "UUID" }], "statuses": [{ "value": "active", "label": "有効", "order": 0 }] }],
-  "roles": [{ "name": "ADMIN", "type": "HUMAN" }]
-}
-- Do not invent entities that are not supported by the code. If something is empty, use an empty array.
-- Deduplicate. Use exact identifiers found in the code.`;
   }
 
   /** ソースファイル群（path + content）から抽出する。 */
@@ -123,15 +89,22 @@ RULES:
     usage?: LlmUsageContext,
   ): Promise<ExtractResult> {
     const client = this.getClient(apiKey);
-    const model = this.model();
+    const prompt = await this.prompts.resolve(
+      'code-extract',
+      usage?.projectId,
+      usage?.userId,
+    );
+    const usageCtx = usage
+      ? { ...usage, promptVersionId: prompt.promptVersionId ?? usage.promptVersionId ?? null }
+      : undefined;
 
     const response = await client.messages.create({
-      model,
+      model: prompt.model,
       max_tokens: 8192,
-      system: this.systemPrompt(),
+      system: prompt.systemPrompt,
       messages: [{ role: 'user', content: userContent }],
     });
-    if (usage) await this.usageRecorder.record(usage, model, (response as any).usage);
+    if (usageCtx) await this.usageRecorder.record(usageCtx, prompt.model, (response as any).usage);
 
     const textContent = response.content.find((c) => c.type === 'text');
     if (!textContent || textContent.type !== 'text') {

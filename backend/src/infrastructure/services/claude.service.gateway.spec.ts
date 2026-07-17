@@ -1,5 +1,6 @@
 import { ClaudeService } from './claude.service';
 import { IproBotGatewayError } from './llm-transport';
+import { defaultModelFor, getPromptDefinition } from '../prompts/prompt-registry';
 
 const mockCreate = jest.fn();
 jest.mock('@anthropic-ai/sdk', () => ({
@@ -12,6 +13,19 @@ const usageRecorder = { record: jest.fn(async () => {}) } as any;
 function makeGateway(resolved: any) {
   return { resolveForProject: jest.fn(async () => resolved) } as any;
 }
+
+// DBを使わずレジストリ既定値を返すPromptServiceスタブ
+const promptStub = {
+  resolve: jest.fn(async (key: string) => {
+    const def = getPromptDefinition(key);
+    if (!def) throw new Error(`unknown prompt key: ${key}`);
+    return {
+      model: defaultModelFor(def),
+      systemPrompt: def.defaultSystemPrompt,
+      promptVersionId: null,
+    };
+  }),
+} as any;
 
 const VALID_JSON = '{"requirements":[]}';
 
@@ -27,7 +41,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
   });
 
   it('ゲートウェイ未設定(null)なら直接Anthropic', async () => {
-    const svc = new ClaudeService(usageRecorder, makeGateway(null));
+    const svc = new ClaudeService(usageRecorder, makeGateway(null), promptStub);
     await svc.parseRequirements('text', 'sk-key', { projectId: 'p1', area: 'REQUIREMENT' });
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -45,6 +59,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
     const svc = new ClaudeService(
       usageRecorder,
       makeGateway({ baseUrl: 'https://b', apiToken: 'aig_x', strict: false, organizationId: 'o1' }),
+      promptStub,
     );
     await svc.parseRequirements('text', 'sk-key', { projectId: 'p1', area: 'REQUIREMENT' });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -62,6 +77,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
     const svc = new ClaudeService(
       usageRecorder,
       makeGateway({ baseUrl: 'https://b', apiToken: 'aig_x', strict: false, organizationId: 'o1' }),
+      promptStub,
     );
     const res = await svc.parseRequirements('text', 'sk-key', {
       projectId: 'p1',
@@ -77,6 +93,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
     const svc = new ClaudeService(
       usageRecorder,
       makeGateway({ baseUrl: 'https://b', apiToken: 'aig_x', strict: true, organizationId: 'o1' }),
+      promptStub,
     );
     await expect(
       svc.parseRequirements('text', 'sk-key', { projectId: 'p1', area: 'REQUIREMENT' }),
@@ -89,6 +106,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
     const svc = new ClaudeService(
       usageRecorder,
       makeGateway({ baseUrl: 'https://b', apiToken: 'aig_bad', strict: false, organizationId: 'o1' }),
+      promptStub,
     );
     await expect(
       svc.parseRequirements('text', 'sk-key', { projectId: 'p1', area: 'REQUIREMENT' }),
@@ -104,6 +122,7 @@ describe('ClaudeService runLlm（parseRequirements 経由）', () => {
     const svc = new ClaudeService(
       usageRecorder,
       makeGateway({ baseUrl: 'https://b', apiToken: 'aig_x', strict: false, organizationId: 'o1' }),
+      promptStub,
     );
     await svc.extractKnowledge(
       { filename: 'a.pdf', pdfBase64: 'AAAA' },

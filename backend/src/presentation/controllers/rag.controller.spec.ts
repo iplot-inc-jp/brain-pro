@@ -71,11 +71,11 @@ describe('RagController settings', () => {
     });
     await controller.resetSettings(user, 'p1');
 
-    expect(prompts.getSettings).toHaveBeenCalledWith('p1', 'u1');
-    expect(prompts.update).toHaveBeenCalledWith('p1', {
+    expect(prompts.getSettings).toHaveBeenCalledWith('p1', 'rag', 'u1');
+    expect(prompts.update).toHaveBeenCalledWith('p1', 'rag', {
       model: 'claude-haiku-4-5', systemPrompt: 'DB管理のプロンプト',
     }, 'u1');
-    expect(prompts.reset).toHaveBeenCalledWith('p1', 'u1');
+    expect(prompts.reset).toHaveBeenCalledWith('p1', 'rag', 'u1');
   });
 
   it.each([
