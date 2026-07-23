@@ -294,6 +294,7 @@ model Project {
   subProjects       SubProject[]
   systems           System[]
   constraints       Constraint[]
+  glossaryTerms     GlossaryTerm[]
   attachments       Attachment[]
   databaseConnections DatabaseConnection[]
   flowFolders       FlowFolder[]
@@ -1849,6 +1850,7 @@ model SubProject {
   roles            Role[]
   systems          System[]
   constraints      Constraint[]
+  glossaryTerms    GlossaryTerm[]
   informationTypes InformationType[]
   tobeVisions      TobeVision[]
   tobeRoadmaps     TobeRoadmap[]
@@ -3628,4 +3630,69 @@ model MeetingDocument {
   @@index([projectId])
   @@index([meetingId])
   @@map("meeting_documents")
+}
+
+// ========================================
+// 用語集 / 用語対応表（Glossary）
+// ========================================
+
+/// 用語（プロジェクト共通語彙の1概念）。
+/// 「意味（definition）」「正（sourceOfTruth）」「名前の対応（mappings）」の3点セットで管理する。
+/// 生成AIに読ませることを前提とし、同一概念が文脈ごとに何と呼ばれるかを名寄せする。
+model GlossaryTerm {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  subProjectId      String?  @map("sub_project_id")
+  /// 概念コード（例: CPT-001）。プロジェクト内で一意。未設定でもよい。
+  termCode          String?  @map("term_code")
+  /// 正式用語（この資料で使う唯一の呼び名）
+  name              String
+  /// 意味（それは何か）
+  definition        String?  @db.Text
+  /// 正（source of truth）: 値が食い違ったときにどこを信じるか
+  sourceOfTruth     String?  @map("source_of_truth")
+  /// 正の補足（更新経路・更新できる人など）
+  sourceOfTruthNote String?  @map("source_of_truth_note") @db.Text
+  /// ドメイン分類（取引先 / 商品 / 在庫 など。自由文字列）
+  category          String?
+  /// 状態: APPROVED / DRAFT / DEPRECATED
+  status            String   @default("APPROVED")
+  /// 備考（紛らわしい別概念との違い、判断基準など）
+  notes             String?  @db.Text
+  order             Int      @default(0)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subProject SubProject?           @relation(fields: [subProjectId], references: [id], onDelete: SetNull)
+  mappings   GlossaryTermMapping[]
+
+  @@unique([projectId, termCode])
+  @@index([projectId])
+  @@index([projectId, category])
+  @@map("glossary_terms")
+}
+
+/// 用語対応（1つの用語が文脈ごとに何と呼ばれるか）。
+/// 例: 得意先 → 現場では「客先」、DBでは customer.customer_cd、EDIでは「発注者コード」。
+model GlossaryTermMapping {
+  id         String   @id @default(uuid())
+  termId     String   @map("term_id")
+  /// 文脈: ALIAS(現場の言い方) / ENGLISH / DB(テーブル.カラム) / SCREEN(画面項目) /
+  ///       INTERFACE(電文フィールド) / CODE(コード上の識別子) / FORBIDDEN(使ってはいけない言い方) / OTHER
+  context    String   @default("ALIAS")
+  /// どのシステム・電文での呼び名か（例: 基幹DB / WMS電文 / EDI / 会計CSV）
+  systemName String?  @map("system_name")
+  /// 実際の名前
+  value      String
+  note       String?  @db.Text
+  order      Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  term GlossaryTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
+
+  @@index([termId])
+  @@index([termId, context])
+  @@map("glossary_term_mappings")
 }

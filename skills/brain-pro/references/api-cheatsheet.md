@@ -96,6 +96,17 @@
 - PATCH /api/constraints/{id}  — 更新 body:{title, description, category, kind=CONSTRAINT|ASSUMPTION, order, subProjectId}
 - DELETE /api/constraints/{id}  — 削除
 
+### 用語集 / 用語対応表 (7)
+用語ごとに「意味(definition)」「正(sourceOfTruth: 値が食い違ったときどこを信じるか)」「名前の対応(mappings)」を持つ。
+実装・レビュー前に glossary_term_list で必ず参照し、命名の揺れと値の取り違えを防ぐ。
+- GET /api/projects/{projectId}/glossary-terms  — 一覧取得（mappings 付き）
+- POST /api/projects/{projectId}/glossary-terms  — 作成 body:{*name, termCode, definition, sourceOfTruth, sourceOfTruthNote, category, status=APPROVED|DRAFT|DEPRECATED, notes, order, subProjectId, mappings[]}
+- PATCH /api/glossary-terms/{id}  — 更新 body:{name, termCode, definition, sourceOfTruth, sourceOfTruthNote, category, status, notes, order, subProjectId}
+- DELETE /api/glossary-terms/{id}  — 削除（用語対応も連鎖削除）
+- POST /api/glossary-terms/{id}/mappings  — 用語対応の追加 body:{*value, context=ALIAS|ENGLISH|DB|SCREEN|INTERFACE|CODE|FORBIDDEN|OTHER, systemName, note, order}
+- PATCH /api/glossary-term-mappings/{id}  — 用語対応の更新
+- DELETE /api/glossary-term-mappings/{id}  — 用語対応の削除
+
 ### Business Flows (34)
 - GET /api/business-flows/project/{projectId}  — ルートフロー一覧
 - GET /api/business-flows/project/{projectId}/all  — 全フロー一覧（階層含む）

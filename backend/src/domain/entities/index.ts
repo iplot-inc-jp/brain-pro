@@ -26,6 +26,7 @@ export * from './data-object-relation.entity';
 export * from './information-type.entity';
 export * from './system.entity';
 export * from './constraint.entity';
+export * from './glossary-term.entity';
 export * from './stakeholder.entity';
 export * from './meeting.entity';
 export * from './risk.entity';

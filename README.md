@@ -208,6 +208,7 @@ pnpm db:reset         # DBリセット＋シード
 | GET | /api/tables | テーブル一覧 |
 | GET | /api/flows | 業務フロー一覧 |
 | GET | /api/roles | ロール一覧 |
+| GET | /api/projects/:id/glossary-terms | 用語集・用語対応表 |
 | GET | /api/export/project/:id/ai | AI向けエクスポート |
 
 詳細は [API設計書](./docs/04-api-spec.md) を参照してください。

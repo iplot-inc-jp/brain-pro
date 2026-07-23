@@ -21,6 +21,7 @@ export * from './data-object.repository.impl';
 export * from './information-type.repository.impl';
 export * from './system.repository.impl';
 export * from './constraint.repository.impl';
+export * from './glossary-term.repository.impl';
 export * from './stakeholder.repository.impl';
 export * from './meeting.repository.impl';
 export * from './risk.repository.impl';

@@ -1,5 +1,5 @@
 /**
- * マスタ（領域/情報種別/システム/制約/ロール）
+ * マスタ（領域/情報種別/システム/制約/ロール/用語集）
  */
 
 import { z } from 'zod';
@@ -134,5 +134,89 @@ export function registerTools(server, call) {
       subProjectId: z.string().optional().describe('所属領域（サブプロジェクト）ID'),
     },
     wrap((body) => call('POST', '/roles', { body })),
+  );
+
+  server.tool(
+    'glossary_term_list',
+    'プロジェクトの用語集を用語対応（mappings）付きで取得する。各用語は「意味(definition)」「正(sourceOfTruth: 値が食い違ったときどこを信じるか)」「名前の対応(mappings)」を持つ。実装前に必ず参照して命名の揺れと値の取り違えを防ぐ。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+    },
+    wrap(({ projectId }) => call('GET', `/projects/${projectId}/glossary-terms`)),
+  );
+
+  server.tool(
+    'glossary_term_create',
+    '用語を作成する。mappings を同時に渡すと用語対応（現場の言い方 / DBカラム / 画面項目 / 電文フィールド / 使用禁止語）もまとめて登録できる。',
+    {
+      projectId: z.string().describe('プロジェクトID'),
+      name: z.string().describe('正式用語（例: 得意先）'),
+      termCode: z.string().optional().describe('概念コード（例: CPT-001）。プロジェクト内で一意'),
+      definition: z.string().optional().describe('意味（それは何か）'),
+      sourceOfTruth: z
+        .string()
+        .optional()
+        .describe('正（source of truth）: 値が食い違ったときにどこを信じるか（例: 倉庫管理システム）'),
+      sourceOfTruthNote: z.string().optional().describe('正の補足（更新経路・更新できる人）'),
+      category: z.string().optional().describe('ドメイン分類（例: 取引先 / 商品 / 在庫）'),
+      status: z.enum(['APPROVED', 'DRAFT', 'DEPRECATED']).optional().describe('状態'),
+      notes: z.string().optional().describe('備考（紛らわしい別概念との違いなど）'),
+      order: z.number().optional().describe('並び順'),
+      subProjectId: z.string().optional().describe('所属領域（サブプロジェクト）ID'),
+      mappings: z
+        .array(
+          z.object({
+            context: z
+              .enum(['ALIAS', 'ENGLISH', 'DB', 'SCREEN', 'INTERFACE', 'CODE', 'FORBIDDEN', 'OTHER'])
+              .optional()
+              .describe(
+                'ALIAS=現場の言い方 / ENGLISH=英語 / DB=テーブル.カラム / SCREEN=画面項目 / INTERFACE=電文フィールド / CODE=コード上の識別子 / FORBIDDEN=使ってはいけない言い方 / OTHER',
+              ),
+            systemName: z.string().optional().describe('どのシステム・電文での呼び名か（例: 基幹DB / WMS電文 / EDI）'),
+            value: z.string().describe('実際の名前（例: customer.customer_cd）'),
+            note: z.string().optional().describe('補足'),
+            order: z.number().optional().describe('並び順'),
+          }),
+        )
+        .optional()
+        .describe('用語対応をまとめて登録する場合'),
+    },
+    wrap(({ projectId, ...body }) => call('POST', `/projects/${projectId}/glossary-terms`, { body })),
+  );
+
+  server.tool(
+    'glossary_term_update',
+    '用語を更新する（意味・正・カテゴリ・状態など）。',
+    {
+      id: z.string().describe('用語ID'),
+      name: z.string().optional().describe('正式用語'),
+      termCode: z.string().optional().describe('概念コード'),
+      definition: z.string().optional().describe('意味'),
+      sourceOfTruth: z.string().optional().describe('正（source of truth）'),
+      sourceOfTruthNote: z.string().optional().describe('正の補足'),
+      category: z.string().optional().describe('ドメイン分類'),
+      status: z.enum(['APPROVED', 'DRAFT', 'DEPRECATED']).optional().describe('状態'),
+      notes: z.string().optional().describe('備考'),
+      order: z.number().optional().describe('並び順'),
+      subProjectId: z.string().optional().describe('所属領域ID'),
+    },
+    wrap(({ id, ...body }) => call('PATCH', `/glossary-terms/${id}`, { body })),
+  );
+
+  server.tool(
+    'glossary_mapping_create',
+    '既存の用語に用語対応を1件追加する（この概念がどこで何と呼ばれているか）。',
+    {
+      termId: z.string().describe('用語ID'),
+      value: z.string().describe('実際の名前（例: customer.customer_cd）'),
+      context: z
+        .enum(['ALIAS', 'ENGLISH', 'DB', 'SCREEN', 'INTERFACE', 'CODE', 'FORBIDDEN', 'OTHER'])
+        .optional()
+        .describe('文脈'),
+      systemName: z.string().optional().describe('どのシステム・電文での呼び名か'),
+      note: z.string().optional().describe('補足'),
+      order: z.number().optional().describe('並び順'),
+    },
+    wrap(({ termId, ...body }) => call('POST', `/glossary-terms/${termId}/mappings`, { body })),
   );
 }

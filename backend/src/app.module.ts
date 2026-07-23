@@ -29,6 +29,7 @@ import {
   INFORMATION_TYPE_REPOSITORY,
   SYSTEM_REPOSITORY,
   CONSTRAINT_REPOSITORY,
+  GLOSSARY_TERM_REPOSITORY,
   STAKEHOLDER_REPOSITORY,
   MEETING_REPOSITORY,
   RISK_REPOSITORY,
@@ -176,6 +177,12 @@ import {
   CreateConstraintUseCase,
   UpdateConstraintUseCase,
   DeleteConstraintUseCase,
+  // GlossaryTerm（用語集 / 用語対応表）
+  GetGlossaryTermsUseCase,
+  CreateGlossaryTermUseCase,
+  UpdateGlossaryTermUseCase,
+  DeleteGlossaryTermUseCase,
+  ManageGlossaryTermMappingUseCase,
   // Stakeholder
   CreateStakeholderUseCase,
   GetStakeholdersUseCase,
@@ -310,6 +317,7 @@ import {
   InformationTypeRepositoryImpl,
   SystemRepositoryImpl,
   ConstraintRepositoryImpl,
+  GlossaryTermRepositoryImpl,
   StakeholderRepositoryImpl,
   MeetingRepositoryImpl,
   RiskRepositoryImpl,
@@ -435,6 +443,11 @@ import {
   ConstraintController,
   ConstraintByIdController,
 } from './presentation/controllers/constraint.controller';
+import {
+  GlossaryTermController,
+  GlossaryTermByIdController,
+  GlossaryTermMappingController,
+} from './presentation/controllers/glossary-term.controller';
 import {
   RoadmapPhaseController,
   RoadmapPhaseByIdController,
@@ -629,6 +642,9 @@ import { PromptService } from './infrastructure/prompts/prompt.service';
     SystemByIdController,
     ConstraintController,
     ConstraintByIdController,
+    GlossaryTermController,
+    GlossaryTermByIdController,
+    GlossaryTermMappingController,
     StakeholderController,
     StakeholderByIdController,
     StakeholderAssignmentController,
@@ -816,6 +832,10 @@ import { PromptService } from './infrastructure/prompts/prompt.service';
     {
       provide: CONSTRAINT_REPOSITORY,
       useClass: ConstraintRepositoryImpl,
+    },
+    {
+      provide: GLOSSARY_TERM_REPOSITORY,
+      useClass: GlossaryTermRepositoryImpl,
     },
     {
       provide: STAKEHOLDER_REPOSITORY,
@@ -1016,6 +1036,12 @@ import { PromptService } from './infrastructure/prompts/prompt.service';
     CreateConstraintUseCase,
     UpdateConstraintUseCase,
     DeleteConstraintUseCase,
+    // GlossaryTerm（用語集 / 用語対応表）
+    GetGlossaryTermsUseCase,
+    CreateGlossaryTermUseCase,
+    UpdateGlossaryTermUseCase,
+    DeleteGlossaryTermUseCase,
+    ManageGlossaryTermMappingUseCase,
     // Stakeholder
     CreateStakeholderUseCase,
     GetStakeholdersUseCase,
